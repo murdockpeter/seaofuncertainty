@@ -15,6 +15,10 @@ namespace SeaOfUncertainty.Prototype
         public double east;
         public double south;
         public double north;
+        public double projectionWest;
+        public double projectionEast;
+        public double projectionSouth;
+        public double projectionNorth;
         public List<CoastlinePolygonData> polygons = new List<CoastlinePolygonData>();
     }
 
@@ -27,14 +31,20 @@ namespace SeaOfUncertainty.Prototype
             var triangles = new List<int>();
             var uvs = new List<Vector2>();
             if (data?.polygons == null) return null;
+            double projectionWest = data.projectionEast > data.projectionWest ? data.projectionWest : data.west;
+            double projectionEast = data.projectionEast > data.projectionWest ? data.projectionEast : data.east;
+            double projectionSouth = data.projectionNorth > data.projectionSouth ? data.projectionSouth : data.south;
+            double projectionNorth = data.projectionNorth > data.projectionSouth ? data.projectionNorth : data.north;
 
             foreach (CoastlinePolygonData polygon in data.polygons)
             {
                 var points = new List<Vector2>();
                 foreach (CoastlinePointData point in polygon.points)
                 {
-                    float x = Mathf.Lerp(worldBounds.xMin, worldBounds.xMax, Mathf.InverseLerp((float)data.west, (float)data.east, (float)point.longitude));
-                    float z = Mathf.Lerp(worldBounds.yMin, worldBounds.yMax, Mathf.InverseLerp((float)data.south, (float)data.north, (float)point.latitude));
+                    float normalizedX = (float)((point.longitude - projectionWest) / (projectionEast - projectionWest));
+                    float normalizedZ = (float)((point.latitude - projectionSouth) / (projectionNorth - projectionSouth));
+                    float x = Mathf.LerpUnclamped(worldBounds.xMin, worldBounds.xMax, normalizedX);
+                    float z = Mathf.LerpUnclamped(worldBounds.yMin, worldBounds.yMax, normalizedZ);
                     Vector2 projected = new Vector2(x, z);
                     if (points.Count == 0 || Vector2.SqrMagnitude(points[points.Count - 1] - projected) > .000001f) points.Add(projected);
                 }
@@ -48,7 +58,7 @@ namespace SeaOfUncertainty.Prototype
                 foreach (Vector2 point in points)
                 {
                     vertices.Add(new Vector3(point.x, height, point.y));
-                    uvs.Add(new Vector2(Mathf.InverseLerp(worldBounds.xMin, worldBounds.xMax, point.x), Mathf.InverseLerp(worldBounds.yMin, worldBounds.yMax, point.y)));
+                    uvs.Add(new Vector2((point.x - worldBounds.xMin) / worldBounds.width, (point.y - worldBounds.yMin) / worldBounds.height));
                 }
                 foreach (int index in localTriangles) triangles.Add(offset + index);
                 var shoreline = new Vector3[points.Count];

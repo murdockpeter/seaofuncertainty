@@ -1,4 +1,5 @@
 #if UNITY_EDITOR
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -80,7 +81,25 @@ namespace SeaOfUncertainty.Editor
             Assert(Rules.StrikeRange(FormationKind.AirGroup, Salvo.Heavy) == 14, "Air heavy Strike boundary");
             Assert(Rules.InterceptionRange == 1, "Interception range is one 20 nm hex");
 
+            var exactTie = new List<FormationState>
+            {
+                new FormationState { Id = "B-TEST", Side = Side.Blue, ReadyTime = 0, Ratings = new Ratings { Command = 9 } },
+                new FormationState { Id = "R-TEST", Side = Side.Red, ReadyTime = 0, Ratings = new Ratings { Command = 0 } }
+            };
+            Assert(Rules.NextReady(exactTie).Side == Side.Blue, "Unseeded exact tie uses formation quality and stable ID");
+            Assert(Rules.NextReady(exactTie, Side.Blue).Side == Side.Red, "Cross-side exact tie passes priority away from the most recent acting side");
+
             var game = new PrototypeGame();
+            Assert(game.Formations.Exists(f => f.Side == Side.Blue && f.ReadyTime == 0) && game.Formations.Exists(f => f.Side == Side.Red && f.ReadyTime == 0), "Both sides have formations in the opening Ready-Time cohort");
+            Assert(game.Formations.Exists(f => f.Side == Side.Blue && f.ReadyTime == 1) && game.Formations.Exists(f => f.Side == Side.Red && f.ReadyTime == 1), "Both sides have interleaved follow-on readiness");
+            var cadenceGame = new PrototypeGame();
+            var cadence = new List<Side>();
+            for (int i = 0; i < 8; i++)
+            {
+                cadence.Add(cadenceGame.Active.Side);
+                Assert(cadenceGame.Hold(cadenceGame.Active, out string cadenceMessage), "Continuous activation cadence action: " + cadenceMessage);
+            }
+            for (int i = 1; i < cadence.Count; i++) Assert(cadence[i] != cadence[i - 1], "Opening Ready-Time cadence alternates only where both sides are tied");
             Assert(game.Area.Width == 12 && game.Area.Height == 10, "Data-driven Meridian Veil dimensions");
             Assert(game.Area.NauticalMilesPerHex == 20, "Operational scale is 20 nautical miles per hex");
             Assert(game.Area.NauticalMiles(new HexCoord(0, 0), new HexCoord(0, 3)) == 60, "Hex range converts to nautical miles");
@@ -113,6 +132,12 @@ namespace SeaOfUncertainty.Editor
             using (var luzonMap = new OperationalMap3D(luzon.Area, 480, 270))
             {
                 Assert(luzonMap.CoastlinePolygonCount >= 50, "Luzon renderer uses the local Natural Earth polygon coastline library");
+                Assert(luzonMap.OffMapCoastlineVertexCount >= 100, "Authentic Natural Earth land geometry continues beyond the playable projection to the table boundary");
+                Assert(luzonMap.HasDirectionalSun, "3D theater has a directional maritime sun");
+                Assert(Mathf.Approximately(luzonMap.SunSourceAzimuthDegrees, 67.5f), "Maritime sun illuminates the theater from east-northeast");
+                Assert(luzonMap.UsesProceduralSurfaceTextures, "Land, littoral, and ocean use procedural surface textures");
+                Assert(luzonMap.WaterSurfaceVertexCount >= 4000, "Ocean surface has enough geometry for restrained wave relief");
+                Assert(luzonMap.TerrainReliefCount >= 2, "Major polygon land masses receive coastline-aligned dimensional relief");
                 Vector3 edge = luzonMap.HexToWorld(new HexCoord(23, 19));
                 Assert(edge.x > 0f && edge.z > 0f, "Floating-origin world coordinates center the theater");
                 Assert(luzonMap.TryWorldToHex(luzonMap.HexToWorld(new HexCoord(11, 9)), out HexCoord roundTrip) && roundTrip.Equals(new HexCoord(11, 9)), "Hex/world conversion round trip");
@@ -136,6 +161,8 @@ namespace SeaOfUncertainty.Editor
                 game.Contacts.Add(new ContactState { Owner = game.Active.Side, TargetId = enemyId, LastKnownPosition = new HexCoord(8, 3), Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 4, IsLost = true });
                 operationalMap.SetState(game, ToolkitActionMode.Strike, MoveMode.Normal, SearchMode.Active, Salvo.Standard);
                 Assert(operationalMap.VisibleFormationCount == game.Formations.FindAll(formation => formation.Side == game.Active.Side && !formation.IsDestroyed).Count, "3D view instantiates only the active side's friendly formations");
+                Assert(operationalMap.FormationMeshVariantCount >= 2 && operationalMap.ContainsRenderedName("Tapered Hull"), "Close formation models use reusable tapered naval meshes instead of stretched-cube hull blockouts");
+                Assert(operationalMap.ContainsRenderedName("Swept Wing") && operationalMap.ContainsRenderedName("Hydrodynamic Pressure Hull"), "Air-group and submarine silhouettes remain recognizable by geometry");
                 Assert(operationalMap.VisibleContactCount == game.Contacts.FindAll(contact => contact.Owner == game.Active.Side && !contact.IsLost).Count, "3D view instantiates only the active side's Contacts");
                 FormationState hiddenEnemy = game.Formations.Find(formation => formation.Side != game.Active.Side);
                 Assert(!operationalMap.ContainsRenderedName(hiddenEnemy.Name) && !operationalMap.ContainsRenderedName(hiddenEnemy.Id), "3D scene hierarchy does not expose a hidden enemy identity");
@@ -147,6 +174,10 @@ namespace SeaOfUncertainty.Editor
                 operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard, true);
                 Assert(operationalMap.ActiveEffectCount == 0 && operationalMap.PooledEffectCount >= 7, "Transient effects return to the object pool");
                 Assert(!operationalMap.PermanentGridVisible, "Permanent hex grid is optional");
+                operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard, false, true);
+                Assert(operationalMap.PermanentGridVisible, "Optional permanent hex grid can be enabled");
+                operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard, false, false);
+                Assert(!operationalMap.PermanentGridVisible, "Optional permanent hex grid can be disabled");
                 game.Contacts.Add(new ContactState { Owner = game.Active.Side, TargetId = "FALSE-TEST", LastKnownPosition = new HexCoord(4, 4), Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 3, IsFalse = true });
                 operationalMap.SetState(game, ToolkitActionMode.Search, MoveMode.Normal, SearchMode.Focused, Salvo.Standard);
                 game.Contacts.RemoveAll(contact => contact.TargetId == "FALSE-TEST");
@@ -155,11 +186,21 @@ namespace SeaOfUncertainty.Editor
                 Assert(operationalMap.PooledMarkerCount >= 1, "Formation and Contact marker roots return to the object pool");
                 operationalMap.Rotate(1f);
                 Assert(Mathf.Approximately(operationalMap.Heading, 30f), "3D command camera uses stepped rotation");
+                float orbitPitch = operationalMap.CameraPitch;
+                operationalMap.Orbit(new Vector2(45f, 30f));
+                Assert(!Mathf.Approximately(operationalMap.Heading, 30f) && operationalMap.CameraPitch < orbitPitch, "Right-drag camera supports continuous orbit and tilt");
+                float flyDistance = operationalMap.CameraDistance;
+                operationalMap.FlyCamera(1f, 1f, 1f, 1f, -1f, .25f, true);
+                Assert(operationalMap.FocusWithinBounds && operationalMap.CameraDistance < flyDistance, "Keyboard camera movement, rotation, tilt, and zoom remain bounded");
                 operationalMap.Pan(new Vector2(20f, -15f));
                 operationalMap.Zoom(1f);
                 operationalMap.ResetCamera();
                 Assert(Mathf.Approximately(operationalMap.Heading, 0f), "3D command camera reset");
             }
+            var cameraInputProbe = new TacticalMapElement();
+            Assert(cameraInputProbe.SetCameraKey(KeyCode.W, true) && cameraInputProbe.CameraInputActive, "WASD camera input can be routed from the operation screen without map focus");
+            cameraInputProbe.SetCameraKey(KeyCode.W, false);
+            Assert(!cameraInputProbe.CameraInputActive, "Released global camera keys do not leave movement stuck active");
             FormationState actor = game.Active;
             int originalTime = game.Time;
             var destination = new HexCoord(actor.Position.Q, actor.Position.R > 0 ? actor.Position.R - 1 : actor.Position.R + 1);
@@ -206,7 +247,8 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.Active != null && restored.Active.Id == game.Active.Id, "Save restores active formation");
             Assert(restored.Formations.Count == game.Formations.Count, "Save restores formations");
             Assert(restored.Contacts.Count == game.Contacts.Count, "Save restores Contacts");
-            Assert(saveData.Version == 2 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 2 save uses stable scenario and area IDs");
+            Assert(saveData.Version == 3 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 3 save uses stable scenario and area IDs");
+            Assert(saveData.HasLastActingSide && restored.LastActingSide == saveData.LastActingSide, "Save restores continuous-activation tie priority");
             saveData.Version = 1; saveData.ScenarioId = null; saveData.OperationalAreaId = null;
             new PrototypeGame().RestoreState(saveData);
             bool mismatchRejected = false;
@@ -219,6 +261,18 @@ namespace SeaOfUncertainty.Editor
             while (completeScenario.Time < completeScenario.Scenario.Horizon && completeScenario.Active != null && completionGuard++ < 200)
                 Assert(completeScenario.Hold(completeScenario.Active, out string holdMessage), "Grid-free scenario simulation action: " + holdMessage);
             Assert(completeScenario.Time >= completeScenario.Scenario.Horizon, "A complete scenario can resolve without a permanent grid");
+
+            var aiGame = new PrototypeGame(1978, luzon);
+            int aiGuard = 0;
+            while (aiGame.Time < aiGame.Scenario.Horizon && aiGame.Active != null && aiGuard++ < 300)
+            {
+                FormationState aiActor = aiGame.Active;
+                AiDecision decision = PrototypeAiCommander.Choose(aiGame);
+                Assert(decision != null, "AI produces a decision for every Ready formation");
+                Assert(PrototypeAiCommander.Execute(aiGame, decision, out string aiMessage), $"AI decision is legal ({decision?.Action}): {aiMessage}");
+                Assert(aiActor.ReadyTime > aiGame.Time || aiGame.Active != aiActor, "AI action schedules or advances the Ready formation");
+            }
+            Assert(aiGame.Time >= aiGame.Scenario.Horizon, "AI commander can complete a full 20 nm scenario without stalling");
 
             var terrainGame = new PrototypeGame(1978, luzon);
             FormationState surface = terrainGame.Active;
@@ -269,6 +323,7 @@ namespace SeaOfUncertainty.Editor
             EnsureMaterial(folder + "/CommandLine.mat", "Sprites/Default", new Color(.2f, .74f, .82f, .38f));
             EnsureMaterial(folder + "/CommandWater.mat", "Standard", new Color(.018f, .13f, .19f, 1f));
             EnsureMaterial(folder + "/CommandLand.mat", "Standard", new Color(.22f, .31f, .22f, 1f));
+            EnsureMaterial(folder + "/CommandHighland.mat", "Standard", new Color(.29f, .31f, .16f, 1f));
             EnsureMaterial(folder + "/CommandLittoral.mat", "Standard", new Color(.09f, .34f, .34f, 1f));
             EnsureMaterial(folder + "/CommandBlue.mat", "Standard", new Color(.08f, .72f, .95f, 1f));
             EnsureMaterial(folder + "/CommandRed.mat", "Standard", new Color(.94f, .25f, .18f, 1f));

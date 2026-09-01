@@ -9,12 +9,14 @@ namespace SeaOfUncertainty.Core
         [Serializable]
         public sealed class SaveData
         {
-            public int Version = 2;
+            public int Version = 3;
             public string ScenarioId;
             public string OperationalAreaId;
             public int Time;
             public string ActiveFormationId;
             public bool AgeTwoTargetingPenalty;
+            public bool HasLastActingSide;
+            public Side LastActingSide;
             public List<FormationState> Formations = new List<FormationState>();
             public List<ContactState> Contacts = new List<ContactState>();
             public List<SideState> Sides = new List<SideState>();
@@ -30,7 +32,9 @@ namespace SeaOfUncertainty.Core
         public OperationalAreaDefinition Area => Scenario.Area;
         public int Time { get; private set; }
         public FormationState Active { get; private set; }
+        public Side? LastActingSide => lastActingSide;
         public bool AgeTwoTargetingPenalty = true;
+        private Side? lastActingSide;
 
         public PrototypeGame(int seed = 1978, ScenarioDefinition scenario = null)
         {
@@ -54,6 +58,8 @@ namespace SeaOfUncertainty.Core
                 OperationalAreaId = Area.Id,
                 ActiveFormationId = Active?.Id,
                 AgeTwoTargetingPenalty = AgeTwoTargetingPenalty,
+                HasLastActingSide = lastActingSide.HasValue,
+                LastActingSide = lastActingSide.GetValueOrDefault(),
                 Formations = new List<FormationState>(Formations),
                 Contacts = new List<ContactState>(Contacts),
                 Sides = new List<SideState>(Sides.Values),
@@ -63,7 +69,7 @@ namespace SeaOfUncertainty.Core
 
         public void RestoreState(SaveData data)
         {
-            if (data == null || data.Version < 1 || data.Version > 2) throw new ArgumentException("Unsupported or empty save data.");
+            if (data == null || data.Version < 1 || data.Version > 3) throw new ArgumentException("Unsupported or empty save data.");
             if (data.Version >= 2 && !string.IsNullOrEmpty(data.ScenarioId) && !string.Equals(data.ScenarioId, Scenario.Id, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException($"Save scenario {data.ScenarioId} does not match loaded scenario {Scenario.Id}.");
             Formations.Clear();
             Formations.AddRange(data.Formations ?? new List<FormationState>());
@@ -77,7 +83,24 @@ namespace SeaOfUncertainty.Core
             Log.AddRange(data.Log ?? new List<string>());
             Time = data.Time;
             AgeTwoTargetingPenalty = data.AgeTwoTargetingPenalty;
-            Active = Find(data.ActiveFormationId) ?? Rules.NextReady(Formations);
+            lastActingSide = data.Version >= 3 && data.HasLastActingSide ? data.LastActingSide : (Side?)null;
+            Active = Find(data.ActiveFormationId) ?? Rules.NextReady(Formations, lastActingSide);
+        }
+
+        public IReadOnlyList<FormationState> ActivationQueue()
+        {
+            var remaining = Formations.Where(formation => !formation.IsDestroyed).ToList();
+            var queue = new List<FormationState>(remaining.Count);
+            Side? previous = lastActingSide;
+            while (remaining.Count > 0)
+            {
+                FormationState next = Rules.NextReady(remaining, previous);
+                if (next == null) break;
+                queue.Add(next);
+                remaining.Remove(next);
+                previous = next.Side;
+            }
+            return queue;
         }
 
         public bool Move(FormationState formation, HexCoord destination, MoveMode mode, out string message)
@@ -208,12 +231,13 @@ namespace SeaOfUncertainty.Core
             }
             if (generatedFriction) formation.Friction = true;
             AddLog($"T{Time:00}  {entry} Next Ready T{formation.ReadyTime:00}.");
+            lastActingSide = formation.Side;
             AdvanceToNextFormation();
         }
 
         private void AdvanceToNextFormation()
         {
-            FormationState next = Rules.NextReady(Formations);
+            FormationState next = Rules.NextReady(Formations, lastActingSide);
             if (next == null) { Active = null; return; }
             if (next.ReadyTime > Time)
             {
@@ -230,7 +254,7 @@ namespace SeaOfUncertainty.Core
                 }
                 foreach (FormationState formation in Formations) formation.HasReacted = false;
             }
-            Active = Rules.NextReady(Formations);
+            Active = Rules.NextReady(Formations, lastActingSide);
         }
 
         private void ApplyDamage(FormationState target, DamageState damage)

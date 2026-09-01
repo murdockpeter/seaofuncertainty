@@ -10,7 +10,16 @@ Status convention:
 
 ## CURRENT PRIORITY — 3D operational map and modular 20 nm theaters
 
+Standing evolution criteria for every meaningful implementation pass:
+
+- [ ] Improve an appropriate aspect of land, sea, lighting, atmosphere, models, effects, or other 3D presentation while preserving operational readability.
+- [ ] Improve an appropriate aspect of formation modeling—silhouette, proportions, materials, detail, animation, effects, or zoom readability—while preserving side and type recognition.
+- [ ] When the pass touches gameplay or provides a relevant opportunity, improve or measurably evaluate Solo vs AI decision quality, information discipline, strategic variety, explainability, or diagnostics.
+- [ ] Keep AI bound to the same authoritative rules and continuous Ready-Time scheduler, without undisclosed bonuses or hidden-information access.
+
 Complete this program before beginning any remaining P1–P5 feature work, except critical prototype bug fixes. Preserve the deterministic hex rules model and print-and-play compatibility: 3D is the presentation and interaction layer, while authoritative movement, range, Contacts, and control remain hex based.
+
+Standing visual criterion: every implementation pass should include an appropriate cosmetic improvement toward a believable maritime theater without reducing information clarity or changing authoritative rules.
 
 ### 3D design constitution
 
@@ -73,13 +82,23 @@ Complete this program before beginning any remaining P1–P5 feature work, excep
 - [x] Generate or import a hex mesh aligned exactly with authoritative axial coordinates.
 - [x] Implement reliable hex-to-world and world-to-hex conversion.
 - [x] Implement contextual hex highlighting for hover, selection, legal movement, Search, Strike, and objectives.
+- [x] Add a persistent optional full-map hex grid with a command-bar toggle, keyboard shortcut, and subdued terrain-aware styling.
+- [x] Tune persistent-grid contrast and line weight for legibility at operational zoom levels without overpowering the terrain.
 - [x] Implement data-driven terrain/coastline mesh ingestion with land and water masks.
 - [x] Add stylized ocean rendering that remains readable beneath overlays and markers.
+- [x] Add a warm shadow-casting maritime sun with cool sky fill.
+- [x] Place the maritime sun at an east-northeast source azimuth with opposing cool fill.
+- [x] Add textured, gently animated ocean geometry with visible wave relief.
+- [x] Add procedural land coloration and dimensional highland relief to polygon coastlines.
+- [x] Render authentic Natural Earth polygons beyond the playable projection through the table edges without stretching interior geography.
 - [x] Replace prototype cylinder landforms with deterministic irregular island and shoal meshes.
 - [x] Separate shoal and ocean depth surfaces to eliminate coplanar rendering artifacts.
 - [x] Add island terrain, shoreline treatment, bathymetry cues, and atmospheric distance treatment.
 - [x] Implement the approved command-table camera with bounded pan, zoom, pitch, and rotation.
-- [x] Implement mouse selection, middle-drag pan, stepped right-drag rotation, wheel zoom, and camera reset.
+- [x] Implement mouse selection, middle-drag pan, continuous right-drag orbit/tilt, wheel zoom, and camera reset.
+- [x] Expand to full command-camera control with WASD movement, continuous orbit/tilt, keyboard zoom, speed boost, and theater bounds.
+- [x] Route command-camera keys game-wide during operation play so WASD remains responsive when non-map UI previously retained focus.
+- [x] Resize and left-align formation timeline typography so long names and readiness details remain legible.
 - [x] Prevent clicks through UI and resolve ambiguous overlapping map selections consistently.
 - [x] Add 3D hovered-hex highlighting and legal-movement preview vectors.
 - [x] Add live hex, terrain, nautical-mile range, north, and camera-heading readouts.
@@ -90,6 +109,9 @@ Complete this program before beginning any remaining P1–P5 feature work, excep
 
 - [x] Create a formation-view layer that reads state without owning gameplay logic.
 - [x] Create prototype 3D representations for surface groups, carrier groups, air groups, and submarines.
+- [x] Replace stretched-cube formation blockouts with tapered multivessel carrier/surface silhouettes, detailed submarine geometry, and a recognizable swept-wing aircraft profile.
+- [ ] Add production-quality generated or licensed formation meshes with consistent physical proportions and asset provenance.
+- [ ] Add formation-model material variation, markings, wakes, propulsion cues, and restrained idle motion appropriate to each domain.
 - [x] Use visual offsets within a hex without changing the authoritative hex position.
 - [x] Define selection rings, side indicators, readiness state, cohesion, and damage presentation.
 - [x] Add prototype active-formation readiness beacons and damage/entropy shape cues.
@@ -184,6 +206,8 @@ Complete this program before beginning any remaining P1–P5 feature work, excep
 - [x] Add a privacy/pass-device screen when control changes sides.
 - [x] Add initial gameplay and audio settings controls.
 - [x] Add save-state JSON round-trip smoke coverage.
+- [x] Add selectable Solo vs AI and Local Hotseat command modes.
+- [x] Preserve command mode and human side in saved operations.
 
 ### Action clarity
 
@@ -322,10 +346,10 @@ Complete this program before beginning any remaining P1–P5 feature work, excep
 
 ### Operational clock rulings
 
-- [ ] **Decision required:** Decide whether same-Time alternation means alternating sides.
-- [ ] **Decision required:** Decide how ordering works when only one side has multiple Ready formations.
-- [ ] Replace the deterministic final tie-break with the approved 1d6 procedure if required.
-- [ ] Display and log same-Time tie resolution.
+- [x] **Decision required:** On a same-Time cross-side tie, prefer the side that did not act most recently.
+- [x] **Decision required:** When only one side has formations at the earliest Ready Time, that side continues acting without artificial alternation.
+- [x] Retain lower Entropy, higher Command, then stable formation ID as deterministic within-side ordering.
+- [x] Display same-Time tie resolution and the computed activation queue.
 - [ ] Support scheduled future events on the operational timeline.
 
 ### Standing Missions
@@ -470,7 +494,13 @@ Begin these only after repeated playtests validate the core loop.
 - [ ] Add different command architectures.
 - [ ] Move scenario and formation definitions into editable data assets.
 - [ ] Add a scenario editor.
-- [ ] Develop AI that acts only on information legitimately available to its side.
+- [x] Add a baseline deterministic AI that acts only on formations, Contacts, terrain, and objectives legitimately available to its side.
+- [x] Resolve consecutive AI formations through the continuous Ready-Time queue without adding AI-only bonuses or traditional turns.
+- [x] Add full-scenario AI legality and no-stall smoke coverage.
+- [ ] Add AI decision-distribution telemetry by action, formation type, scenario phase, and operational situation.
+- [ ] Add tactical AI fixtures for Contact prosecution, objective movement, Entropy recovery, weapon commitment, and disengagement.
+- [ ] Add baseline-versus-candidate simulation comparisons so AI changes can demonstrate improvement rather than merely different behavior.
+- [ ] Add strategic variety without sacrificing deterministic reproducibility for a fixed scenario seed and AI profile.
 
 ## P5 — Print-and-play and multiplayer
 

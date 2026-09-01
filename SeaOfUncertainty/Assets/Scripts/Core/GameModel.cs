@@ -5,6 +5,7 @@ using System.Linq;
 namespace SeaOfUncertainty.Core
 {
     public enum Side { Blue, Red }
+    public enum OperationMode { LocalHotseat, SoloVsAi }
     public enum FormationKind { CarrierGroup, SurfaceGroup, Submarine, AirGroup }
     public enum ActionKind { Move, Search, Strike, Patrol, Support, Recover, Replenish, Hold }
     public enum MoveMode { Cautious, Normal, HighTempo }
@@ -171,11 +172,16 @@ namespace SeaOfUncertainty.Core
             }
         }
 
-        public static FormationState NextReady(IEnumerable<FormationState> formations)
+        public static FormationState NextReady(IEnumerable<FormationState> formations, Side? lastActingSide = null)
         {
-            return formations.Where(f => !f.IsDestroyed)
-                .OrderBy(f => f.ReadyTime)
-                .ThenBy(f => f.EntropySources)
+            List<FormationState> available = formations.Where(f => !f.IsDestroyed).ToList();
+            if (available.Count == 0) return null;
+            int earliestTime = available.Min(f => f.ReadyTime);
+            List<FormationState> tied = available.Where(f => f.ReadyTime == earliestTime).ToList();
+            if (lastActingSide.HasValue && tied.Any(f => f.Side == lastActingSide.Value) && tied.Any(f => f.Side != lastActingSide.Value))
+                tied = tied.Where(f => f.Side != lastActingSide.Value).ToList();
+            return tied
+                .OrderBy(f => f.EntropySources)
                 .ThenByDescending(f => f.Ratings.Command)
                 .ThenBy(f => f.Id, StringComparer.Ordinal)
                 .FirstOrDefault();

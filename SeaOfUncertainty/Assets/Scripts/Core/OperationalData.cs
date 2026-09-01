@@ -176,13 +176,13 @@ namespace SeaOfUncertainty.Core
                 VictoryConditions = "Control the Inner Sea at T16; preserve the carrier; score enemy damage."
             };
 
-            AddFormation(scenario, "B-CV", "CSG Resolute", Side.Blue, FormationKind.CarrierGroup, 1, 4, 0, 2, 3, 1, 4, 3, 1);
+            AddFormation(scenario, "B-CV", "CSG Resolute", Side.Blue, FormationKind.CarrierGroup, 1, 4, 1, 2, 3, 1, 4, 3, 1);
             AddFormation(scenario, "B-SG", "SAG Valiant", Side.Blue, FormationKind.SurfaceGroup, 2, 7, 0, 2, 2, 2, 3, 3, 2);
             AddFormation(scenario, "B-SS", "SSN Nightfall", Side.Blue, FormationKind.Submarine, 0, 7, 0, 2, 3, -1, 3, 2, 3);
-            AddFormation(scenario, "B-AG", "Air Group Kestrel", Side.Blue, FormationKind.AirGroup, 3, 2, 0, 3, 3, 2, 3, 2, 2);
+            AddFormation(scenario, "B-AG", "Air Group Kestrel", Side.Blue, FormationKind.AirGroup, 3, 2, 1, 3, 3, 2, 3, 2, 2);
             AddFormation(scenario, "R-CV", "CVG Tempest", Side.Red, FormationKind.CarrierGroup, 10, 5, 1, 2, 3, 1, 4, 3, 1);
-            AddFormation(scenario, "R-SG", "Surface Action Two", Side.Red, FormationKind.SurfaceGroup, 9, 2, 1, 2, 2, 2, 3, 3, 2);
-            AddFormation(scenario, "R-SS", "Hunter Submarine", Side.Red, FormationKind.Submarine, 11, 2, 1, 2, 3, -1, 3, 2, 3);
+            AddFormation(scenario, "R-SG", "Surface Action Two", Side.Red, FormationKind.SurfaceGroup, 9, 2, 0, 2, 2, 2, 3, 3, 2);
+            AddFormation(scenario, "R-SS", "Hunter Submarine", Side.Red, FormationKind.Submarine, 11, 2, 0, 2, 3, -1, 3, 2, 3);
             AddFormation(scenario, "R-AG", "Air Group Ember", Side.Red, FormationKind.AirGroup, 8, 8, 1, 3, 3, 2, 3, 2, 2);
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Blue, TargetId = "R-SG", Q = 8, R = 3, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 2 });
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Red, TargetId = "B-CV", Q = 2, R = 4, Location = LocationQuality.Medium, Identity = IdentityQuality.General, Age = 1 });
@@ -254,13 +254,13 @@ namespace SeaOfUncertainty.Core
             scenario.ExitRegions.Add(area.Regions[1]);
             scenario.LogisticsRegions.Add(Region("basco-logistics", "Basco Logistics Access", new[] { new HexCoord(11, 10) }));
 
-            AddFormation(scenario, "B-CV-L", "CSG Horizon", Side.Blue, FormationKind.CarrierGroup, 2, 10, 0, 2, 3, 1, 4, 3, 2);
+            AddFormation(scenario, "B-CV-L", "CSG Horizon", Side.Blue, FormationKind.CarrierGroup, 2, 10, 1, 2, 3, 1, 4, 3, 2);
             AddFormation(scenario, "B-SG-L", "SAG Lantern", Side.Blue, FormationKind.SurfaceGroup, 3, 7, 0, 2, 2, 2, 3, 3, 2);
             AddFormation(scenario, "B-SS-L", "SSN Wayfinder", Side.Blue, FormationKind.Submarine, 4, 13, 0, 2, 3, -1, 3, 2, 3);
-            AddFormation(scenario, "B-AG-L", "Air Group Meridian", Side.Blue, FormationKind.AirGroup, 5, 9, 0, 3, 3, 2, 3, 2, 2);
+            AddFormation(scenario, "B-AG-L", "Air Group Meridian", Side.Blue, FormationKind.AirGroup, 5, 9, 1, 3, 3, 2, 3, 2, 2);
             AddFormation(scenario, "R-CV-L", "CVG Typhoon", Side.Red, FormationKind.CarrierGroup, 21, 8, 1, 2, 3, 1, 4, 3, 2);
-            AddFormation(scenario, "R-SG-L", "SAG Monsoon", Side.Red, FormationKind.SurfaceGroup, 20, 12, 1, 2, 2, 2, 3, 3, 2);
-            AddFormation(scenario, "R-SS-L", "Submarine Shade", Side.Red, FormationKind.Submarine, 18, 6, 1, 2, 3, -1, 3, 2, 3);
+            AddFormation(scenario, "R-SG-L", "SAG Monsoon", Side.Red, FormationKind.SurfaceGroup, 20, 12, 0, 2, 2, 2, 3, 3, 2);
+            AddFormation(scenario, "R-SS-L", "Submarine Shade", Side.Red, FormationKind.Submarine, 18, 6, 0, 2, 3, -1, 3, 2, 3);
             AddFormation(scenario, "R-AG-L", "Air Group Squall", Side.Red, FormationKind.AirGroup, 19, 10, 1, 3, 3, 2, 3, 2, 2);
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Blue, TargetId = "R-SG-L", Q = 17, R = 11, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 2 });
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Red, TargetId = "B-CV-L", Q = 6, R = 10, Location = LocationQuality.Low, Identity = IdentityQuality.General, Age = 2 });

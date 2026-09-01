@@ -10,12 +10,12 @@ An operational naval wargame prototype about acting effectively inside incomplet
 4. Choose **Begin Operation**, select **Meridian Veil**, review the briefing, and lock the fixed test deployment.
 5. Use the secure handoff screen whenever control passes between sides.
 6. The highlighted formation is Ready. Choose Move, Search, Strike, Recover, or Hold.
-7. For Move, choose a commitment and then a destination hex. For Search or Strike, choose a commitment and then an enemy Contact.
+7. For Move, choose a commitment and destination hex. For Search, choose any highlighted area hex. For Strike, choose an eligible Contact.
 8. Use **Menu** during play to save, load, restart, adjust settings, or return to the main menu. A saved operation adds **Continue** to the main menu.
 
 The scenario concludes at operational Time 16 with provisional scoring for objective control, carrier preservation, and enemy formations rendered Crippled or Destroyed.
 
-During action selection, the 3D command map highlights legal destinations and eligible Contacts. Hover an enemy Contact after choosing Search or Strike to inspect the complete calculation and outcome probabilities. Heavy Salvo requires a final confirmation. Hover ratings and status elements for contextual rules help, and use **Inspect** on the after-action feed for the full event history.
+During action selection, the 3D command map highlights legal destinations, Search areas, and eligible Strike Contacts. Heavy Salvo requires a final confirmation. Hover ratings and status elements for contextual rules help, and use **Inspect** on the after-action feed for the full event history.
 
 The current baseline uses 20 nautical miles between adjacent hex centers and two hours per Ready-Time point. These physical-scale values are provisional until dedicated movement, sensor, and weapon-range playtests are complete.
 
@@ -36,6 +36,7 @@ The prototype is deliberately pass-and-play for now. Each side sees only its own
 ## What this slice tests
 
 - continuous Ready Time instead of alternating turns;
+- cross-side priority passing only when both sides are tied at the earliest Ready Time;
 - movement commitment versus signature, friction, and future tempo;
 - Contact Location, Identity, and Age;
 - bounded search and combat dice;
@@ -48,10 +49,13 @@ The implementation is data-oriented: game rules live in `Assets/Scripts/Core`, w
 
 The runtime presentation now uses Unity UI Toolkit. Shared component styling and design tokens live in `Assets/Resources/UI/SeaTheme.uss`; the old immediate-mode controller remains disabled as a development fallback. The retained-mode layout scales at smaller desktop resolutions, expands its map on ultrawide displays, and responds to live window-size changes.
 
+The operation-mode screen supports **Solo vs AI** (player commands Blue) and **Local Hotseat**. The prototype AI controls Red through the same continuous Ready-Time scheduler and legal action methods as a human. Its decisions use only Red formations, Red-owned Contacts, public terrain, and the public objective; it receives no combat or initiative bonuses.
+
 Keyboard controls:
 
 - `Tab` and `Shift+Tab`: move through controls;
 - `1`–`5`: Move, Search, Strike, Recover, and Hold;
+- `G`: toggle the persistent map hex grid;
 - arrow keys while the tactical map is focused: move the map cursor;
 - `Enter` or `Space`: commit the highlighted map selection;
 - `Escape`: close an overlay or open the operation menu.
@@ -60,9 +64,19 @@ Keyboard controls:
 
 - mouse wheel: bounded zoom;
 - middle-button drag: pan;
-- right-button drag: rotate in 30-degree steps;
+- right-button drag: freely rotate and tilt the camera;
 - left click: select a hex or eligible Contact;
 - `Home` while the map is focused: reset the camera.
+
+Full keyboard camera controls (click the map to focus it):
+
+- `W/A/S/D`: move across the operational area;
+- `Q/E`: rotate left/right;
+- `R/F`: tilt up/down;
+- `Z/X` or keypad `+/-`: zoom in/out;
+- hold `Shift`: accelerate keyboard camera movement.
+
+The command bar's **HEXES OFF / HEXES ON** control provides the same persistent grid toggle, and the preference is saved between sessions.
 
 Gamepad and joystick polling is intentionally disabled while robust dead-zone and one-step focus handling are developed.
 

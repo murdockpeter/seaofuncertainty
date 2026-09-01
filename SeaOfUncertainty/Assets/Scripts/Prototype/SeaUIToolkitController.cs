@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using SeaOfUncertainty.Core;
@@ -9,7 +10,7 @@ namespace SeaOfUncertainty.Prototype
 {
     public sealed class SeaUIToolkitController : MonoBehaviour
     {
-        private enum View { Main, Scenario, Briefing, Setup, Handoff, Game, Results }
+        private enum View { Main, Mode, Scenario, Briefing, Setup, Handoff, AiPlanning, Game, Results }
 
         private SeaPrototypeController backend;
         private UIDocument document;
@@ -23,6 +24,7 @@ namespace SeaOfUncertainty.Prototype
         private SearchMode searchMode = SearchMode.Passive;
         private Salvo salvo = Salvo.Standard;
         private Side previousSide;
+        private bool aiRunning;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -52,6 +54,7 @@ namespace SeaOfUncertainty.Prototype
             root.AddToClassList("app");
             root.focusable = true;
             root.RegisterCallback<KeyDownEvent>(OnGlobalKeyDown);
+            root.RegisterCallback<KeyUpEvent>(OnGlobalKeyUp);
             root.RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
             if (Environment.GetCommandLineArgs().Contains("-capture3DPrototype"))
             {
@@ -60,6 +63,7 @@ namespace SeaOfUncertainty.Prototype
                 backend.ToolkitBeginDecision();
                 ShowGame();
             }
+            else if (Environment.GetCommandLineArgs().Contains("-captureModeSelect")) ShowMode();
             else ShowMain();
         }
 
@@ -72,14 +76,31 @@ namespace SeaOfUncertainty.Prototype
             card.Add(Text("COMMAND • INFORMATION • TEMPO", "eyebrow"));
             card.Add(Text("OPERATE INSIDE\nUNCERTAINTY", "front-title"));
             card.Add(Text("You are not trying to eliminate uncertainty. You are trying to operate better than your opponent inside it.", "body-copy"));
-            card.Add(ActionButton("BEGIN OPERATION", ShowScenario, "primary"));
-            if (backend.HasSave) card.Add(ActionButton("CONTINUE SAVED OPERATION", () => { backend.ToolkitLoad(); previousSide = backend.Game.Active.Side; ShowHandoff(); }));
+            card.Add(ActionButton("BEGIN OPERATION", ShowMode, "primary"));
+            if (backend.HasSave) card.Add(ActionButton("CONTINUE SAVED OPERATION", () => { backend.ToolkitLoad(); ContinueOperation(); }));
             VisualElement row = El("row");
             row.Add(ActionButton("SETTINGS", ShowSettings));
             row.Add(ActionButton("FIELD MANUAL", ShowRules));
             row.Add(ActionButton("EXIT GAME", ShowExitConfirmation, "danger-button"));
             card.Add(row);
-            card.Add(Text("Local pass-and-play • Multiplayer intentionally deferred • Mouse and keyboard enabled", "muted"));
+            card.Add(Text("Solo vs AI • Local pass-and-play • Online multiplayer intentionally deferred", "muted"));
+            page.Add(card);
+            app.Add(page);
+        }
+
+        private void ShowMode()
+        {
+            view = View.Mode;
+            BeginScreen("SELECT COMMAND MODE");
+            VisualElement page = El("front-page");
+            VisualElement card = Panel("hero-card");
+            card.Add(Text("WHO HOLDS THE OPPOSING COMMAND?", "heading"));
+            card.Add(Text("Both modes use the same continuous Ready-Time sequence, hidden-information rules, combat tables, and scenarios.", "body-copy"));
+            card.Add(ActionButton("SOLO VS AI  •  COMMAND BLUE", () => { backend.ToolkitSetOperationMode(OperationMode.SoloVsAi, Side.Blue); ShowScenario(); }, "primary"));
+            card.Add(Text("The deterministic OPFOR commander controls Red using only its own Contacts, formations, public terrain, and objective information.", "muted"));
+            card.Add(ActionButton("LOCAL HOTSEAT  •  BLUE VS RED", () => { backend.ToolkitSetOperationMode(OperationMode.LocalHotseat); ShowScenario(); }));
+            card.Add(Text("Two players share this device with secure information-handoff screens whenever command changes sides.", "muted"));
+            card.Add(ActionButton("BACK", ShowMain));
             page.Add(card);
             app.Add(page);
         }
@@ -102,7 +123,7 @@ namespace SeaOfUncertainty.Prototype
                 card.Add(ActionButton("REVIEW BRIEFING", () => { backend.ToolkitNewScenario(scenario.Id); ShowBriefing(); }, "primary"));
                 list.Add(card);
             }
-            list.Add(ActionButton("BACK", ShowMain));
+            list.Add(ActionButton("BACK", ShowMode));
             page.Add(list);
             app.Add(page);
         }
@@ -118,7 +139,7 @@ namespace SeaOfUncertainty.Prototype
             card.Add(Text(backend.Game.Scenario.Summary + $" Resolve at Time {backend.Game.Scenario.Horizon}. Preserve your carrier group in combat-capable condition. Destruction is a means to those operational ends.", "body-copy"));
             card.Add(Text("PROVISIONAL SCORING", "eyebrow"));
             card.Add(Text("5 VP — Sole objective control\n3 VP — Carrier remains combat capable\n2 VP — Enemy Destroyed\n1 VP — Enemy Crippled", "body-copy"));
-            card.Add(Text($"ASSUMPTIONS\n20 nm hexes • 2 hours / Ready Time • Formation-specific Strike ranges • Age-2 penalty {(backend.AgeTwoPenalty ? "ON" : "OFF")} • Automatic Defend", "muted"));
+            card.Add(Text($"ASSUMPTIONS\n20 nm hexes • 2 hours / Ready Time • Formation-specific Strike ranges • Age-2 penalty {(backend.AgeTwoPenalty ? "ON" : "OFF")} • Automatic Defend • MODE {(backend.SelectedMode == OperationMode.SoloVsAi ? "SOLO VS AI" : "LOCAL HOTSEAT")}", "muted"));
             VisualElement row = El("row");
             row.Add(ActionButton("REVIEW SETUP", ShowSetup, "primary"));
             row.Add(ActionButton("BACK", ShowScenario));
@@ -143,7 +164,7 @@ namespace SeaOfUncertainty.Prototype
             OperationalLocationDefinition objective = backend.Game.Area.Locations.FirstOrDefault(location => location.Kind == LocationKind.Objective);
             card.Add(Text($"Objective: {(objective?.Name ?? "OPERATIONAL CONTROL").ToUpperInvariant()} • {backend.Game.Area.Objective}", "subheading", "amber"));
             VisualElement row = El("row");
-            row.Add(ActionButton("LOCK SETUP & BEGIN", () => { previousSide = backend.Game.Active.Side; ShowHandoff(); }, "primary"));
+            row.Add(ActionButton("LOCK SETUP & BEGIN", BeginSelectedOperation, "primary"));
             row.Add(ActionButton("BACK", ShowBriefing));
             card.Add(row);
             page.Add(card);
@@ -174,6 +195,68 @@ namespace SeaOfUncertainty.Prototype
             app.Add(page);
         }
 
+        private void BeginSelectedOperation()
+        {
+            previousSide = backend.Game.Active.Side;
+            ContinueOperation();
+        }
+
+        private void ContinueOperation()
+        {
+            if (backend.IsComplete) { ShowResults(); return; }
+            if (backend.SelectedMode == OperationMode.SoloVsAi)
+            {
+                if (backend.IsAiTurn) BeginAiSequence();
+                else { backend.ToolkitBeginDecision(); ShowGame(); }
+            }
+            else ShowHandoff();
+        }
+
+        private void BeginAiSequence()
+        {
+            if (aiRunning) return;
+            ShowAiPlanning();
+            StartCoroutine(RunAiSequence());
+        }
+
+        private IEnumerator RunAiSequence()
+        {
+            aiRunning = true;
+            yield return new WaitForSecondsRealtime(backend.ReducedMotion ? .1f : .55f);
+            int guard = 0;
+            while (backend.IsAiTurn && !backend.IsComplete && guard++ < 64)
+            {
+                backend.ToolkitBeginDecision();
+                yield return new WaitForSecondsRealtime(backend.ReducedMotion ? .05f : .22f);
+                backend.ToolkitExecuteAiTurn();
+                if (!backend.LastToolkitActionSucceeded) break;
+                if (backend.IsAiTurn && !backend.IsComplete) ShowAiPlanning();
+                yield return new WaitForSecondsRealtime(backend.ReducedMotion ? .05f : .35f);
+            }
+            aiRunning = false;
+            if (backend.IsComplete) ShowResults();
+            else if (backend.IsAiTurn) ShowAiPlanning(true);
+            else { backend.ToolkitBeginDecision(); ShowGame(); }
+        }
+
+        private void ShowAiPlanning(bool stalled = false)
+        {
+            view = View.AiPlanning;
+            actionMode = ToolkitActionMode.None;
+            BeginScreen($"OPERATIONAL TIME T{backend.Game.Time:00}  •  SOLO VS AI");
+            VisualElement page = El("front-page");
+            VisualElement card = Panel("hero-card", "center");
+            card.Add(Text(stalled ? "OPFOR DECISION PAUSED" : "OPFOR PLANNING", "front-title"));
+            card.Add(Text(stalled ? "The AI could not complete its preferred legal action. Retry the decision or return safely to the main menu." : "Red formations are resolving through the same Ready-Time queue and legal action system. Hidden OPFOR information remains concealed.", "body-copy"));
+            if (stalled)
+            {
+                card.Add(ActionButton("RETRY AI DECISION", BeginAiSequence, "primary"));
+                card.Add(ActionButton("MAIN MENU", ShowMain));
+            }
+            page.Add(card);
+            app.Add(page);
+        }
+
         private void ShowGame()
         {
             view = View.Game;
@@ -188,9 +271,9 @@ namespace SeaOfUncertainty.Prototype
             map.HexChosen = OnHexChosen;
             map.ContactChosen = OnContactChosen;
             map.ContactHovered = contact => UpdateDossier(contact);
-            map.SetState(backend.Game, actionMode, moveMode, searchMode, salvo, backend.ReducedMotion);
+            map.SetState(backend.Game, actionMode, moveMode, searchMode, salvo, backend.ReducedMotion, backend.HexGridVisible);
             mapColumn.Add(map);
-            mapColumn.Add(Text($"3D COMMAND MAP  •  {backend.Game.Area.NauticalMilesPerHex} NM / HEX  •  WHEEL ZOOM  •  MIDDLE-DRAG PAN  •  RIGHT-DRAG ROTATE  •  HOME RESET", "muted"));
+            mapColumn.Add(Text($"3D COMMAND MAP  •  {backend.Game.Area.NauticalMilesPerHex} NM / HEX  •  WASD MOVE ANYTIME  •  Q/E ROTATE  •  R/F TILT  •  Z/X ZOOM  •  SHIFT FAST  •  HOME RESET", "muted"));
             workspace.Add(mapColumn);
             dossier = Panel("dossier");
             UpdateDossier(null);
@@ -201,7 +284,7 @@ namespace SeaOfUncertainty.Prototype
             bottom.Add(BuildActions());
             bottom.Add(BuildEventFeed());
             app.Add(bottom);
-            map.schedule.Execute(() => map.Refresh());
+            map.schedule.Execute(() => { map.Refresh(); map.Focus(); });
         }
 
         private VisualElement BuildTimeline()
@@ -209,15 +292,17 @@ namespace SeaOfUncertainty.Prototype
             VisualElement panel = Panel("timeline");
             panel.Add(Text("FORMATION TIMELINE", "subheading"));
             Label reason = Text(backend.ToolkitActivationReason(), "muted");
-            reason.tooltip = "Lowest Ready Time, then lower Entropy, then higher Command, then the reproducible prototype tie-break.";
+            reason.tooltip = "Lowest Ready Time. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable ID.";
             panel.Add(reason);
             ScrollView scroll = new ScrollView();
-            foreach (FormationState formation in backend.Game.Formations.Where(f => !f.IsDestroyed).OrderBy(f => f.ReadyTime).ThenBy(f => f.EntropySources).ThenByDescending(f => f.Ratings.Command))
+            int queuePosition = 0;
+            foreach (FormationState formation in backend.Game.ActivationQueue())
             {
-                Button row = ActionButton($"{formation.Name}\n{formation.Kind} • {formation.Cohesion}                    T{formation.ReadyTime:00}", () => UpdateDossier(null));
+                string queueLabel = queuePosition++ == 0 ? "NOW" : $"NEXT {queuePosition - 1}";
+                Button row = ActionButton($"{queueLabel}  •  READY T{formation.ReadyTime:00}\n{formation.Name}\n{formation.Kind}  •  {formation.Cohesion}", () => UpdateDossier(null));
                 row.AddToClassList("timeline-row");
                 if (formation == backend.Game.Active) row.AddToClassList("active");
-                row.tooltip = $"Ready T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.Ratings.Command}";
+                row.tooltip = $"Activation queue position {queuePosition} • {formation.Side} • Ready T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.Ratings.Command}";
                 scroll.Add(row);
             }
             panel.Add(scroll);
@@ -345,7 +430,12 @@ namespace SeaOfUncertainty.Prototype
             if (backend.IsComplete) { ShowResults(); return; }
             if (!backend.LastToolkitActionSucceeded) { ShowGame(); return; }
             actionMode = ToolkitActionMode.None;
-            if (backend.Game.Active.Side != actingSide) ShowHandoff();
+            if (backend.SelectedMode == OperationMode.SoloVsAi)
+            {
+                if (backend.IsAiTurn) BeginAiSequence();
+                else { backend.ToolkitBeginDecision(); ShowGame(); }
+            }
+            else if (backend.Game.Active.Side != actingSide) ShowHandoff();
             else { backend.ToolkitBeginDecision(); ShowGame(); }
         }
 
@@ -364,7 +454,7 @@ namespace SeaOfUncertainty.Prototype
             VisualElement modal = Modal("OPERATION PAUSED");
             modal.Add(ActionButton("RESUME", ShowGame, "primary"));
             modal.Add(ActionButton("SAVE OPERATION", () => { backend.ToolkitSave(); ShowGame(); }));
-            if (backend.HasSave) modal.Add(ActionButton("LOAD SAVED OPERATION", () => { backend.ToolkitLoad(); ShowHandoff(); }));
+            if (backend.HasSave) modal.Add(ActionButton("LOAD SAVED OPERATION", () => { backend.ToolkitLoad(); ContinueOperation(); }));
             modal.Add(ActionButton("EXPORT PLAYTEST DATA", () => { backend.ToolkitExport(); ShowGame(); }));
             modal.Add(ActionButton("SETTINGS", ShowSettings));
             modal.Add(ActionButton("RESTART OPERATION", () => { backend.ToolkitNewScenario(); ShowBriefing(); }, "warning"));
@@ -396,16 +486,17 @@ namespace SeaOfUncertainty.Prototype
             Toggle audio = new Toggle("Master audio enabled") { value = backend.AudioEnabled };
             Toggle contrast = new Toggle("High-contrast side colors") { value = backend.HighContrast };
             Toggle motion = new Toggle("Reduced motion") { value = backend.ReducedMotion };
-            modal.Add(age); modal.Add(audio); modal.Add(contrast); modal.Add(motion);
+            Toggle grid = new Toggle("Show hex grid on the map") { value = backend.HexGridVisible };
+            modal.Add(age); modal.Add(audio); modal.Add(contrast); modal.Add(motion); modal.Add(grid);
             modal.Add(ActionButton(Screen.fullScreen ? "SWITCH TO WINDOWED" : "SWITCH TO FULLSCREEN", () => { Screen.fullScreen = !Screen.fullScreen; ShowSettings(); }));
-            modal.Add(ActionButton("APPLY", () => { backend.ToolkitSetSettings(age.value, audio.value, contrast.value, motion.value); CloseOverlay(); }, "primary"));
+            modal.Add(ActionButton("APPLY", () => { backend.ToolkitSetSettings(age.value, audio.value, contrast.value, motion.value, grid.value); CloseOverlay(); if (view == View.Game) ShowGame(); }, "primary"));
             modal.Add(ActionButton("CANCEL", CloseOverlay));
         }
 
         private void ShowRules()
         {
             VisualElement modal = Modal("FIELD MANUAL");
-            modal.Add(Text("SCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nREADY TIME\nThe earliest formation acts. Ties use Entropy, Command, then the prototype tie-break.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Littoral adds one Ready-Time.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE\nRange depends on formation and Light / Standard / Heavy commitment; the selected range is shown before commitment.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY\nFriction delays, Disruption impairs information, Destruction impairs offense.", "body-copy"));
+            modal.Add(Text("COMMAND MODES\nSolo vs AI assigns Blue to the player and Red to the deterministic OPFOR commander. Local Hotseat uses secure handoffs between two players. Both modes use identical rules and Ready-Time sequencing.\n\nSCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nMAP CAMERA\nWASD moves the camera anywhere on the operation screen; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. Middle-drag pans, right-drag freely orbits, and the wheel zooms.\n\nMAP GRID\nUse HEXES OFF / HEXES ON in the command bar, or press G, to toggle the persistent hex overlay. The preference is saved between sessions.\n\nREADY TIME\nThere are no player turns. The earliest formation acts. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable formation order. If only one side is Ready, it continues.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Littoral adds one Ready-Time.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE\nRange depends on formation and Light / Standard / Heavy commitment; the selected range is shown before commitment.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY\nFriction delays complex actions. Disruption impairs information. Destruction impairs offense.", "body-copy"));
             modal.Add(ActionButton("CLOSE", CloseOverlay, "primary"));
         }
 
@@ -494,7 +585,13 @@ namespace SeaOfUncertainty.Prototype
             top.Add(El("spacer"));
             if (gameHeader)
             {
+                if (backend.SelectedMode == OperationMode.SoloVsAi) top.Add(Text("SOLO • BLUE COMMAND", "eyebrow"));
                 top.Add(Text($"NOW READY  •  {backend.Game.Active.Name.ToUpperInvariant()}", "subheading"));
+                top.Add(ActionButton(backend.HexGridVisible ? "HEXES ON" : "HEXES OFF", () =>
+                {
+                    backend.ToolkitToggleHexGrid();
+                    ShowGame();
+                }, backend.HexGridVisible ? "selected" : null));
                 top.Add(ActionButton("RULES", ShowRules));
                 top.Add(ActionButton("MENU", ShowPause));
             }
@@ -521,11 +618,19 @@ namespace SeaOfUncertainty.Prototype
         {
             if (evt.keyCode == KeyCode.Escape) { if (root.Q<VisualElement>("overlay") != null) CloseOverlay(); else if (view == View.Game) ShowPause(); return; }
             if (view != View.Game || root.Q<VisualElement>("overlay") != null) return;
+            if (map != null && map.SetCameraKey(evt.keyCode, true)) { evt.StopPropagation(); return; }
+            if (evt.keyCode == KeyCode.G) { backend.ToolkitToggleHexGrid(); ShowGame(); return; }
             if (evt.keyCode == KeyCode.Alpha1 || evt.keyCode == KeyCode.Keypad1) SelectAction(ToolkitActionMode.Move);
             else if (evt.keyCode == KeyCode.Alpha2 || evt.keyCode == KeyCode.Keypad2) SelectAction(ToolkitActionMode.Search);
             else if (evt.keyCode == KeyCode.Alpha3 || evt.keyCode == KeyCode.Keypad3) SelectAction(ToolkitActionMode.Strike);
             else if (evt.keyCode == KeyCode.Alpha4 || evt.keyCode == KeyCode.Keypad4) ResolveAction(() => backend.ToolkitRecover());
             else if (evt.keyCode == KeyCode.Alpha5 || evt.keyCode == KeyCode.Keypad5) ResolveAction(() => backend.ToolkitHold());
+        }
+
+        private void OnGlobalKeyUp(KeyUpEvent evt)
+        {
+            if (view != View.Game || map == null) return;
+            if (map.SetCameraKey(evt.keyCode, false)) evt.StopPropagation();
         }
 
         private void OnGeometryChanged(GeometryChangedEvent evt) => ApplyResponsiveClass(evt.newRect.width);

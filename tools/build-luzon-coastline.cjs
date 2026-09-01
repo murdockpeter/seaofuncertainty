@@ -5,7 +5,22 @@ const path = require('node:path');
 
 const source = process.argv[2] || path.resolve(__dirname, '..', '..', 'gcbh_dynamic_campaign', 'mission-map', 'renderer', 'data', 'global-land.geojson');
 const output = path.resolve(__dirname, '..', 'SeaOfUncertainty', 'Assets', 'Resources', 'Geography', 'luzon-strait-coastline.json');
-const bounds = { west: 118.5, east: 125.8, south: 17.4, north: 24.1 };
+const projectionBounds = { west: 118.5, east: 125.8, south: 17.4, north: 24.1 };
+// Keep the authoritative 20 nm hex projection fixed, but crop enough real Natural Earth
+// geometry to cover the larger rendered command-table surface around that projection.
+const grid = { width: 24, height: 20, hexRadius: 1 };
+const lastWorldX = (grid.width - 1) * grid.hexRadius * 1.5;
+const lastWorldZ = (grid.height - 1 + ((grid.width - 1) & 1) * 0.5) * grid.hexRadius * Math.sqrt(3);
+const projectionWorldWidth = lastWorldX + 2;
+const projectionWorldDepth = lastWorldZ + 1.74;
+const longitudePerWorldUnit = (projectionBounds.east - projectionBounds.west) / projectionWorldWidth;
+const latitudePerWorldUnit = (projectionBounds.north - projectionBounds.south) / projectionWorldDepth;
+const bounds = {
+  west: projectionBounds.west - 5 * longitudePerWorldUnit,
+  east: projectionBounds.east + 5 * longitudePerWorldUnit,
+  south: projectionBounds.south - 5.13 * latitudePerWorldUnit,
+  north: projectionBounds.north + 5.13 * latitudePerWorldUnit,
+};
 
 function clip(ring, inside, intersect) {
   const result = [];
@@ -67,12 +82,16 @@ for (const feature of geojson.features || []) {
 
 const result = {
   metadata: {
-    title: 'Luzon Strait Natural Earth 1:10m coastline crop',
+    title: 'Luzon Strait Natural Earth 1:10m command-table crop',
     source: 'Local GCBH cached Natural Earth 1:10m land and minor islands',
     sourceFile: source,
     license: 'Natural Earth public domain',
   },
   ...bounds,
+  projectionWest: projectionBounds.west,
+  projectionEast: projectionBounds.east,
+  projectionSouth: projectionBounds.south,
+  projectionNorth: projectionBounds.north,
   polygons,
 };
 fs.mkdirSync(path.dirname(output), { recursive: true });

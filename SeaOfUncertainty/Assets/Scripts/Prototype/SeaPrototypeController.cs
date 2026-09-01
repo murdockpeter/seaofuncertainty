@@ -24,12 +24,18 @@ namespace SeaOfUncertainty.Prototype
         public bool AudioEnabled => audioEnabled;
         public bool HighContrast => highContrast;
         public bool ReducedMotion => reducedMotion;
+        public bool HexGridVisible => hexGridVisible;
+        public OperationMode SelectedMode => operationMode;
+        public Side HumanSide => humanSide;
+        public bool IsAiTurn => operationMode == OperationMode.SoloVsAi && game?.Active != null && game.Active.Side != humanSide;
         public bool LastToolkitActionSucceeded => lastActionSucceeded;
 
         [Serializable]
         private sealed class OperationSave
         {
-            public int Version = 2;
+            public int Version = 4;
+            public OperationMode OperationMode;
+            public Side HumanSide = Side.Blue;
             public PrototypeGame.SaveData Game;
             public PlaytestSession Playtest;
             public PlaytestFeedback Feedback;
@@ -75,6 +81,9 @@ namespace SeaOfUncertainty.Prototype
         private bool audioEnabled = true;
         private bool highContrast;
         private bool reducedMotion;
+        private bool hexGridVisible;
+        private OperationMode operationMode = OperationMode.LocalHotseat;
+        private Side humanSide = Side.Blue;
         private bool lastActionSucceeded;
         private int blueFinalScore;
         private int redFinalScore;
@@ -104,6 +113,8 @@ namespace SeaOfUncertainty.Prototype
             audioEnabled = PlayerPrefs.GetInt("AudioEnabled", 1) == 1;
             highContrast = PlayerPrefs.GetInt("HighContrast", 0) == 1;
             reducedMotion = PlayerPrefs.GetInt("ReducedMotion", 0) == 1;
+            hexGridVisible = PlayerPrefs.GetInt("HexGridVisible", 0) == 1;
+            if (Environment.GetCommandLineArgs().Contains("-showHexGrid")) hexGridVisible = true;
             game = new PrototypeGame();
             game.AgeTwoTargetingPenalty = ageTwoTargetingPenalty;
             telemetry = new PlaytestRecorder();
@@ -167,14 +178,51 @@ namespace SeaOfUncertainty.Prototype
         public string ToolkitActivationReason() => CurrentActivationExplanation();
         public string ToolkitLegalAlternatives() => LegalAlternatives();
         public void ToolkitRecordChoice(string action, string mode) => telemetry.RecordChoice(game, game.Active, "ActionChosen", action, mode, LegalAlternatives());
-        public void ToolkitSetSettings(bool agePenalty, bool audio, bool contrast, bool reduceMotion)
+        public void ToolkitSetOperationMode(OperationMode mode, Side playerSide = Side.Blue)
+        {
+            operationMode = mode;
+            humanSide = playerSide;
+        }
+
+        public string ToolkitExecuteAiTurn()
+        {
+            lastActionSucceeded = false;
+            if (!IsAiTurn) return "No AI-controlled formation is Ready.";
+            FormationState actor = game.Active;
+            string alternatives = LegalAlternatives();
+            PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
+            AiDecision decision = PrototypeAiCommander.Choose(game);
+            if (decision == null) return "AI could not form a legal decision.";
+            telemetry.RecordChoice(game, actor, "AiActionChosen", decision.Action.ToString(), decision.ModeName, alternatives);
+            if (!PrototypeAiCommander.Execute(game, decision, out string message))
+            {
+                var fallback = new AiDecision { Action = ActionKind.Hold, Rationale = "Fallback after the preferred AI action became illegal." };
+                if (!PrototypeAiCommander.Execute(game, fallback, out message)) { Toast(message); return message; }
+                decision = fallback;
+            }
+            lastActionSucceeded = true;
+            telemetry.RecordAction(game, before, actor, decision.Action.ToString(), decision.ModeName, decision.TargetId ?? decision.Hex.ToString(), alternatives, DecisionSeconds(), decision.Rationale, message);
+            pending = PendingAction.None;
+            inspected = game.Active;
+            Toast("OPFOR: " + message);
+            AfterSuccessfulAction(actor.Side);
+            return message;
+        }
+        public void ToolkitSetSettings(bool agePenalty, bool audio, bool contrast, bool reduceMotion, bool showHexGrid)
         {
             ageTwoTargetingPenalty = agePenalty;
             audioEnabled = audio;
             highContrast = contrast;
             reducedMotion = reduceMotion;
+            hexGridVisible = showHexGrid;
             game.AgeTwoTargetingPenalty = agePenalty;
             AudioListener.volume = audio ? 1 : 0;
+            SaveSettings();
+        }
+
+        public void ToolkitToggleHexGrid()
+        {
+            hexGridVisible = !hexGridVisible;
             SaveSettings();
         }
 
@@ -444,7 +492,9 @@ namespace SeaOfUncertainty.Prototype
                 if (newContrast != highContrast) { highContrast = newContrast; SaveSettings(); }
                 bool newMotion = GUI.Toggle(new Rect(rect.x + 48, rect.y + 482, 500, 38), reducedMotion, "  Reduced motion");
                 if (newMotion != reducedMotion) { reducedMotion = newMotion; SaveSettings(); }
-                GUI.Label(new Rect(rect.x + 44, rect.y + 552, 810, 65), "Settings persist between sessions. Reduced motion will govern upcoming map and combat animation systems.", body);
+                bool newGrid = GUI.Toggle(new Rect(rect.x + 48, rect.y + 542, 500, 38), hexGridVisible, "  Show hex grid on the map");
+                if (newGrid != hexGridVisible) { hexGridVisible = newGrid; SaveSettings(); }
+                GUI.Label(new Rect(rect.x + 44, rect.y + 602, 810, 65), "Settings persist between sessions, including the optional map grid.", body);
             }
             else if (overlay == Overlay.EventLog)
             {
@@ -528,7 +578,7 @@ namespace SeaOfUncertainty.Prototype
         {
             try
             {
-                var save = new OperationSave { Game = game.CaptureState(), Playtest = telemetry.Session, Feedback = feedback };
+                var save = new OperationSave { Game = game.CaptureState(), Playtest = telemetry.Session, Feedback = feedback, OperationMode = operationMode, HumanSide = humanSide };
                 string json = JsonUtility.ToJson(save, true);
                 File.WriteAllText(SavePath, json);
                 Toast($"Operation saved at T{game.Time:00}.");
@@ -556,6 +606,8 @@ namespace SeaOfUncertainty.Prototype
                 if (telemetry == null) telemetry = new PlaytestRecorder();
                 if (operation?.Playtest != null) telemetry.Restore(operation.Playtest); else telemetry.StartNew(game);
                 feedback = operation?.Feedback ?? new PlaytestFeedback();
+                operationMode = operation != null && operation.Version >= 4 ? operation.OperationMode : OperationMode.LocalHotseat;
+                humanSide = operation != null && operation.Version >= 4 ? operation.HumanSide : Side.Blue;
                 ageTwoTargetingPenalty = game.AgeTwoTargetingPenalty;
                 inspected = game.Active;
                 pending = PendingAction.None;
@@ -578,6 +630,7 @@ namespace SeaOfUncertainty.Prototype
             PlayerPrefs.SetInt("AudioEnabled", audioEnabled ? 1 : 0);
             PlayerPrefs.SetInt("HighContrast", highContrast ? 1 : 0);
             PlayerPrefs.SetInt("ReducedMotion", reducedMotion ? 1 : 0);
+            PlayerPrefs.SetInt("HexGridVisible", hexGridVisible ? 1 : 0);
             PlayerPrefs.Save();
         }
 
@@ -1178,8 +1231,12 @@ namespace SeaOfUncertainty.Prototype
             int minimumTime = game.Formations.Where(f => !f.IsDestroyed).Min(f => f.ReadyTime);
             List<FormationState> sameTime = game.Formations.Where(f => !f.IsDestroyed && f.ReadyTime == minimumTime).ToList();
             if (sameTime.Count == 1) return $"{game.Active.Name} is earliest at T{minimumTime:00}.";
-            int minimumEntropy = sameTime.Min(f => f.EntropySources);
-            List<FormationState> sameEntropy = sameTime.Where(f => f.EntropySources == minimumEntropy).ToList();
+            bool crossSideTie = sameTime.Select(f => f.Side).Distinct().Count() > 1;
+            if (crossSideTie && game.LastActingSide.HasValue)
+                return $"T{minimumTime:00} cross-side tie: priority passes from {game.LastActingSide.Value} to {game.Active.Side}; {game.Active.Name} leads that side's Ready formations.";
+            List<FormationState> eligibleSide = crossSideTie ? sameTime.Where(f => f.Side == game.Active.Side).ToList() : sameTime;
+            int minimumEntropy = eligibleSide.Min(f => f.EntropySources);
+            List<FormationState> sameEntropy = eligibleSide.Where(f => f.EntropySources == minimumEntropy).ToList();
             if (sameEntropy.Count == 1) return $"T{minimumTime:00} tie: {game.Active.Name} has lower Entropy.";
             int maximumCommand = sameEntropy.Max(f => f.Ratings.Command);
             List<FormationState> sameCommand = sameEntropy.Where(f => f.Ratings.Command == maximumCommand).ToList();

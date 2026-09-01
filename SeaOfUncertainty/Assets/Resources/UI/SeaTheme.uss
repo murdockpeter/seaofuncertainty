@@ -80,7 +80,7 @@
 .button.selected { background-color: rgb(19, 126, 133); color: white; }
 
 .workspace { flex-grow: 1; flex-direction: row; padding: 10px; }
-.timeline { width: 245px; min-width: 210px; margin-right: 10px; }
+.timeline { width: 255px; min-width: 225px; margin-right: 10px; }
 .map-column { flex-grow: 1; min-width: 500px; }
 .dossier { width: 330px; min-width: 285px; margin-left: 10px; }
 .bottom-deck { height: 230px; min-height: 200px; flex-direction: row; padding: 0 10px 10px 10px; }
@@ -88,11 +88,13 @@
 .event-feed { width: 560px; min-width: 380px; }
 
 .timeline-row {
-    height: 58px;
+    height: 62px;
     margin-top: 4px;
-    padding: 7px;
-    flex-direction: row;
-    align-items: center;
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 12px;
+    white-space: normal;
+    -unity-text-align: middle-left;
     background-color: rgba(10, 54, 65, 0.78);
     border-left-width: 3px;
     border-left-color: rgba(83, 172, 183, 0.35);
@@ -183,7 +185,7 @@
 .map-marker.eligible { border-top-color: rgb(75, 244, 177); border-right-color: rgb(75, 244, 177); border-bottom-color: rgb(75, 244, 177); border-left-color: rgb(75, 244, 177); }
 
 .compact .dossier { display: none; }
-.compact .timeline { width: 205px; min-width: 180px; }
+.compact .timeline { width: 220px; min-width: 200px; }
 .compact .event-feed { width: 390px; min-width: 320px; }
 .compact .brand { font-size: 21px; }
 

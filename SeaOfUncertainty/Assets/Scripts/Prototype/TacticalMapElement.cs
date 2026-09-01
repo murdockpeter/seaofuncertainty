@@ -12,6 +12,7 @@ namespace SeaOfUncertainty.Prototype
     public sealed class TacticalMapElement : VisualElement
     {
         private readonly List<Label> markers = new List<Label>();
+        private readonly HashSet<KeyCode> cameraKeys = new HashSet<KeyCode>();
         private PrototypeGame game;
         private ToolkitActionMode actionMode;
         private MoveMode moveMode;
@@ -29,6 +30,7 @@ namespace SeaOfUncertainty.Prototype
         public Action<HexCoord> HexChosen;
         public Action<ContactState> ContactChosen;
         public Action<ContactState> ContactHovered;
+        public bool CameraInputActive => cameraKeys.Count > 0;
 
         public TacticalMapElement()
         {
@@ -53,11 +55,13 @@ namespace SeaOfUncertainty.Prototype
             RegisterCallback<PointerLeaveEvent>(_ => { ContactHovered?.Invoke(null); presentation?.SetHoverHex(null); UpdateReadout(null); });
             RegisterCallback<WheelEvent>(OnWheel);
             RegisterCallback<KeyDownEvent>(OnKeyDown);
+            RegisterCallback<KeyUpEvent>(OnKeyUp);
+            RegisterCallback<FocusOutEvent>(_ => cameraKeys.Clear());
             RegisterCallback<NavigationSubmitEvent>(_ => SubmitCursor());
-            schedule.Execute(() => presentation?.Tick(Time.deltaTime)).Every(16);
+            schedule.Execute(TickPresentation).Every(16);
         }
 
-        public void SetState(PrototypeGame currentGame, ToolkitActionMode mode, MoveMode currentMoveMode, SearchMode currentSearchMode, Salvo currentSalvo, bool useReducedMotion = false)
+        public void SetState(PrototypeGame currentGame, ToolkitActionMode mode, MoveMode currentMoveMode, SearchMode currentSearchMode, Salvo currentSalvo, bool useReducedMotion = false, bool showHexGrid = false)
         {
             game = currentGame;
             actionMode = mode;
@@ -67,7 +71,7 @@ namespace SeaOfUncertainty.Prototype
             reducedMotion = useReducedMotion;
             if (game?.Active != null) keyboardHex = game.Active.Position;
             EnsurePresentation();
-            presentation?.SetState(game, actionMode, moveMode, searchMode, salvo, reducedMotion);
+            presentation?.SetState(game, actionMode, moveMode, searchMode, salvo, reducedMotion, showHexGrid);
             UpdateMarkers();
         }
 
@@ -161,6 +165,7 @@ namespace SeaOfUncertainty.Prototype
                 lastPointer = evt.localPosition;
                 dragTravel += delta;
                 if (dragButton == 2) presentation?.Pan(delta);
+                else if (dragButton == 1) presentation?.Orbit(delta);
                 UpdateMarkers();
                 UpdateReadout(null);
                 evt.StopPropagation();
@@ -182,7 +187,6 @@ namespace SeaOfUncertainty.Prototype
         private void OnPointerUp(PointerUpEvent evt)
         {
             if (dragButton < 0 || evt.button != dragButton) return;
-            if (dragButton == 1 && Mathf.Abs(dragTravel.x) > 18f) presentation?.Rotate(dragTravel.x);
             dragButton = -1;
             if (this.HasPointerCapture(evt.pointerId)) this.ReleasePointer(evt.pointerId);
             UpdateMarkers();
@@ -201,6 +205,11 @@ namespace SeaOfUncertainty.Prototype
         private void OnKeyDown(KeyDownEvent evt)
         {
             if (game?.Area == null) return;
+            if (SetCameraKey(evt.keyCode, true))
+            {
+                evt.StopPropagation();
+                return;
+            }
             int q = keyboardHex.Q;
             int r = keyboardHex.R;
             if (evt.keyCode == KeyCode.LeftArrow) q--;
@@ -216,10 +225,51 @@ namespace SeaOfUncertainty.Prototype
             evt.StopPropagation();
         }
 
+        private void OnKeyUp(KeyUpEvent evt)
+        {
+            if (!SetCameraKey(evt.keyCode, false)) return;
+            evt.StopPropagation();
+        }
+
+        public bool SetCameraKey(KeyCode key, bool pressed)
+        {
+            if (!IsCameraKey(key)) return false;
+            if (pressed) cameraKeys.Add(key); else cameraKeys.Remove(key);
+            return true;
+        }
+
+        public void ClearCameraKeys() => cameraKeys.Clear();
+
+        private void TickPresentation()
+        {
+            presentation?.Tick(Time.deltaTime);
+            if (presentation == null || cameraKeys.Count == 0) return;
+            float right = Axis(KeyCode.D, KeyCode.A);
+            float forward = Axis(KeyCode.W, KeyCode.S);
+            float yaw = Axis(KeyCode.E, KeyCode.Q);
+            float pitch = Axis(KeyCode.R, KeyCode.F);
+            float zoom = Axis(KeyCode.X, KeyCode.Z) + Axis(KeyCode.KeypadMinus, KeyCode.KeypadPlus);
+            bool fast = cameraKeys.Contains(KeyCode.LeftShift) || cameraKeys.Contains(KeyCode.RightShift);
+            if (Mathf.Approximately(right, 0f) && Mathf.Approximately(forward, 0f) && Mathf.Approximately(yaw, 0f) && Mathf.Approximately(pitch, 0f) && Mathf.Approximately(zoom, 0f)) return;
+            presentation.FlyCamera(right, forward, yaw, pitch, zoom, Time.deltaTime, fast);
+            UpdateMarkers();
+            UpdateReadout(null);
+        }
+
+        private float Axis(KeyCode positive, KeyCode negative) => (cameraKeys.Contains(positive) ? 1f : 0f) - (cameraKeys.Contains(negative) ? 1f : 0f);
+
+        private static bool IsCameraKey(KeyCode key)
+        {
+            return key == KeyCode.W || key == KeyCode.A || key == KeyCode.S || key == KeyCode.D ||
+                   key == KeyCode.Q || key == KeyCode.E || key == KeyCode.R || key == KeyCode.F ||
+                   key == KeyCode.Z || key == KeyCode.X || key == KeyCode.KeypadPlus || key == KeyCode.KeypadMinus ||
+                   key == KeyCode.LeftShift || key == KeyCode.RightShift;
+        }
+
         private void UpdateReadout(HexCoord? hex)
         {
             string overlay = actionMode == ToolkitActionMode.Move ? "MOVE AREA" : actionMode == ToolkitActionMode.Search ? "SEARCH COVERAGE" : actionMode == ToolkitActionMode.Strike ? "STRIKE RANGE" : "COMMAND VIEW";
-            if (headingReadout != null) headingReadout.text = presentation == null ? "NORTH 000°" : $"NORTH {presentation.Heading:000}°  •  {overlay}";
+            if (headingReadout != null) headingReadout.text = presentation == null ? "NORTH 000°" : $"HDG {presentation.Heading:000}°  •  PITCH {presentation.CameraPitch:00}°  •  {overlay}";
             if (hexReadout == null) return;
             if (!hex.HasValue || game?.Active == null) { hexReadout.text = $"{game?.Area?.NauticalMilesPerHex ?? 20} NM HEX SCALE"; return; }
             int range = game.Area.NauticalMiles(game.Active.Position, hex.Value);
