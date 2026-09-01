@@ -25,6 +25,8 @@ namespace SeaOfUncertainty.Prototype
         private Salvo salvo = Salvo.Standard;
         private Side previousSide;
         private bool aiRunning;
+        private bool edgeScrollEnabled;
+        private bool entropyRevealBlocking;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -56,6 +58,7 @@ namespace SeaOfUncertainty.Prototype
             root.RegisterCallback<KeyDownEvent>(OnGlobalKeyDown);
             root.RegisterCallback<KeyUpEvent>(OnGlobalKeyUp);
             root.RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
+            EnsureNativeFullscreenResolution();
             if (Environment.GetCommandLineArgs().Contains("-capture3DPrototype"))
             {
                 string scenarioArgument = Environment.GetCommandLineArgs().FirstOrDefault(argument => argument.StartsWith("-scenario=", StringComparison.OrdinalIgnoreCase));
@@ -271,9 +274,10 @@ namespace SeaOfUncertainty.Prototype
             map.HexChosen = OnHexChosen;
             map.ContactChosen = OnContactChosen;
             map.ContactHovered = contact => UpdateDossier(contact);
+            map.SetEdgeScroll(edgeScrollEnabled);
             map.SetState(backend.Game, actionMode, moveMode, searchMode, salvo, backend.ReducedMotion, backend.HexGridVisible);
             mapColumn.Add(map);
-            mapColumn.Add(Text($"3D COMMAND MAP  •  {backend.Game.Area.NauticalMilesPerHex} NM / HEX  •  WASD MOVE ANYTIME  •  Q/E ROTATE  •  R/F TILT  •  Z/X ZOOM  •  SHIFT FAST  •  HOME RESET", "muted"));
+            mapColumn.Add(Text($"3D COMMAND MAP  •  {backend.Game.Area.NauticalMilesPerHex} NM / HEX  •  WASD MOVE  •  C ACTIVE  •  O OBJECTIVE  •  V EDGE PAN  •  F9/F10 SAVE/RECALL VIEW  •  HOME RESET", "muted"));
             workspace.Add(mapColumn);
             dossier = Panel("dossier");
             UpdateDossier(null);
@@ -282,9 +286,18 @@ namespace SeaOfUncertainty.Prototype
 
             VisualElement bottom = El("bottom-deck");
             bottom.Add(BuildActions());
+            bottom.Add(BuildCardHand());
             bottom.Add(BuildEventFeed());
             app.Add(bottom);
             map.schedule.Execute(() => { map.Refresh(); map.Focus(); });
+            if (backend.ToolkitPendingEntropyEffect(active.Side) != null && backend.ToolkitPendingEntropyFormation(active.Side) != null)
+            {
+                if (backend.SelectedMode == OperationMode.SoloVsAi && active.Side != backend.HumanSide)
+                {
+                    while (backend.ToolkitPendingEntropyEffect(active.Side) != null) backend.ToolkitAcknowledgeEntropyEffect(active.Side);
+                }
+                else root.schedule.Execute(() => ShowEntropyPull(active.Side));
+            }
         }
 
         private VisualElement BuildTimeline()
@@ -302,7 +315,7 @@ namespace SeaOfUncertainty.Prototype
                 Button row = ActionButton($"{queueLabel}  •  READY T{formation.ReadyTime:00}\n{formation.Name}\n{formation.Kind}  •  {formation.Cohesion}", () => UpdateDossier(null));
                 row.AddToClassList("timeline-row");
                 if (formation == backend.Game.Active) row.AddToClassList("active");
-                row.tooltip = $"Activation queue position {queuePosition} • {formation.Side} • Ready T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.Ratings.Command}";
+                row.tooltip = $"Activation queue position {queuePosition} • {formation.Side} • Ready T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.EffectiveCommand}";
                 scroll.Add(row);
             }
             panel.Add(scroll);
@@ -356,6 +369,86 @@ namespace SeaOfUncertainty.Prototype
             return panel;
         }
 
+        private VisualElement BuildCardHand()
+        {
+            Side side = backend.SelectedMode == OperationMode.SoloVsAi ? backend.HumanSide : backend.Game.Active.Side;
+            var heldEntropy = backend.Game.Formations
+                .Where(formation => formation.Side == side)
+                .SelectMany(formation => (formation.ActiveEffectCardIds ?? new List<string>())
+                    .Select(id => new { Formation = formation, Card = EntropyEffectCatalog.Find(id) }))
+                .Where(item => item.Card != null)
+                .ToList();
+            IReadOnlyList<CommandResponseDefinition> responses = backend.ToolkitResponseHand(side);
+
+            VisualElement panel = Panel("card-hand");
+            VisualElement header = El("row");
+            header.Add(Text("CARD HAND", "subheading"));
+            header.Add(El("spacer"));
+            header.Add(Text($"{heldEntropy.Count} ENTROPY  •  {responses.Count} RESPONSE", "eyebrow"));
+            panel.Add(header);
+
+            ScrollView scroll = new ScrollView(ScrollViewMode.Horizontal);
+            scroll.AddToClassList("hand-scroll");
+            scroll.verticalScrollerVisibility = ScrollerVisibility.Hidden;
+            scroll.horizontalScrollerVisibility = ScrollerVisibility.Auto;
+            foreach (var held in heldEntropy)
+            {
+                FormationState formation = held.Formation;
+                EntropyEffectDefinition effect = held.Card;
+                var card = new Button(() => ShowHeldEntropyCard(formation, effect)) { focusable = true };
+                card.AddToClassList("hand-card");
+                card.AddToClassList(effect.Source.ToString().ToLowerInvariant());
+                card.Add(Text(effect.Id + "  •  " + effect.Source.ToString().ToUpperInvariant(), "hand-card-id"));
+                card.Add(Text(effect.Title.ToUpperInvariant(), "hand-card-title"));
+                card.Add(Text(effect.Effect, "hand-card-effect"));
+                card.Add(Text("ATTACHED  •  " + formation.Name.ToUpperInvariant(), "hand-card-footer"));
+                if (formation.ResolvedEffectCardIds != null && formation.ResolvedEffectCardIds.Contains(effect.Id)) card.Add(Text("RESOLVED", "hand-card-footer", "amber"));
+                scroll.Add(card);
+            }
+            foreach (CommandResponseDefinition response in responses)
+            {
+                CommandResponseDefinition cardDefinition = response;
+                var card = new Button(() =>
+                {
+                    if (cardDefinition.MechanicallySupported) ShowResponseTargets(cardDefinition);
+                    else ShowResponseHand();
+                }) { focusable = true };
+                card.AddToClassList("hand-card");
+                card.AddToClassList("response");
+                card.Add(Text(cardDefinition.Id + "  •  RESPONSE", "hand-card-id"));
+                card.Add(Text(cardDefinition.Title.ToUpperInvariant(), "hand-card-title"));
+                card.Add(Text(cardDefinition.Play, "hand-card-effect"));
+                card.Add(Text(cardDefinition.MechanicallySupported ? "CLICK TO PLAY" : "PARENT SYSTEM PENDING", "hand-card-footer"));
+                scroll.Add(card);
+            }
+            if (heldEntropy.Count == 0 && responses.Count == 0) scroll.Add(Text("No cards currently held.", "muted"));
+            panel.Add(scroll);
+            return panel;
+        }
+
+        private void ShowHeldEntropyCard(FormationState formation, EntropyEffectDefinition card)
+        {
+            VisualElement modal = Modal(card.Id + "  •  " + card.Title.ToUpperInvariant());
+            VisualElement effect = Panel("entropy-card", card.Source.ToString().ToLowerInvariant());
+            effect.Add(Text("ATTACHED TO  •  " + formation.Name.ToUpperInvariant(), "eyebrow"));
+            effect.Add(Text(card.Effect, "entropy-effect"));
+            if (!string.IsNullOrEmpty(card.Response)) effect.Add(Text("RESPONSE  •  " + card.Response, "body-copy", "amber"));
+            modal.Add(effect);
+            if (!string.IsNullOrEmpty(card.Response) && formation.HasEffect(card.Id))
+            {
+                Button respond = ActionButton("SPEND 1 COMMAND TO RESPOND", () =>
+                {
+                    backend.ToolkitRespondToEntropy(formation, card.Id);
+                    ShowGame();
+                }, "warning");
+                respond.SetEnabled(card.Id == "F-01" || card.Id == "F-02" || card.Id == "F-07");
+                modal.Add(respond);
+            }
+            if (formation == backend.Game.Active && card.Source != EntropySource.Destruction)
+                modal.Add(ActionButton("RECOVER & DISCARD THIS CARD • 2", () => { CloseOverlay(); ResolveAction(() => backend.ToolkitRecover(card.Source, card.Id)); }, "primary"));
+            modal.Add(ActionButton("CLOSE", CloseOverlay, "primary"));
+        }
+
         private void UpdateDossier(ContactState contact)
         {
             if (dossier == null) return;
@@ -369,14 +462,20 @@ namespace SeaOfUncertainty.Prototype
                 if (actionMode == ToolkitActionMode.Search)
                 {
                     int centerRange = HexCoord.Distance(backend.Game.Active.Position, contact.LastKnownPosition);
-                    dossier.Add(Text($"AREA CENTER {contact.LastKnownPosition}\nCENTER RANGE {centerRange} / {Rules.SearchRange(searchMode)}\nFOOTPRINT RADIUS {Rules.SearchAreaRadius}\nSEARCH {backend.Game.Active.EffectiveSearch}\nMODE {Rules.SearchModifier(searchMode):+0;-0;0}\n\nHidden Signature, Loud status, and exact position resolve privately.", "body-copy"));
+                    dossier.Add(Text($"AREA CENTER {contact.LastKnownPosition}\nCENTER RANGE {centerRange} / {Rules.SearchRange(searchMode)}\nFOOTPRINT RADIUS {Rules.SearchAreaRadius}\nSEARCH {backend.Game.Active.EffectiveSearch}\nMODE {backend.Game.SearchModifierFor(backend.Game.Active, searchMode):+0;-0;0}\n\nHidden Signature, Loud status, and exact position resolve privately.", "body-copy"));
                 }
                 else if (actionMode == ToolkitActionMode.Strike)
                 {
+                    if (target == null)
+                    {
+                        dossier.Add(Text("This possible Contact has no confirmed target. Search its last-known area before committing a Strike.", "body-copy", "amber"));
+                        return;
+                    }
                     int attack = backend.Game.Active.EffectiveStrike + Rules.SalvoModifier(salvo) + Rules.TargetingModifier(contact, backend.Game.AgeTwoTargetingPenalty);
-                    int defense = target.Ratings.Defense + 1 - (target.Destruction ? 1 : 0);
+                    Reaction reaction = backend.Game.ReactionFor(target);
+                    int defense = target.EffectiveDefense + (reaction == Reaction.Defend || reaction == Reaction.Evade ? 1 : 0) - (target.Destruction ? 1 : 0);
                     CombatBand band = Rules.BandFor(attack - defense);
-                    dossier.Add(Text($"ATTACK {attack}\nDEFENSE {defense}\nDIFFERENCE {attack - defense:+0;-0;0}\n\n{band.ToString().ToUpperInvariant()} BAND\n{Odds(band)}", "body-copy"));
+                    dossier.Add(Text($"ATTACK {attack}\nDEFENSE {defense}\nREACTION {reaction.ToString().ToUpperInvariant()}\nDIFFERENCE {attack - defense:+0;-0;0}\n\n{band.ToString().ToUpperInvariant()} BAND\n{Odds(band)}", "body-copy"));
                 }
                 return;
             }
@@ -389,11 +488,65 @@ namespace SeaOfUncertainty.Prototype
             stats.Add(Stat("MOVE", formation.EffectiveMove, "Maximum movement after damage and Endurance."));
             stats.Add(Stat("SEARCH", formation.EffectiveSearch, "Detection after Disruption."));
             stats.Add(Stat("STRIKE", formation.EffectiveStrike, "Offense after Destruction."));
-            stats.Add(Stat("DEFENSE", formation.Ratings.Defense, "Survivability before Reaction."));
-            stats.Add(Stat("SIGNATURE", formation.Ratings.Signature + (formation.Loud ? 1 : 0), "Higher is easier to detect."));
-            stats.Add(Stat("COMMAND", formation.Ratings.Command, "Same-Time initiative and autonomy."));
+            stats.Add(Stat("DEFENSE", formation.EffectiveDefense, "Survivability before Reaction and attached effects."));
+            stats.Add(Stat("SIGNATURE", formation.EffectiveSignature, "Higher is easier to detect."));
+            stats.Add(Stat("COMMAND", formation.EffectiveCommand, "Same-Time initiative and autonomy after attached effects."));
             dossier.Add(stats);
-            dossier.Add(Text($"READY T{formation.ReadyTime:00}\nENDURANCE {formation.Endurance}\nDAMAGE {formation.Damage}\nCOHESION {formation.Cohesion}\nFRICTION {(formation.Friction ? "MARKED" : "CLEAR")}\nDISRUPTION {(formation.Disruption ? "MARKED" : "CLEAR")}\nDESTRUCTION {(formation.Destruction ? "MARKED" : "CLEAR")}", "body-copy"));
+            dossier.Add(Text($"MISSION {formation.Mission.ToString().ToUpperInvariant()}\nREADY T{formation.ReadyTime:00}\nENDURANCE {formation.Endurance}\nDAMAGE {formation.Damage}\nCOHESION {formation.Cohesion}\nFRICTION {(formation.Friction ? "MARKED" : "CLEAR")}\nDISRUPTION {(formation.Disruption ? "MARKED" : "CLEAR")}\nDESTRUCTION {(formation.Destruction ? "MARKED" : "CLEAR")}{(formation.OrderlyWithdrawalReady ? "\nORDERLY WITHDRAWAL PREPARED" : string.Empty)}", "body-copy"));
+            foreach (string cardId in formation.ActiveEffectCardIds ?? new List<string>())
+            {
+                EntropyEffectDefinition card = EntropyEffectCatalog.Find(cardId);
+                if (card == null) continue;
+                VisualElement effect = Panel("attached-effect", card.Source.ToString().ToLowerInvariant());
+                effect.Add(Text($"{card.Id}  â€¢  {card.Source.ToString().ToUpperInvariant()}", "eyebrow"));
+                effect.Add(Text(card.Title.ToUpperInvariant(), "subheading"));
+                effect.Add(Text(card.Effect, "muted"));
+                if (!EntropyEffectCatalog.IsFullyMechanicallySupported(card)) effect.Add(Text("NOT FULLY ACTIVE • PARENT SYSTEM PENDING", "muted", "amber"));
+                dossier.Add(effect);
+            }
+        }
+
+        private void ShowEntropyPull(Side side, Action onComplete = null)
+        {
+            EntropyEffectDefinition card = backend.ToolkitPendingEntropyEffect(side);
+            FormationState formation = backend.ToolkitPendingEntropyFormation(side);
+            if (card == null || formation == null)
+            {
+                entropyRevealBlocking = false;
+                onComplete?.Invoke();
+                return;
+            }
+            entropyRevealBlocking = true;
+            VisualElement modal = Modal(card.Source.ToString().ToUpperInvariant() + " EFFECT DRAWN");
+            VisualElement effect = Panel("entropy-card", card.Source.ToString().ToLowerInvariant());
+            effect.Add(Text(card.Id, "entropy-card-id"));
+            effect.Add(Text(card.Title.ToUpperInvariant(), "front-title"));
+            effect.Add(Text("ATTACHED TO  â€¢  " + formation.Name.ToUpperInvariant(), "eyebrow"));
+            effect.Add(Text(card.Effect, "entropy-effect"));
+            if (!EntropyEffectCatalog.IsFullyMechanicallySupported(card)) effect.Add(Text("This card is tracked and displayed, but some or all of its parent Mission, Synchronization, Support, Replenish, or uncertainty-geometry system is not active yet.", "body-copy", "amber"));
+            if (!string.IsNullOrEmpty(card.Response)) effect.Add(Text("RESPONSE  â€¢  " + card.Response, "body-copy", "amber"));
+            modal.Add(effect);
+            if (!string.IsNullOrEmpty(card.Response) && formation.HasEffect(card.Id))
+            {
+                Button respond = ActionButton("SPEND 1 COMMAND TO RESPOND", () =>
+                {
+                    backend.ToolkitRespondToEntropy(formation, card.Id);
+                    ShowEntropyPull(side, onComplete);
+                }, "warning");
+                respond.SetEnabled(card.Id == "F-01" || card.Id == "F-02" || card.Id == "F-07");
+                modal.Add(respond);
+            }
+            modal.Add(ActionButton("ACKNOWLEDGE CARD", () =>
+            {
+                backend.ToolkitAcknowledgeEntropyEffect(side);
+                if (backend.ToolkitPendingEntropyEffect(side) != null) ShowEntropyPull(side, onComplete);
+                else
+                {
+                    entropyRevealBlocking = false;
+                    CloseOverlay();
+                    onComplete?.Invoke();
+                }
+            }, "primary"));
         }
 
         private void SelectAction(ToolkitActionMode mode)
@@ -416,9 +569,14 @@ namespace SeaOfUncertainty.Prototype
         private void OnContactChosen(ContactState contact)
         {
             FormationState target = backend.Game.Find(contact.TargetId);
-            if (actionMode == ToolkitActionMode.Search) ResolveAction(() => backend.ToolkitSearch(target, searchMode));
+            if (actionMode == ToolkitActionMode.Search)
+            {
+                if (target == null) ResolveAction(() => backend.ToolkitSearchHex(contact.LastKnownPosition, searchMode));
+                else ResolveAction(() => backend.ToolkitSearch(target, searchMode));
+            }
             else if (actionMode == ToolkitActionMode.Strike)
             {
+                if (target == null) { UpdateDossier(contact); return; }
                 if (salvo == Salvo.Heavy) ConfirmHeavy(target); else ResolveAction(() => backend.ToolkitStrike(target, salvo));
             }
         }
@@ -430,6 +588,16 @@ namespace SeaOfUncertainty.Prototype
             if (backend.IsComplete) { ShowResults(); return; }
             if (!backend.LastToolkitActionSucceeded) { ShowGame(); return; }
             actionMode = ToolkitActionMode.None;
+            if (backend.ToolkitPendingEntropyEffect(actingSide) != null)
+            {
+                ShowEntropyPull(actingSide, () => ContinueAfterResolvedAction(actingSide));
+                return;
+            }
+            ContinueAfterResolvedAction(actingSide);
+        }
+
+        private void ContinueAfterResolvedAction(Side actingSide)
+        {
             if (backend.SelectedMode == OperationMode.SoloVsAi)
             {
                 if (backend.IsAiTurn) BeginAiSequence();
@@ -488,7 +656,8 @@ namespace SeaOfUncertainty.Prototype
             Toggle motion = new Toggle("Reduced motion") { value = backend.ReducedMotion };
             Toggle grid = new Toggle("Show hex grid on the map") { value = backend.HexGridVisible };
             modal.Add(age); modal.Add(audio); modal.Add(contrast); modal.Add(motion); modal.Add(grid);
-            modal.Add(ActionButton(Screen.fullScreen ? "SWITCH TO WINDOWED" : "SWITCH TO FULLSCREEN", () => { Screen.fullScreen = !Screen.fullScreen; ShowSettings(); }));
+            modal.Add(Text($"CURRENT {Screen.width} × {Screen.height}  •  DESKTOP {Display.main.systemWidth} × {Display.main.systemHeight}", "muted"));
+            modal.Add(ActionButton(Screen.fullScreen ? "SWITCH TO WINDOWED" : "SWITCH TO NATIVE FULLSCREEN", ToggleFullscreen));
             modal.Add(ActionButton("APPLY", () => { backend.ToolkitSetSettings(age.value, audio.value, contrast.value, motion.value, grid.value); CloseOverlay(); if (view == View.Game) ShowGame(); }, "primary"));
             modal.Add(ActionButton("CANCEL", CloseOverlay));
         }
@@ -496,7 +665,7 @@ namespace SeaOfUncertainty.Prototype
         private void ShowRules()
         {
             VisualElement modal = Modal("FIELD MANUAL");
-            modal.Add(Text("COMMAND MODES\nSolo vs AI assigns Blue to the player and Red to the deterministic OPFOR commander. Local Hotseat uses secure handoffs between two players. Both modes use identical rules and Ready-Time sequencing.\n\nSCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nMAP CAMERA\nWASD moves the camera anywhere on the operation screen; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. Middle-drag pans, right-drag freely orbits, and the wheel zooms.\n\nMAP GRID\nUse HEXES OFF / HEXES ON in the command bar, or press G, to toggle the persistent hex overlay. The preference is saved between sessions.\n\nREADY TIME\nThere are no player turns. The earliest formation acts. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable formation order. If only one side is Ready, it continues.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Littoral adds one Ready-Time.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE\nRange depends on formation and Light / Standard / Heavy commitment; the selected range is shown before commitment.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY\nFriction delays complex actions. Disruption impairs information. Destruction impairs offense.", "body-copy"));
+            modal.Add(Text("COMMAND MODES\nSolo vs AI assigns Blue to the player and Red to the deterministic OPFOR commander. Local Hotseat uses secure handoffs between two players. Both modes use identical rules and Ready-Time sequencing.\n\nSCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nMAP CAMERA\nWASD moves with smooth acceleration; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. C focuses the active formation, O focuses the objective, V toggles optional edge scrolling, and F9/F10 save/recall a command view. Middle-drag pans, right-drag freely orbits, and the wheel zooms.\n\nMAP GRID\nUse HEXES OFF / HEXES ON in the command bar, or press G, to toggle the persistent hex overlay. The preference is saved between sessions.\n\nREADY TIME\nThere are no player turns. The earliest formation acts. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable formation order. If only one side is Ready, it continues.\n\nSTANDING MISSIONS\nEach Formation tracks a current Mission task. Rapid Replan changes that task without occupying Command and adds +1 Time when the Formation next schedules Ready.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Littoral adds one Ready-Time.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE AND REACTION\nRange depends on formation and Light / Standard / Heavy commitment; the selected range is shown before commitment. Defenders normally Defend automatically. Orderly Withdrawal prepares one Formation to Evade its next incoming Strike, gain +1 Defense, and move up to two valid hexes away afterward.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY AND CARD HAND\nEvery Entropy event draws a physical card, even if that source is already marked. Attached effects stack and appear with Command Responses in the active side's Card Hand at the bottom of the interface. Recover selects and discards one Friction or Disruption card; a source remains marked while another matching card remains. Destruction cards await repair or reorganization.", "body-copy"));
             modal.Add(ActionButton("CLOSE", CloseOverlay, "primary"));
         }
 
@@ -510,14 +679,100 @@ namespace SeaOfUncertainty.Prototype
             modal.Add(ActionButton("CLOSE", CloseOverlay, "primary"));
         }
 
+        private void ShowResponseHand()
+        {
+            Side side = backend.Game.Active.Side;
+            VisualElement modal = Modal(side.ToString().ToUpperInvariant() + " COMMAND RESPONSES");
+            IReadOnlyList<CommandResponseDefinition> hand = backend.ToolkitResponseHand(side);
+            if (hand.Count == 0) modal.Add(Text("No Command Responses remain in hand.", "body-copy"));
+            ScrollView scroll = new ScrollView();
+            scroll.AddToClassList("scroll");
+            foreach (CommandResponseDefinition card in hand)
+            {
+                VisualElement response = Panel("attached-effect");
+                response.Add(Text(card.Id + "  •  COMMAND RESPONSE", "eyebrow"));
+                response.Add(Text(card.Title.ToUpperInvariant(), "subheading"));
+                response.Add(Text(card.Play + (string.IsNullOrEmpty(card.Cost) ? string.Empty : "\nCOST  •  " + card.Cost), "body-copy"));
+                Button play = ActionButton(card.MechanicallySupported ? "SELECT TARGET & PLAY" : "SYSTEM NOT YET ACTIVE", () => ShowResponseTargets(card), card.MechanicallySupported ? "primary" : null);
+                play.SetEnabled(card.MechanicallySupported);
+                response.Add(play);
+                scroll.Add(response);
+            }
+            modal.Add(scroll);
+            modal.Add(ActionButton("CLOSE", CloseOverlay));
+        }
+
+        private void ShowResponseTargets(CommandResponseDefinition card)
+        {
+            Side side = backend.Game.Active.Side;
+            VisualElement modal = Modal(card.Id + "  •  " + card.Title.ToUpperInvariant());
+            modal.Add(Text(card.Play + (string.IsNullOrEmpty(card.Cost) ? string.Empty : "\nCOST  •  " + card.Cost), "body-copy"));
+            if (card.Target == ResponseTarget.Contact)
+            {
+                foreach (ContactState contact in backend.Game.Contacts.Where(candidate => candidate.Owner == side && !candidate.IsLost))
+                {
+                    ContactState selected = contact;
+                    modal.Add(ActionButton($"{selected.Summary}  •  {selected.LastKnownPosition}", () => PlayResponse(card, null, selected, null)));
+                }
+            }
+            else if (card.Target == ResponseTarget.Hex)
+            {
+                modal.Add(Text("Select a friendly Formation's current hex as the False Contact location.", "muted"));
+                foreach (FormationState formation in backend.Game.Formations.Where(candidate => candidate.Side == side && !candidate.IsDestroyed))
+                {
+                    FormationState selected = formation;
+                    modal.Add(ActionButton($"{selected.Name.ToUpperInvariant()}  •  HEX {selected.Position}", () => PlayResponse(card, null, null, selected.Position)));
+                }
+            }
+            else
+            {
+                foreach (FormationState formation in backend.Game.Formations.Where(candidate => candidate.Side == side && !candidate.IsDestroyed))
+                {
+                    FormationState selected = formation;
+                    modal.Add(ActionButton($"{selected.Name.ToUpperInvariant()}  •  MISSION {selected.Mission.ToString().ToUpperInvariant()}  •  READY T{selected.ReadyTime:00}", () =>
+                    {
+                        if (card.Id == "C-04") ShowMissionChoices(card, selected);
+                        else PlayResponse(card, selected, null, null);
+                    }));
+                }
+            }
+            modal.Add(ActionButton("BACK TO HAND", ShowResponseHand));
+        }
+
+        private void PlayResponse(CommandResponseDefinition card, FormationState formation, ContactState contact, HexCoord? hex)
+        {
+            backend.ToolkitPlayResponse(card.Id, formation, contact, hex);
+            if (backend.LastToolkitActionSucceeded) ShowGame(); else ShowResponseTargets(card);
+        }
+
+        private void ShowMissionChoices(CommandResponseDefinition card, FormationState formation)
+        {
+            VisualElement modal = Modal(card.Id + "  •  SELECT NEW MISSION");
+            modal.Add(Text($"{formation.Name.ToUpperInvariant()} currently has Mission {formation.Mission}. Rapid Replan changes its task without occupying Command; its next Ready scheduling receives +1 Time.", "body-copy"));
+            ActionKind[] playableMissions = { ActionKind.Move, ActionKind.Search, ActionKind.Strike, ActionKind.Recover, ActionKind.Hold };
+            foreach (ActionKind mission in playableMissions)
+            {
+                ActionKind selectedMission = mission;
+                Button choice = ActionButton(selectedMission.ToString().ToUpperInvariant(), () =>
+                {
+                    backend.ToolkitPlayResponse(card.Id, formation, null, null, selectedMission);
+                    if (backend.LastToolkitActionSucceeded) ShowGame(); else ShowMissionChoices(card, formation);
+                }, formation.Mission == selectedMission ? "selected" : null);
+                choice.SetEnabled(formation.Mission != selectedMission);
+                modal.Add(choice);
+            }
+            modal.Add(ActionButton("BACK TO FORMATIONS", () => ShowResponseTargets(card)));
+        }
+
         private void ConfirmHeavy(FormationState target)
         {
             ContactState contact = backend.Game.ContactFor(backend.Game.Active.Side, target.Id);
             int attack = backend.Game.Active.EffectiveStrike + 2 + Rules.TargetingModifier(contact, backend.Game.AgeTwoTargetingPenalty);
-            int defense = target.Ratings.Defense + 1 - (target.Destruction ? 1 : 0);
+            Reaction reaction = backend.Game.ReactionFor(target);
+            int defense = target.EffectiveDefense + (reaction == Reaction.Defend || reaction == Reaction.Evade ? 1 : 0) - (target.Destruction ? 1 : 0);
             CombatBand band = Rules.BandFor(attack - defense);
             VisualElement modal = Modal("CONFIRM HEAVY SALVO");
-            modal.Add(Text($"Heavy capability will be expended.\n\nATTACK {attack} vs DEFENSE {defense}\n{band.ToString().ToUpperInvariant()} BAND\n{Odds(band)}", "body-copy"));
+            modal.Add(Text($"Heavy capability will be expended.\n\nATTACK {attack} vs DEFENSE {defense}\nREACTION {reaction.ToString().ToUpperInvariant()}\n{band.ToString().ToUpperInvariant()} BAND\n{Odds(band)}", "body-copy"));
             modal.Add(ActionButton("COMMIT HEAVY SALVO", () => { CloseOverlay(); ResolveAction(() => backend.ToolkitStrike(target, Salvo.Heavy)); }, "warning"));
             modal.Add(ActionButton("CANCEL", CloseOverlay));
         }
@@ -587,6 +842,7 @@ namespace SeaOfUncertainty.Prototype
             {
                 if (backend.SelectedMode == OperationMode.SoloVsAi) top.Add(Text("SOLO • BLUE COMMAND", "eyebrow"));
                 top.Add(Text($"NOW READY  •  {backend.Game.Active.Name.ToUpperInvariant()}", "subheading"));
+                top.Add(ActionButton($"RESPONSES {backend.ToolkitResponseHand(backend.Game.Active.Side).Count}", ShowResponseHand));
                 top.Add(ActionButton(backend.HexGridVisible ? "HEXES ON" : "HEXES OFF", () =>
                 {
                     backend.ToolkitToggleHexGrid();
@@ -616,9 +872,20 @@ namespace SeaOfUncertainty.Prototype
 
         private void OnGlobalKeyDown(KeyDownEvent evt)
         {
-            if (evt.keyCode == KeyCode.Escape) { if (root.Q<VisualElement>("overlay") != null) CloseOverlay(); else if (view == View.Game) ShowPause(); return; }
+            if (evt.keyCode == KeyCode.Escape)
+            {
+                if (entropyRevealBlocking) { evt.StopPropagation(); return; }
+                if (root.Q<VisualElement>("overlay") != null) CloseOverlay(); else if (view == View.Game) ShowPause();
+                return;
+            }
             if (view != View.Game || root.Q<VisualElement>("overlay") != null) return;
             if (map != null && map.SetCameraKey(evt.keyCode, true)) { evt.StopPropagation(); return; }
+            if (evt.keyCode == KeyCode.C) { map?.FocusActiveFormation(); evt.StopPropagation(); return; }
+            if (evt.keyCode == KeyCode.O) { map?.FocusObjective(); evt.StopPropagation(); return; }
+            if (evt.keyCode == KeyCode.V) { edgeScrollEnabled = !edgeScrollEnabled; map?.SetEdgeScroll(edgeScrollEnabled); evt.StopPropagation(); return; }
+            if (evt.keyCode == KeyCode.F9) { map?.SaveCameraView(); evt.StopPropagation(); return; }
+            if (evt.keyCode == KeyCode.F10) { map?.RecallCameraView(); evt.StopPropagation(); return; }
+            if (evt.keyCode == KeyCode.Home) { map?.ResetCameraView(); evt.StopPropagation(); return; }
             if (evt.keyCode == KeyCode.G) { backend.ToolkitToggleHexGrid(); ShowGame(); return; }
             if (evt.keyCode == KeyCode.Alpha1 || evt.keyCode == KeyCode.Keypad1) SelectAction(ToolkitActionMode.Move);
             else if (evt.keyCode == KeyCode.Alpha2 || evt.keyCode == KeyCode.Keypad2) SelectAction(ToolkitActionMode.Search);
@@ -633,7 +900,30 @@ namespace SeaOfUncertainty.Prototype
             if (map.SetCameraKey(evt.keyCode, false)) evt.StopPropagation();
         }
 
-        private void OnGeometryChanged(GeometryChangedEvent evt) => ApplyResponsiveClass(evt.newRect.width);
+        private void OnGeometryChanged(GeometryChangedEvent evt)
+        {
+            ApplyResponsiveClass(evt.newRect.width);
+            EnsureNativeFullscreenResolution();
+        }
+
+        private void ToggleFullscreen()
+        {
+            if (Screen.fullScreen)
+            {
+                int width = Mathf.Min(1600, Display.main.systemWidth);
+                int height = Mathf.Min(900, Display.main.systemHeight);
+                Screen.SetResolution(width, height, FullScreenMode.Windowed);
+            }
+            else Screen.SetResolution(Display.main.systemWidth, Display.main.systemHeight, FullScreenMode.FullScreenWindow);
+            root.schedule.Execute(ShowSettings).ExecuteLater(150);
+        }
+
+        private static void EnsureNativeFullscreenResolution()
+        {
+            if (!Screen.fullScreen || Display.main == null) return;
+            if (Screen.width != Display.main.systemWidth || Screen.height != Display.main.systemHeight || Screen.fullScreenMode != FullScreenMode.FullScreenWindow)
+                Screen.SetResolution(Display.main.systemWidth, Display.main.systemHeight, FullScreenMode.FullScreenWindow);
+        }
         private void ApplyResponsiveClass(float width)
         {
             if (app == null) return;

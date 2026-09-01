@@ -32,7 +32,7 @@ namespace SeaOfUncertainty.Core
                 .ToList();
 
             ContactState strikeContact = contacts
-                .Where(contact => game.Find(contact.TargetId) != null && HexCoord.Distance(actor.Position, contact.LastKnownPosition) <= Rules.StrikeRange(actor.Kind, Salvo.Standard))
+                .Where(contact => game.Find(contact.TargetId) != null && SelectSalvo(actor, contact).HasValue)
                 .OrderByDescending(contact => contact.Identity)
                 .ThenByDescending(contact => contact.Location)
                 .ThenBy(contact => contact.Age)
@@ -40,8 +40,8 @@ namespace SeaOfUncertainty.Core
                 .FirstOrDefault();
             if (strikeContact != null)
             {
-                bool heavyAvailable = strikeContact.Identity == IdentityQuality.Identified && strikeContact.Location == LocationQuality.High && !actor.WeaponExpended && actor.Endurance != Endurance.Critical && actor.Damage != DamageState.Crippled;
-                return new AiDecision { Action = ActionKind.Strike, TargetId = strikeContact.TargetId, Salvo = heavyAvailable ? Salvo.Heavy : Salvo.Standard, Rationale = "Engage the strongest usable Contact already inside weapon range." };
+                Salvo selectedSalvo = SelectSalvo(actor, strikeContact).Value;
+                return new AiDecision { Action = ActionKind.Strike, TargetId = strikeContact.TargetId, Salvo = selectedSalvo, Rationale = selectedSalvo == Salvo.Heavy ? "Commit the expendable Heavy capability to a high-quality identified Contact inside extended range." : "Engage the strongest usable owned Contact already inside weapon range." };
             }
 
             if (actor.Friction || actor.Disruption)
@@ -50,8 +50,9 @@ namespace SeaOfUncertainty.Core
             ContactState searchContact = contacts.FirstOrDefault(contact => HexCoord.Distance(actor.Position, contact.LastKnownPosition) <= Rules.SearchRange(actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active));
             if (searchContact != null && (actor.Kind == FormationKind.Submarine || actor.EffectiveSearch >= 3 || searchContact.Age > 0 || searchContact.Location < LocationQuality.High))
             {
-                SearchMode mode = actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active;
-                return new AiDecision { Action = ActionKind.Search, Hex = searchContact.LastKnownPosition, SearchMode = mode, Rationale = "Refresh the best available Contact without consulting hidden enemy state." };
+                bool needsFocused = actor.Kind != FormationKind.Submarine && game.Sides[actor.Side].CommandSlots > 0 && (searchContact.Age >= 2 || searchContact.Location == LocationQuality.Low);
+                SearchMode mode = actor.Kind == FormationKind.Submarine ? SearchMode.Passive : needsFocused ? SearchMode.Focused : SearchMode.Active;
+                return new AiDecision { Action = ActionKind.Search, Hex = searchContact.LastKnownPosition, SearchMode = mode, Rationale = needsFocused ? "Use available Command to improve a stale or low-quality owned Contact." : "Refresh the best available Contact without consulting hidden enemy state." };
             }
 
             AiDecision movement = ChooseObjectiveMove(game, actor);
@@ -96,6 +97,7 @@ namespace SeaOfUncertainty.Core
                     if (movement < 1 || movement > allowance) continue;
                     OperationalTerrain terrain = game.Area.TerrainAt(candidate);
                     if (terrain == OperationalTerrain.Land && actor.Kind != FormationKind.AirGroup) continue;
+                    if (game.Area.RestrictedAreas != null && game.Area.RestrictedAreas.Any(region => region.Hexes.Contains(candidate))) continue;
                     candidates.Add(candidate);
                 }
             }
@@ -107,6 +109,16 @@ namespace SeaOfUncertainty.Core
                 .FirstOrDefault();
             if (candidates.Count == 0 || HexCoord.Distance(destination, game.Area.Objective) >= currentDistance) return null;
             return new AiDecision { Action = ActionKind.Move, Hex = destination, MoveMode = mode, Rationale = "Improve position toward the public operational objective." };
+        }
+
+        private static Salvo? SelectSalvo(FormationState actor, ContactState contact)
+        {
+            int distance = HexCoord.Distance(actor.Position, contact.LastKnownPosition);
+            bool heavyAvailable = contact.Identity == IdentityQuality.Identified && contact.Location == LocationQuality.High && actor.CanHeavySalvo;
+            if (heavyAvailable && distance <= Rules.StrikeRange(actor.Kind, Salvo.Heavy)) return Salvo.Heavy;
+            if (distance <= Rules.StrikeRange(actor.Kind, Salvo.Standard)) return Salvo.Standard;
+            if (distance <= Rules.StrikeRange(actor.Kind, Salvo.Light)) return Salvo.Light;
+            return null;
         }
     }
 }

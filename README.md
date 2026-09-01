@@ -56,6 +56,10 @@ Keyboard controls:
 - `Tab` and `Shift+Tab`: move through controls;
 - `1`–`5`: Move, Search, Strike, Recover, and Hold;
 - `G`: toggle the persistent map hex grid;
+- `C`: focus the active formation;
+- `O`: focus the operational objective;
+- `V`: toggle optional edge scrolling;
+- `F9` / `F10`: save and recall a command-camera view;
 - arrow keys while the tactical map is focused: move the map cursor;
 - `Enter` or `Space`: commit the highlighted map selection;
 - `Escape`: close an overlay or open the operation menu.
@@ -66,15 +70,17 @@ Keyboard controls:
 - middle-button drag: pan;
 - right-button drag: freely rotate and tilt the camera;
 - left click: select a hex or eligible Contact;
-- `Home` while the map is focused: reset the camera.
+- `Home`: reset the camera.
 
-Full keyboard camera controls (click the map to focus it):
+Full keyboard camera controls work anywhere on the operation screen when no modal is open:
 
 - `W/A/S/D`: move across the operational area;
 - `Q/E`: rotate left/right;
 - `R/F`: tilt up/down;
 - `Z/X` or keypad `+/-`: zoom in/out;
 - hold `Shift`: accelerate keyboard camera movement.
+
+The 3D theater uses multi-scale procedural surface normals, sun glint, shallow-water coloration, bathymetric contours, coastline foam, layered terrain relief, horizon haze, moving cloud shadows, and data-driven weather hooks. Map-space labels and distinct port/airfield geometry remain presentation-only and do not alter hex terrain or rules.
 
 The command bar's **HEXES OFF / HEXES ON** control provides the same persistent grid toggle, and the preference is saved between sessions.
 

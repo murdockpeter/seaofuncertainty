@@ -26,11 +26,13 @@ namespace SeaOfUncertainty.Prototype
         private readonly Label hexReadout;
         private readonly Label headingReadout;
         private bool reducedMotion;
+        private Vector2 edgePanInput;
 
         public Action<HexCoord> HexChosen;
         public Action<ContactState> ContactChosen;
         public Action<ContactState> ContactHovered;
         public bool CameraInputActive => cameraKeys.Count > 0;
+        public bool EdgeScrollEnabled { get; private set; }
 
         public TacticalMapElement()
         {
@@ -48,11 +50,15 @@ namespace SeaOfUncertainty.Prototype
             Add(commandHud);
             RegisterCallback<AttachToPanelEvent>(_ => EnsurePresentation());
             RegisterCallback<DetachFromPanelEvent>(_ => DisposePresentation());
-            RegisterCallback<GeometryChangedEvent>(_ => UpdateMarkers());
+            RegisterCallback<GeometryChangedEvent>(evt =>
+            {
+                presentation?.Resize(Mathf.RoundToInt(evt.newRect.width), Mathf.RoundToInt(evt.newRect.height));
+                UpdateMarkers();
+            });
             RegisterCallback<PointerDownEvent>(OnPointerDown);
             RegisterCallback<PointerMoveEvent>(OnPointerMove);
             RegisterCallback<PointerUpEvent>(OnPointerUp);
-            RegisterCallback<PointerLeaveEvent>(_ => { ContactHovered?.Invoke(null); presentation?.SetHoverHex(null); UpdateReadout(null); });
+            RegisterCallback<PointerLeaveEvent>(_ => { edgePanInput = Vector2.zero; ContactHovered?.Invoke(null); presentation?.SetHoverHex(null); UpdateReadout(null); });
             RegisterCallback<WheelEvent>(OnWheel);
             RegisterCallback<KeyDownEvent>(OnKeyDown);
             RegisterCallback<KeyUpEvent>(OnKeyUp);
@@ -171,6 +177,7 @@ namespace SeaOfUncertainty.Prototype
                 evt.StopPropagation();
                 return;
             }
+            UpdateEdgePan(evt.localPosition);
             if (presentation != null && presentation.TryPickHex(evt.localPosition, contentRect, out HexCoord hoverHex))
             {
                 presentation.SetHoverHex(hoverHex);
@@ -240,17 +247,59 @@ namespace SeaOfUncertainty.Prototype
 
         public void ClearCameraKeys() => cameraKeys.Clear();
 
+        public void SetEdgeScroll(bool enabled)
+        {
+            EdgeScrollEnabled = enabled;
+            if (!enabled) edgePanInput = Vector2.zero;
+            UpdateReadout(null);
+        }
+
+        public void FocusActiveFormation()
+        {
+            if (game?.Active == null) return;
+            presentation?.FocusHex(game.Active.Position);
+            UpdateMarkers(); UpdateReadout(game.Active.Position);
+        }
+
+        public void FocusObjective()
+        {
+            if (game?.Area == null) return;
+            presentation?.FocusHex(game.Area.Objective);
+            UpdateMarkers(); UpdateReadout(game.Area.Objective);
+        }
+
+        public void SaveCameraView() => presentation?.SaveCameraView();
+        public bool RecallCameraView()
+        {
+            bool recalled = presentation != null && presentation.RecallCameraView();
+            if (recalled) { UpdateMarkers(); UpdateReadout(null); }
+            return recalled;
+        }
+
+        public void ResetCameraView() { presentation?.ResetCamera(); UpdateMarkers(); UpdateReadout(null); }
+
+        private void UpdateEdgePan(Vector2 pointer)
+        {
+            edgePanInput = Vector2.zero;
+            if (!EdgeScrollEnabled || contentRect.width < 10f || contentRect.height < 10f) return;
+            const float edge = 18f;
+            if (pointer.x <= edge) edgePanInput.x = -Mathf.Clamp01((edge - pointer.x) / edge);
+            else if (pointer.x >= contentRect.width - edge) edgePanInput.x = Mathf.Clamp01((pointer.x - (contentRect.width - edge)) / edge);
+            if (pointer.y <= edge) edgePanInput.y = Mathf.Clamp01((edge - pointer.y) / edge);
+            else if (pointer.y >= contentRect.height - edge) edgePanInput.y = -Mathf.Clamp01((pointer.y - (contentRect.height - edge)) / edge);
+        }
+
         private void TickPresentation()
         {
             presentation?.Tick(Time.deltaTime);
-            if (presentation == null || cameraKeys.Count == 0) return;
-            float right = Axis(KeyCode.D, KeyCode.A);
-            float forward = Axis(KeyCode.W, KeyCode.S);
+            if (presentation == null) return;
+            float right = Axis(KeyCode.D, KeyCode.A) + edgePanInput.x;
+            float forward = Axis(KeyCode.W, KeyCode.S) + edgePanInput.y;
             float yaw = Axis(KeyCode.E, KeyCode.Q);
             float pitch = Axis(KeyCode.R, KeyCode.F);
             float zoom = Axis(KeyCode.X, KeyCode.Z) + Axis(KeyCode.KeypadMinus, KeyCode.KeypadPlus);
             bool fast = cameraKeys.Contains(KeyCode.LeftShift) || cameraKeys.Contains(KeyCode.RightShift);
-            if (Mathf.Approximately(right, 0f) && Mathf.Approximately(forward, 0f) && Mathf.Approximately(yaw, 0f) && Mathf.Approximately(pitch, 0f) && Mathf.Approximately(zoom, 0f)) return;
+            if (Mathf.Approximately(right, 0f) && Mathf.Approximately(forward, 0f) && Mathf.Approximately(yaw, 0f) && Mathf.Approximately(pitch, 0f) && Mathf.Approximately(zoom, 0f) && !presentation.CameraIsSettling) return;
             presentation.FlyCamera(right, forward, yaw, pitch, zoom, Time.deltaTime, fast);
             UpdateMarkers();
             UpdateReadout(null);
@@ -269,7 +318,7 @@ namespace SeaOfUncertainty.Prototype
         private void UpdateReadout(HexCoord? hex)
         {
             string overlay = actionMode == ToolkitActionMode.Move ? "MOVE AREA" : actionMode == ToolkitActionMode.Search ? "SEARCH COVERAGE" : actionMode == ToolkitActionMode.Strike ? "STRIKE RANGE" : "COMMAND VIEW";
-            if (headingReadout != null) headingReadout.text = presentation == null ? "NORTH 000°" : $"HDG {presentation.Heading:000}°  •  PITCH {presentation.CameraPitch:00}°  •  {overlay}";
+            if (headingReadout != null) headingReadout.text = presentation == null ? "NORTH 000°" : $"HDG {presentation.Heading:000}°  •  PITCH {presentation.CameraPitch:00}°  •  EDGE {(EdgeScrollEnabled ? "ON" : "OFF")}  •  {overlay}";
             if (hexReadout == null) return;
             if (!hex.HasValue || game?.Active == null) { hexReadout.text = $"{game?.Area?.NauticalMilesPerHex ?? 20} NM HEX SCALE"; return; }
             int range = game.Area.NauticalMiles(game.Active.Position, hex.Value);
@@ -310,7 +359,7 @@ namespace SeaOfUncertainty.Prototype
         {
             if (game?.Active == null || contact == null) return false;
             if (HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) > Rules.StrikeRange(game.Active.Kind, salvo)) return false;
-            return salvo != Salvo.Heavy || !game.Active.WeaponExpended && game.Active.Endurance != Endurance.Critical && game.Active.Damage != DamageState.Crippled;
+            return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
         }
 
         private bool SearchEligible(ContactState contact) => game?.Active != null && contact != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= Rules.SearchRange(searchMode);

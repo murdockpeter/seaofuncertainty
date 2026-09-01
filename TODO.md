@@ -13,7 +13,7 @@ Status convention:
 Standing evolution criteria for every meaningful implementation pass:
 
 - [ ] Improve an appropriate aspect of land, sea, lighting, atmosphere, models, effects, or other 3D presentation while preserving operational readability.
-- [ ] Improve an appropriate aspect of formation modeling—silhouette, proportions, materials, detail, animation, effects, or zoom readability—while preserving side and type recognition.
+- [ ] Formation-counter evolution is currently parked: preserve the approved counters unchanged until art direction explicitly reopens them.
 - [ ] When the pass touches gameplay or provides a relevant opportunity, improve or measurably evaluate Solo vs AI decision quality, information discipline, strategic variety, explainability, or diagnostics.
 - [ ] Keep AI bound to the same authoritative rules and continuous Ready-Time scheduler, without undisclosed bonuses or hidden-information access.
 
@@ -98,6 +98,7 @@ Standing visual criterion: every implementation pass should include an appropria
 - [x] Implement mouse selection, middle-drag pan, continuous right-drag orbit/tilt, wheel zoom, and camera reset.
 - [x] Expand to full command-camera control with WASD movement, continuous orbit/tilt, keyboard zoom, speed boost, and theater bounds.
 - [x] Route command-camera keys game-wide during operation play so WASD remains responsive when non-map UI previously retained focus.
+- [x] Add smooth camera acceleration/deceleration, optional edge scrolling, active/objective focus commands, and save/recall command views.
 - [x] Resize and left-align formation timeline typography so long names and readiness details remain legible.
 - [x] Prevent clicks through UI and resolve ambiguous overlapping map selections consistently.
 - [x] Add 3D hovered-hex highlighting and legal-movement preview vectors.
@@ -110,8 +111,8 @@ Standing visual criterion: every implementation pass should include an appropria
 - [x] Create a formation-view layer that reads state without owning gameplay logic.
 - [x] Create prototype 3D representations for surface groups, carrier groups, air groups, and submarines.
 - [x] Replace stretched-cube formation blockouts with tapered multivessel carrier/surface silhouettes, detailed submarine geometry, and a recognizable swept-wing aircraft profile.
-- [ ] Add production-quality generated or licensed formation meshes with consistent physical proportions and asset provenance.
-- [ ] Add formation-model material variation, markings, wakes, propulsion cues, and restrained idle motion appropriate to each domain.
+- [ ] **Parked by current art direction:** Add production-quality generated or licensed formation meshes with consistent physical proportions and asset provenance; retain the present platform counters until explicitly revisited.
+- [ ] **Parked by current art direction:** Add further formation-counter material, marking, wake, propulsion, or idle-motion changes; retain the present platform counters until explicitly revisited.
 - [x] Use visual offsets within a hex without changing the authoritative hex position.
 - [x] Define selection rings, side indicators, readiness state, cohesion, and damage presentation.
 - [x] Add prototype active-formation readiness beacons and damage/entropy shape cues.
@@ -131,6 +132,17 @@ Standing visual criterion: every implementation pass should include an appropria
 - [x] Respect reduced-motion settings for camera movement, marker animation, water, and combat effects.
 - [x] Establish placeholder asset budgets and naming conventions for models, materials, textures, VFX, and audio.
 - [x] Document which generated assets are temporary and retain prompt/source/license metadata.
+
+### 3D environmental polish
+
+- [x] Add multi-scale procedural ocean normals, stronger sun glint, sea-state tuning, and layered surface motion.
+- [x] Add shallow-water coloration, terrain-aware bathymetric contours, and coastline foam.
+- [x] Seat geographic land close to the animated waterline and replace hex-centered shallow-water blobs with noise-varied, coastline-distance continental shelves.
+- [x] Add denser coastline-aligned terrain shoulders and normal-mapped land relief.
+- [x] Add horizon haze, data-driven clear/haze/rain/night hooks, moving cloud shadows, and optional precipitation streaks.
+- [x] Replace the generic effect sphere with pooled, category-specific Search, detection, wake, launch, interception, impact, and damage effects.
+- [x] Add map-space geographic labels plus distinct port piers and airfield runway geometry.
+- [x] Keep all environmental presentation independent from authoritative hex terrain, range, visibility, and outcomes.
 
 ### South China Sea pilot operational area
 
@@ -298,15 +310,16 @@ Standing visual criterion: every implementation pass should include an appropria
 
 ### Entropy effects
 
-- [ ] **Decision required:** Decide whether entropy cards replace or stack with universal source penalties.
-- [ ] **Decision required:** Decide whether an already-marked source can generate another card.
-- [ ] **Decision required:** Define the lifetime and clearing rule for every effect card.
+- [x] **Baseline decision:** Entropy cards stack with universal source penalties during MVP playtests.
+- [x] **Baseline decision:** Every Entropy event draws a physical card, including repeated events from an already-marked source.
+- [x] **Baseline decision:** Matching cards stack in the owning side's visible hand; Recover discards one selected Friction/Disruption card, while Destruction cards await repair/reorganization.
 - [ ] Define the exhaustive list of complex Actions.
-- [ ] Convert all six Friction effects into structured game data.
-- [ ] Convert all six Disruption effects into structured game data.
-- [ ] Convert all six Destruction effects into structured game data.
-- [ ] Draw and apply an effect when a source is newly marked.
-- [ ] Display active effect cards on the formation dossier.
+- [x] Convert all 12 Friction effects into structured game data.
+- [x] Convert all 12 Disruption effects into structured game data.
+- [x] Convert all 12 Destruction effects into structured game data.
+- [ ] Draw and apply an effect for every Entropy event. **In progress:** deterministic physical-deck draw/stacking plus supported Move, Search, Strike, Defense, Command, Endurance, Heavy-Salvo, and selected-card Recover hooks are live; mission, synchronization, Support, and uncertain-location hooks remain.
+- [x] Display active effect cards on the formation dossier and reveal newly drawn friendly cards.
+- [x] Queue card reveals independently by side, interrupt before solo-AI continuation, and preserve unseen reveals through save/load.
 - [ ] Implement printed responses to entropy effects.
 - [ ] Remove or retain attached cards according to the approved recovery ruling.
 
@@ -357,7 +370,7 @@ Standing visual criterion: every implementation pass should include an appropria
 - [ ] **Decision required:** Define the allowed Task vocabulary.
 - [ ] **Decision required:** Define Objective, Posture, and Trigger vocabulary.
 - [ ] **Decision required:** Define what a Trigger authorizes automatically.
-- [ ] Implement a Standing Mission editor.
+- [ ] Implement the full Task / Objective / Posture / Trigger Standing Mission editor. **In progress:** playable Task assignment and Rapid Replan are active.
 - [ ] Determine whether each action follows the current Mission.
 - [ ] Allow mission-following actions without Command Attention.
 - [ ] Charge Command Attention for immediate retasking.
@@ -417,10 +430,10 @@ Standing visual criterion: every implementation pass should include an appropria
 
 - [ ] **Decision required:** Define deck construction, hand limit, discard, reshuffle, and draw triggers.
 - [ ] **Decision required:** Define the exact play window for every response.
-- [ ] Convert all 12 Command Response cards into structured game data.
-- [ ] Implement the starting three-card hand.
-- [ ] Implement card play, cost, discard, and acquisition.
-- [ ] Add a readable response-hand interface.
+- [x] Convert all 24 Command Response cards into structured game data.
+- [x] Implement deterministic private starting three-card hands and save/load persistence.
+- [ ] Implement every card play window, cost, discard, and acquisition trigger. **In progress:** supported Formation, Contact, Reaction, deception, Rapid Replan, and prepared Orderly Withdrawal effects play from hand and discard; Synchronization, Support, Replenish, and fully interactive reaction-window cards remain gated on their parent systems.
+- [x] Add a readable response-hand interface with target selection and explicit unavailable-system states.
 
 ### Endurance
 

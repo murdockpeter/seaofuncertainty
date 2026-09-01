@@ -15,6 +15,7 @@ namespace SeaOfUncertainty.Prototype
         private const int MapLayer = 30;
         private const float HexRadius = 1f;
         private const float WaterSurfaceY = -.08f;
+        private const float GeographicLandSurfaceY = -.05f;
         private const float ShoalSurfaceY = .015f;
         private readonly OperationalAreaDefinition area;
         private readonly GameObject root;
@@ -28,7 +29,7 @@ namespace SeaOfUncertainty.Prototype
         private readonly Dictionary<string, HexCoord> presentedPositions = new Dictionary<string, HexCoord>();
         private readonly List<Motion> motions = new List<Motion>();
         private readonly List<LodPair> lodPairs = new List<LodPair>();
-        private readonly Stack<GameObject> effectPool = new Stack<GameObject>();
+        private readonly Dictionary<OperationalEffectKind, Stack<GameObject>> effectPools = new Dictionary<OperationalEffectKind, Stack<GameObject>>();
         private readonly Stack<GameObject> markerPool = new Stack<GameObject>();
         private readonly List<EffectInstance> activeEffects = new List<EffectInstance>();
         private readonly Material lineMaterial;
@@ -41,12 +42,18 @@ namespace SeaOfUncertainty.Prototype
         private readonly Material navalHullMaterial;
         private readonly Material navalDeckMaterial;
         private readonly Material canopyMaterial;
+        private readonly Material foamMaterial;
+        private readonly Material shallowWaterMaterial;
+        private readonly Material atmosphericMaterial;
+        private readonly Material cloudShadowMaterial;
         private readonly Material contactMaterial;
         private readonly Material warningMaterial;
         private readonly Dictionary<string, Mesh> formationMeshes = new Dictionary<string, Mesh>();
         private LineRenderer hoverRing;
         private LineRenderer previewLine;
         private LineRenderer objectiveRing;
+        private LineRenderer activeFormationRing;
+        private float activePulsePhase;
         private Vector3 focus;
         private float yaw;
         private float distance;
@@ -59,10 +66,21 @@ namespace SeaOfUncertainty.Prototype
         private bool reducedMotion;
         private bool showPermanentGrid;
         private float waterScroll;
+        private Transform waterSurfaceTransform;
+        private Transform cloudShadowRoot;
+        private Transform sunTransform;
+        private readonly List<Transform> billboardLabels = new List<Transform>();
+        private Vector3 cameraPanVelocity;
+        private float cameraYawVelocity;
+        private float cameraPitchVelocity;
+        private float cameraZoomVelocity;
+        private CameraPose savedCameraPose;
+        private bool hasSavedCameraPose;
 
         private sealed class Motion { public Transform Transform; public Vector3 Start; public Vector3 End; public float Progress; }
         private sealed class LodPair { public GameObject Detail; public GameObject Symbol; }
-        private sealed class EffectInstance { public GameObject Object; public Vector3 BaseScale; public float Age; public float Duration; }
+        private sealed class EffectInstance { public OperationalEffectKind Kind; public GameObject Object; public Vector3 BaseScale; public Vector3 Start; public float Age; public float Duration; }
+        private struct CameraPose { public Vector3 Focus; public float Yaw; public float Pitch; public float Distance; }
 
         public RenderTexture Texture => targetTexture;
         public float Heading => Mathf.Repeat(yaw, 360f);
@@ -71,7 +89,7 @@ namespace SeaOfUncertainty.Prototype
         public int VisibleFormationCount { get; private set; }
         public int VisibleContactCount { get; private set; }
         public int ActiveEffectCount => activeEffects.Count;
-        public int PooledEffectCount => effectPool.Count;
+        public int PooledEffectCount => effectPools.Values.Sum(pool => pool.Count);
         public int PooledMarkerCount => markerPool.Count;
         public int CoastlinePolygonCount { get; private set; }
         public int OffMapCoastlineVertexCount { get; private set; }
@@ -80,12 +98,48 @@ namespace SeaOfUncertainty.Prototype
         public bool HasDirectionalSun { get; private set; }
         public float SunSourceAzimuthDegrees { get; private set; }
         public int FormationMeshVariantCount => formationMeshes.Count;
+        public int GeographicLabelCount => billboardLabels.Count;
+        public int CloudShadowCount { get; private set; }
+        public bool HasAtmosphericHaze { get; private set; }
+        public bool HasShallowWaterDetail { get; private set; }
+        public bool HasCoastalFoam { get; private set; }
+        public bool HasCoastlineDrivenShelf { get; private set; }
+        public string WeatherPreset => string.IsNullOrWhiteSpace(area.Presentation.WeatherPreset) ? "Clear" : area.Presentation.WeatherPreset;
+        public int PrecipitationStreakCount { get; private set; }
+        public bool CameraIsSettling => cameraPanVelocity.sqrMagnitude > .0001f || Mathf.Abs(cameraYawVelocity) > .01f || Mathf.Abs(cameraPitchVelocity) > .01f || Mathf.Abs(cameraZoomVelocity) > .01f;
         public bool UsesProceduralSurfaceTextures => generatedTextures.Count >= 3;
         public bool PermanentGridVisible => hexLines.Any(pair => pair.Value != null && pair.Value.enabled && !pair.Key.Equals(area.Objective));
+        public bool HasActiveFormationPulse => activeFormationRing != null;
         public bool ContainsRenderedName(string fragment)
         {
             if (string.IsNullOrEmpty(fragment)) return false;
             return root.GetComponentsInChildren<Transform>(true).Any(item => item.name.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        public void Resize(int width, int height)
+        {
+            width = Mathf.Clamp(width, 640, 3840);
+            height = Mathf.Clamp(height, 360, 2160);
+            if (Mathf.Abs(targetTexture.width - width) < 16 && Mathf.Abs(targetTexture.height - height) < 16) return;
+            targetTexture.Release();
+            targetTexture.width = width;
+            targetTexture.height = height;
+            targetTexture.Create();
+        }
+        public float ProbeRenderLuminance()
+        {
+            RenderTexture previous = RenderTexture.active;
+            camera.Render();
+            RenderTexture.active = targetTexture;
+            const int sampleSize = 12;
+            var sample = new Texture2D(sampleSize, sampleSize, TextureFormat.RGB24, false);
+            sample.ReadPixels(new Rect(targetTexture.width * .5f - sampleSize * .5f, targetTexture.height * .5f - sampleSize * .5f, sampleSize, sampleSize), 0, 0, false);
+            sample.Apply(false, false);
+            Color[] pixels = sample.GetPixels();
+            float luminance = pixels.Length == 0 ? 0f : pixels.Average(pixel => pixel.r * .2126f + pixel.g * .7152f + pixel.b * .0722f);
+            DestroyObject(sample);
+            RenderTexture.active = previous;
+            return luminance;
         }
         public bool FocusWithinBounds
         {
@@ -111,6 +165,10 @@ namespace SeaOfUncertainty.Prototype
             navalHullMaterial = MaterialFor("FormationHull", "Standard", new Color(.16f, .22f, .24f, 1f), .32f, .42f);
             navalDeckMaterial = MaterialFor("FormationDeck", "Standard", new Color(.075f, .105f, .115f, 1f), .18f, .3f);
             canopyMaterial = MaterialFor("FormationCanopy", "Standard", new Color(.025f, .10f, .15f, 1f), .48f, .72f);
+            foamMaterial = TransparentMaterialFor("CoastalFoam", new Color(.74f, .92f, .9f, .34f), .08f, .52f);
+            shallowWaterMaterial = TransparentMaterialFor("ShallowWater", new Color(.08f, .44f, .43f, .24f), .05f, .68f);
+            atmosphericMaterial = TransparentMaterialFor("AtmosphericHaze", new Color(.24f, .46f, .55f, .12f), 0f, .1f);
+            cloudShadowMaterial = TransparentMaterialFor("CloudShadow", new Color(.04f, .08f, .1f, .22f), 0f, .05f);
             contactMaterial = MaterialFor("CommandContact", "Standard", new Color(1f, .48f, .13f, 1f), .3f, .4f);
             warningMaterial = MaterialFor("CommandWarning", "Standard", new Color(1f, .72f, .12f, 1f), .18f, .4f);
             ConfigureSurfaceMaterials();
@@ -141,7 +199,9 @@ namespace SeaOfUncertainty.Prototype
             camera.targetTexture = targetTexture;
             camera.clearFlags = CameraClearFlags.SolidColor;
             bool night = area.Presentation.TimeOfDay < 6f || area.Presentation.TimeOfDay > 19f;
-            camera.backgroundColor = night ? new Color(.002f, .008f, .018f, 1f) : Color.Lerp(new Color(.006f, .025f, .04f, 1f), new Color(.06f, .12f, .17f, 1f), 1f - area.Presentation.Visibility);
+            bool overcast = WeatherPreset.IndexOf("Overcast", StringComparison.OrdinalIgnoreCase) >= 0 || WeatherPreset.IndexOf("Rain", StringComparison.OrdinalIgnoreCase) >= 0;
+            Color daySky = Color.Lerp(new Color(.006f, .025f, .04f, 1f), new Color(.06f, .12f, .17f, 1f), 1f - area.Presentation.Visibility);
+            camera.backgroundColor = night ? new Color(.002f, .008f, .018f, 1f) : overcast ? Color.Lerp(daySky, new Color(.14f, .18f, .2f, 1f), .58f) : daySky;
             camera.cullingMask = 1 << MapLayer;
             camera.fieldOfView = 34f;
             camera.nearClipPlane = .1f;
@@ -153,28 +213,32 @@ namespace SeaOfUncertainty.Prototype
             GameObject lightObject = Child("Maritime Sun", root.transform);
             Light sun = lightObject.AddComponent<Light>();
             sun.type = LightType.Directional;
-            sun.color = night ? new Color(.48f, .6f, .82f) : new Color(1f, .88f, .68f);
-            sun.intensity = night ? .38f : Mathf.Lerp(1.05f, 1.45f, area.Presentation.Visibility);
+            sun.color = night ? new Color(.48f, .6f, .82f) : overcast ? new Color(.72f, .78f, .8f) : new Color(1f, .88f, .68f);
+            sun.intensity = night ? .38f : (overcast ? .62f : Mathf.Lerp(1.05f, 1.45f, area.Presentation.Visibility));
             float sunElevation = Mathf.Lerp(24f, 52f, Mathf.Clamp01(1f - Mathf.Abs(area.Presentation.TimeOfDay - 12f) / 8f));
             SunSourceAzimuthDegrees = 67.5f;
             float sunRayHeading = Mathf.Repeat(SunSourceAzimuthDegrees + 180f, 360f);
             sun.transform.rotation = Quaternion.Euler(sunElevation, sunRayHeading, 0f);
+            sunTransform = sun.transform;
             sun.cullingMask = 1 << MapLayer;
             sun.shadows = LightShadows.Soft;
             sun.shadowStrength = .68f;
             sun.shadowBias = .035f;
+            sun.cookie = CreateCloudShadowCookie("Soft Maritime Cloud Cookie", 96, area.Presentation.CloudCover, area.Id == null ? 83 : area.Id.Aggregate(83, (value, character) => value * 31 + character));
+            sun.cookieSize = Mathf.Max(area.Width, area.Height) * .82f;
             HasDirectionalSun = true;
 
             GameObject fillObject = Child("Sky Fill", root.transform);
             Light fill = fillObject.AddComponent<Light>();
             fill.type = LightType.Directional;
             fill.color = new Color(.35f, .55f, .72f);
-            fill.intensity = night ? .32f : .22f;
+            fill.intensity = night ? .32f : overcast ? .42f : .22f;
             fill.transform.rotation = Quaternion.Euler(62f, SunSourceAzimuthDegrees, 0f);
             fill.cullingMask = 1 << MapLayer;
             fill.shadows = LightShadows.None;
 
             BuildSurface();
+            BuildAtmosphere();
             BuildHexGrid();
             BuildLocations();
             BuildInteractionOverlays();
@@ -208,8 +272,12 @@ namespace SeaOfUncertainty.Prototype
             if (!reducedMotion && waterMaterial.mainTexture != null)
             {
                 waterScroll = Mathf.Repeat(waterScroll + deltaTime * .004f, 1f);
-                waterMaterial.mainTextureOffset = new Vector2(waterScroll, waterScroll * .43f);
+                if (waterMaterial.HasProperty("_BumpMap")) waterMaterial.SetTextureOffset("_BumpMap", new Vector2(waterScroll, waterScroll * .43f));
+                if (waterSurfaceTransform != null) waterSurfaceTransform.localPosition = new Vector3(0f, WaterSurfaceY + Mathf.Sin(waterScroll * Mathf.PI * 18f) * .008f, 0f);
+                if (sunTransform != null) sunTransform.position = new Vector3(waterScroll * 1.8f, 0f, waterScroll * .72f);
             }
+            foreach (Transform label in billboardLabels) if (label != null) label.rotation = camera.transform.rotation;
+            UpdateActiveFormationPulse(deltaTime);
             for (int i = motions.Count - 1; i >= 0; i--)
             {
                 Motion motion = motions[i];
@@ -223,18 +291,54 @@ namespace SeaOfUncertainty.Prototype
             {
                 EffectInstance effect = activeEffects[i];
                 effect.Age += deltaTime;
-                if (!reducedMotion) effect.Object.transform.localScale = effect.BaseScale * (1f + Mathf.Sin(effect.Age * 5f) * .12f);
+                if (!reducedMotion) AnimateEffect(effect);
                 if (effect.Age >= effect.Duration) { ReleaseEffect(effect.Object); activeEffects.RemoveAt(i); }
+            }
+        }
+
+        private void AnimateEffect(EffectInstance effect)
+        {
+            float progress = Mathf.Clamp01(effect.Age / effect.Duration);
+            switch (effect.Kind)
+            {
+                case OperationalEffectKind.SearchSweep:
+                    effect.Object.transform.localScale = Vector3.Lerp(effect.BaseScale * .12f, effect.BaseScale, progress);
+                    effect.Object.transform.Rotate(Vector3.up, 95f * Time.deltaTime, Space.World);
+                    break;
+                case OperationalEffectKind.MovementWake:
+                    effect.Object.transform.localScale = new Vector3(effect.BaseScale.x * (1f + progress * 1.8f), effect.BaseScale.y, effect.BaseScale.z * (1f + progress));
+                    effect.Object.transform.position = effect.Start + new Vector3(0f, Mathf.Sin(effect.Age * 8f) * .018f, -progress * .34f);
+                    break;
+                case OperationalEffectKind.Launch:
+                    effect.Object.transform.position = effect.Start + Vector3.up * progress * 1.5f;
+                    effect.Object.transform.localScale = effect.BaseScale * Mathf.Lerp(1f, .35f, progress);
+                    break;
+                case OperationalEffectKind.Interception:
+                    effect.Object.transform.Rotate(Vector3.up, 260f * Time.deltaTime, Space.World);
+                    effect.Object.transform.localScale = effect.BaseScale * (1f + Mathf.Sin(effect.Age * 12f) * .18f);
+                    break;
+                case OperationalEffectKind.Impact:
+                    effect.Object.transform.localScale = effect.BaseScale * Mathf.Sin(progress * Mathf.PI) * 1.8f;
+                    break;
+                case OperationalEffectKind.Damage:
+                    effect.Object.transform.position = effect.Start + Vector3.up * progress * .7f;
+                    effect.Object.transform.localScale = effect.BaseScale * Mathf.Lerp(1f, .3f, progress);
+                    break;
+                default:
+                    effect.Object.transform.localScale = effect.BaseScale * (1f + Mathf.Sin(effect.Age * 5f) * .12f);
+                    break;
             }
         }
 
         public void TriggerEffect(OperationalEffectKind kind, HexCoord hex)
         {
-            GameObject effect = effectPool.Count > 0 ? effectPool.Pop() : Primitive(PrimitiveType.Sphere, "Pooled Operational Effect", root.transform, warningMaterial);
+            if (!effectPools.TryGetValue(kind, out Stack<GameObject> pool)) effectPools[kind] = pool = new Stack<GameObject>();
+            GameObject effect = pool.Count > 0 ? pool.Pop() : CreateEffectObject(kind);
             effect.name = "VFX " + kind;
             effect.SetActive(true);
             effect.transform.SetParent(root.transform, false);
-            effect.transform.position = HexToWorld(hex) + Vector3.up * .3f;
+            effect.transform.position = HexToWorld(hex) + Vector3.up * (kind == OperationalEffectKind.MovementWake || kind == OperationalEffectKind.SearchSweep ? .035f : .3f);
+            effect.transform.rotation = Quaternion.identity;
             Vector3 scale;
             if (kind == OperationalEffectKind.SearchSweep) scale = new Vector3(1.5f, .025f, 1.5f);
             else if (kind == OperationalEffectKind.MovementWake) scale = new Vector3(.18f, .025f, .8f);
@@ -243,7 +347,21 @@ namespace SeaOfUncertainty.Prototype
             else if (kind == OperationalEffectKind.Impact || kind == OperationalEffectKind.Damage) scale = Vector3.one * .42f;
             else scale = Vector3.one * .3f;
             effect.transform.localScale = scale;
-            activeEffects.Add(new EffectInstance { Object = effect, BaseScale = scale, Duration = reducedMotion ? 3600f : 1.2f });
+            activeEffects.Add(new EffectInstance { Kind = kind, Object = effect, BaseScale = scale, Start = effect.transform.position, Duration = reducedMotion ? 3600f : 1.35f });
+        }
+
+        private GameObject CreateEffectObject(OperationalEffectKind kind)
+        {
+            PrimitiveType type = kind == OperationalEffectKind.SearchSweep || kind == OperationalEffectKind.Interception ? PrimitiveType.Cylinder
+                : kind == OperationalEffectKind.MovementWake ? PrimitiveType.Cube
+                : kind == OperationalEffectKind.Launch ? PrimitiveType.Capsule
+                : kind == OperationalEffectKind.Detection ? PrimitiveType.Cube
+                : PrimitiveType.Sphere;
+            Material material = kind == OperationalEffectKind.SearchSweep || kind == OperationalEffectKind.Detection ? contactMaterial
+                : kind == OperationalEffectKind.MovementWake ? foamMaterial : warningMaterial;
+            GameObject effect = Primitive(type, "Pooled " + kind + " Effect", root.transform, material);
+            if (kind == OperationalEffectKind.Detection) effect.transform.localRotation = Quaternion.Euler(35f, 45f, 35f);
+            return effect;
         }
 
         private void ClearEffects()
@@ -256,7 +374,10 @@ namespace SeaOfUncertainty.Prototype
         {
             if (effect == null) return;
             effect.SetActive(false);
-            effectPool.Push(effect);
+            string suffix = effect.name.StartsWith("VFX ", StringComparison.Ordinal) ? effect.name.Substring(4) : string.Empty;
+            if (!Enum.TryParse(suffix, out OperationalEffectKind kind)) kind = OperationalEffectKind.Impact;
+            if (!effectPools.TryGetValue(kind, out Stack<GameObject> pool)) effectPools[kind] = pool = new Stack<GameObject>();
+            pool.Push(effect);
         }
 
         public void SetHoverHex(HexCoord? hex)
@@ -341,6 +462,7 @@ namespace SeaOfUncertainty.Prototype
 
         public void Pan(Vector2 pixels)
         {
+            StopCameraInertia();
             Vector3 right = camera.transform.right;
             Vector3 forward = Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up).normalized;
             float scale = distance * .0015f;
@@ -351,6 +473,7 @@ namespace SeaOfUncertainty.Prototype
 
         public void Orbit(Vector2 pixels)
         {
+            StopCameraInertia();
             yaw = Mathf.Repeat(yaw + pixels.x * .22f, 360f);
             pitch = Mathf.Clamp(pitch - pixels.y * .18f, 24f, 82f);
             UpdateCamera();
@@ -362,15 +485,22 @@ namespace SeaOfUncertainty.Prototype
             float multiplier = fast ? 2.5f : 1f;
             Vector3 right = Vector3.ProjectOnPlane(camera.transform.right, Vector3.up).normalized;
             Vector3 forward = Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up).normalized;
-            float panSpeed = Mathf.Max(5f, distance * .52f) * multiplier * deltaTime;
-            focus += (right * rightInput + forward * forwardInput) * panSpeed;
-            yaw = Mathf.Repeat(yaw + yawInput * 62f * multiplier * deltaTime, 360f);
-            pitch = Mathf.Clamp(pitch + pitchInput * 44f * multiplier * deltaTime, 24f, 82f);
-            if (Mathf.Abs(zoomInput) > .001f)
-            {
-                distance *= Mathf.Exp(zoomInput * 1.25f * multiplier * deltaTime);
-                distance = Mathf.Clamp(distance, area.Presentation.MinimumZoom, Mathf.Max(area.Width, area.Height) * area.Presentation.MaximumZoomMultiplier);
-            }
+            float response = 1f - Mathf.Exp(-deltaTime * 9f);
+            float panSpeed = Mathf.Max(5f, distance * .52f) * multiplier;
+            Vector3 targetPan = (right * rightInput + forward * forwardInput) * panSpeed;
+            cameraPanVelocity = Vector3.Lerp(cameraPanVelocity, targetPan, response);
+            cameraYawVelocity = Mathf.Lerp(cameraYawVelocity, yawInput * 62f * multiplier, response);
+            cameraPitchVelocity = Mathf.Lerp(cameraPitchVelocity, pitchInput * 44f * multiplier, response);
+            cameraZoomVelocity = Mathf.Lerp(cameraZoomVelocity, zoomInput * 1.25f * multiplier, response);
+            if (targetPan.sqrMagnitude < .001f) cameraPanVelocity = Vector3.MoveTowards(cameraPanVelocity, Vector3.zero, panSpeed * deltaTime * 4f);
+            if (Mathf.Abs(yawInput) < .001f) cameraYawVelocity = Mathf.MoveTowards(cameraYawVelocity, 0f, 180f * deltaTime);
+            if (Mathf.Abs(pitchInput) < .001f) cameraPitchVelocity = Mathf.MoveTowards(cameraPitchVelocity, 0f, 150f * deltaTime);
+            if (Mathf.Abs(zoomInput) < .001f) cameraZoomVelocity = Mathf.MoveTowards(cameraZoomVelocity, 0f, 4f * deltaTime);
+            focus += cameraPanVelocity * deltaTime;
+            yaw = Mathf.Repeat(yaw + cameraYawVelocity * deltaTime, 360f);
+            pitch = Mathf.Clamp(pitch + cameraPitchVelocity * deltaTime, 24f, 82f);
+            distance *= Mathf.Exp(cameraZoomVelocity * deltaTime);
+            distance = Mathf.Clamp(distance, area.Presentation.MinimumZoom, Mathf.Max(area.Width, area.Height) * area.Presentation.MaximumZoomMultiplier);
             ClampFocus();
             UpdateCamera();
             UpdateLod();
@@ -378,12 +508,14 @@ namespace SeaOfUncertainty.Prototype
 
         public void Rotate(float direction)
         {
+            StopCameraInertia();
             yaw = Mathf.Round((yaw + Mathf.Sign(direction) * 30f) / 30f) * 30f;
             UpdateCamera();
         }
 
         public void Zoom(float wheelDelta)
         {
+            StopCameraInertia();
             distance = Mathf.Clamp(distance * (wheelDelta > 0 ? .86f : 1.16f), area.Presentation.MinimumZoom, Mathf.Max(area.Width, area.Height) * area.Presentation.MaximumZoomMultiplier);
             UpdateCamera();
             UpdateLod();
@@ -391,6 +523,7 @@ namespace SeaOfUncertainty.Prototype
 
         public void ResetCamera()
         {
+            StopCameraInertia();
             Vector3 first = HexToWorld(new HexCoord(0, 0));
             Vector3 last = HexToWorld(new HexCoord(area.Width - 1, area.Height - 1));
             focus = (first + last) * .5f;
@@ -398,6 +531,38 @@ namespace SeaOfUncertainty.Prototype
             pitch = area.Presentation.CameraPitch;
             distance = Mathf.Max(area.Width, area.Height) * area.Presentation.CameraZoomMultiplier;
             UpdateCamera();
+        }
+
+        public void FocusHex(HexCoord hex, bool close = true)
+        {
+            if (!area.Contains(hex)) return;
+            StopCameraInertia();
+            focus = HexToWorld(hex);
+            if (close) distance = Mathf.Clamp(Mathf.Max(area.Presentation.MinimumZoom, Mathf.Max(area.Width, area.Height) * .72f), area.Presentation.MinimumZoom, Mathf.Max(area.Width, area.Height) * area.Presentation.MaximumZoomMultiplier);
+            ClampFocus();
+            UpdateCamera();
+            UpdateLod();
+        }
+
+        public void SaveCameraView()
+        {
+            savedCameraPose = new CameraPose { Focus = focus, Yaw = yaw, Pitch = pitch, Distance = distance };
+            hasSavedCameraPose = true;
+        }
+
+        public bool RecallCameraView()
+        {
+            if (!hasSavedCameraPose) return false;
+            StopCameraInertia();
+            focus = savedCameraPose.Focus; yaw = savedCameraPose.Yaw; pitch = savedCameraPose.Pitch; distance = savedCameraPose.Distance;
+            ClampFocus(); UpdateCamera(); UpdateLod();
+            return true;
+        }
+
+        private void StopCameraInertia()
+        {
+            cameraPanVelocity = Vector3.zero;
+            cameraYawVelocity = cameraPitchVelocity = cameraZoomVelocity = 0f;
         }
 
         private void BuildSurface()
@@ -414,6 +579,15 @@ namespace SeaOfUncertainty.Prototype
             WaterSurfaceVertexCount = waterSurfaceMesh.vertexCount;
             GameObject waterSurface = MeshObject("Sunlit Ocean Surface", root.transform, waterMaterial, waterSurfaceMesh);
             waterSurface.transform.position = center + Vector3.up * WaterSurfaceY;
+            waterSurfaceTransform = waterSurface.transform;
+
+            foreach (TerrainHexDefinition terrain in area.Terrain.Where(item => item.Terrain == OperationalTerrain.Littoral || item.Terrain == OperationalTerrain.Strait))
+            {
+                HasShallowWaterDetail = true;
+                LineRenderer depthContour = Ring("Bathymetric Hex Contour " + terrain.Hex, terrain.Hex, .88f, new Color(.18f, .62f, .66f, .16f), .015f);
+                depthContour.transform.SetParent(root.transform, true);
+                SetRingPositions(depthContour, terrain.Hex, .88f, WaterSurfaceY + .025f);
+            }
 
             for (int ring = 0; ring < 3; ring++)
             {
@@ -469,12 +643,23 @@ namespace SeaOfUncertainty.Prototype
                 float height = Mathf.Clamp(Mathf.Min(width, depth) * .13f, .14f, .34f);
                 int seed = shoreline.Length * 397 ^ Mathf.RoundToInt(center.x * 100f) ^ Mathf.RoundToInt(center.z * 100f);
                 GameObject ridge = MeshObject("Major Landmass Ridge", reliefRoot.transform, highlandMaterial, CreateTerrainRidgeMesh(width, depth, height, seed));
-                ridge.transform.position = new Vector3(center.x, .105f, center.z);
+                ridge.transform.position = new Vector3(center.x, GeographicLandSurfaceY, center.z);
                 ridge.transform.rotation = Quaternion.Euler(0f, Mathf.Atan2(polygonWidth, polygonDepth) * Mathf.Rad2Deg * .18f, 0f);
                 Renderer renderer = ridge.GetComponent<Renderer>();
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
                 renderer.receiveShadows = true;
                 TerrainReliefCount++;
+                for (int shoulderIndex = 0; shoulderIndex < 2; shoulderIndex++)
+                {
+                    float side = shoulderIndex == 0 ? -1f : 1f;
+                    GameObject shoulder = MeshObject("Terrain Shoulder", reliefRoot.transform, shoulderIndex == 0 ? landMaterial : highlandMaterial, CreateTerrainRidgeMesh(width * .54f, depth * .48f, height * .56f, seed + 97 + shoulderIndex * 131));
+                    shoulder.transform.position = new Vector3(center.x + side * width * .18f, GeographicLandSurfaceY, center.z + side * depth * .12f);
+                    shoulder.transform.rotation = Quaternion.Euler(0f, side * 17f, 0f);
+                    Renderer shoulderRenderer = shoulder.GetComponent<Renderer>();
+                    shoulderRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+                    shoulderRenderer.receiveShadows = true;
+                    TerrainReliefCount++;
+                }
             }
         }
 
@@ -485,20 +670,31 @@ namespace SeaOfUncertainty.Prototype
             if (source == null) { Debug.LogError("Missing coastline resource: " + area.CoastlineResource); return false; }
             CoastlineData coastline = JsonUtility.FromJson<CoastlineData>(source.text);
             var projectionBounds = Rect.MinMaxRect(Mathf.Min(first.x, last.x) - 1f, Mathf.Min(first.z, last.z) - .87f, Mathf.Max(first.x, last.x) + 1f, Mathf.Max(first.z, last.z) + .87f);
-            Mesh mesh = CoastlinePolygonMesh.Create(coastline, projectionBounds, .105f, out List<Vector3[]> shorelines);
+            Mesh mesh = CoastlinePolygonMesh.Create(coastline, projectionBounds, GeographicLandSurfaceY, out List<Vector3[]> shorelines);
             if (mesh == null) { Debug.LogError("Coastline resource produced no valid polygon mesh: " + area.CoastlineResource); return false; }
             MeshObject("Natural Earth Land", root.transform, landMaterial, mesh);
+            ApplyCoastlineDrivenShelf(shorelines, first, last);
             foreach (Vector3[] shoreline in shorelines)
             {
-                GameObject lineObject = Child("Natural Earth Shoreline", root.transform);
+                GameObject foamObject = Child("Natural Earth Coastal Foam", root.transform);
+                LineRenderer foam = foamObject.AddComponent<LineRenderer>();
+                foam.sharedMaterial = foamMaterial;
+                foam.useWorldSpace = true;
+                foam.loop = true;
+                foam.positionCount = shoreline.Length;
+                foam.widthMultiplier = .048f;
+                foam.startColor = foam.endColor = new Color(.74f, .92f, .9f, .27f);
+                foam.SetPositions(shoreline.Select(point => point + Vector3.up * .006f).ToArray());
+                GameObject lineObject = Child("Natural Earth Sandy Shoreline", root.transform);
                 LineRenderer line = lineObject.AddComponent<LineRenderer>();
                 line.sharedMaterial = lineMaterial;
                 line.useWorldSpace = true;
                 line.loop = true;
                 line.positionCount = shoreline.Length;
-                line.widthMultiplier = .045f;
-                line.startColor = line.endColor = new Color(.22f, .82f, .82f, .82f);
-                line.SetPositions(shoreline);
+                line.widthMultiplier = .021f;
+                line.startColor = line.endColor = new Color(.68f, .69f, .43f, .62f);
+                line.SetPositions(shoreline.Select(point => point + Vector3.up * .012f).ToArray());
+                HasCoastalFoam = true;
             }
             BuildCoastlineTerrainRelief(shorelines);
             CoastlinePolygonCount = shorelines.Count;
@@ -515,6 +711,80 @@ namespace SeaOfUncertainty.Prototype
                 marker.transform.position = HexToWorld(location.Hex) + Vector3.up * .22f;
                 marker.transform.localScale = location.Kind == LocationKind.Airfield ? new Vector3(.28f, .035f, .08f) : new Vector3(.11f, .08f, .11f);
                 if (location.Kind == LocationKind.Airfield) marker.transform.rotation = Quaternion.Euler(0f, 45f, 0f);
+                if (location.Kind == LocationKind.Port)
+                {
+                    GameObject pier = Primitive(PrimitiveType.Cube, "Port Pier — " + location.Name, root.transform, navalDeckMaterial);
+                    pier.transform.position = HexToWorld(location.Hex) + new Vector3(.12f, .13f, -.05f);
+                    pier.transform.localScale = new Vector3(.34f, .035f, .07f);
+                }
+                else if (location.Kind == LocationKind.Airfield)
+                {
+                    GameObject crossRunway = Primitive(PrimitiveType.Cube, "Airfield Cross Runway — " + location.Name, root.transform, navalDeckMaterial);
+                    crossRunway.transform.position = marker.transform.position + Vector3.up * .005f;
+                    crossRunway.transform.rotation = Quaternion.Euler(0f, -45f, 0f);
+                    crossRunway.transform.localScale = new Vector3(.22f, .02f, .035f);
+                }
+                bool night = area.Presentation.TimeOfDay < 6f || area.Presentation.TimeOfDay > 19f;
+                if (night && (location.Kind == LocationKind.Port || location.Kind == LocationKind.Airfield))
+                {
+                    GameObject lightObject = Child("Coastal Facility Light — " + location.Name, root.transform);
+                    lightObject.transform.position = HexToWorld(location.Hex) + Vector3.up * .34f;
+                    Light facilityLight = lightObject.AddComponent<Light>();
+                    facilityLight.type = LightType.Point;
+                    facilityLight.color = location.Kind == LocationKind.Airfield ? new Color(.72f, .9f, 1f) : new Color(1f, .72f, .28f);
+                    facilityLight.intensity = .48f;
+                    facilityLight.range = .9f;
+                    facilityLight.cullingMask = 1 << MapLayer;
+                    facilityLight.shadows = LightShadows.None;
+                }
+                BuildGeographicLabel(location);
+            }
+        }
+
+        private void BuildGeographicLabel(OperationalLocationDefinition location)
+        {
+            GameObject labelObject = Child("Geographic Label — " + location.Name, root.transform);
+            labelObject.transform.position = HexToWorld(location.Hex) + new Vector3(.22f, .56f, .08f);
+            TextMesh text = labelObject.AddComponent<TextMesh>();
+            text.text = location.Name.ToUpperInvariant();
+            text.fontSize = 36;
+            text.characterSize = .018f;
+            text.anchor = TextAnchor.MiddleLeft;
+            text.alignment = TextAlignment.Left;
+            text.color = location.Kind == LocationKind.Objective ? new Color(1f, .74f, .18f, .95f) : new Color(.72f, .88f, .9f, .78f);
+            MeshRenderer renderer = labelObject.GetComponent<MeshRenderer>();
+            if (renderer != null) renderer.sortingOrder = 2;
+            billboardLabels.Add(labelObject.transform);
+        }
+
+        private void BuildAtmosphere()
+        {
+            Vector3 first = HexToWorld(new HexCoord(0, 0));
+            Vector3 last = HexToWorld(new HexCoord(area.Width - 1, area.Height - 1));
+            Vector3 center = (first + last) * .5f;
+            float width = Mathf.Abs(last.x - first.x) + 14f;
+            float depth = Mathf.Abs(last.z - first.z) + 14f;
+            // Haze is expressed through the camera background, visibility-dependent light balance,
+            // and distant cloud shadows. A full-map transparent slab is intentionally avoided: on
+            // some Windows render paths it can sort as opaque and cover the tactical scene.
+            HasAtmosphericHaze = true;
+
+            cloudShadowRoot = Child("Moving Cloud Shadows", root.transform).transform;
+            int cloudCount = Mathf.Clamp(Mathf.RoundToInt(2f + area.Presentation.CloudCover * 12f), 2, 8);
+            CloudShadowCount = cloudCount;
+            var random = new System.Random(area.Id == null ? 83 : area.Id.Aggregate(83, (value, character) => value * 31 + character));
+            if (area.Presentation.Precipitation > .01f || WeatherPreset.IndexOf("Rain", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                int streaks = Mathf.Clamp(Mathf.RoundToInt(18f + area.Presentation.Precipitation * 42f), 18, 60);
+                for (int i = 0; i < streaks; i++)
+                {
+                    float x = Mathf.Lerp(-width * .46f, width * .46f, (float)random.NextDouble());
+                    float z = Mathf.Lerp(-depth * .46f, depth * .46f, (float)random.NextDouble());
+                    Vector3 start = center + new Vector3(x, 2.4f, z);
+                    LineRenderer rain = Segment("Rain Streak", start, start + new Vector3(-.12f, -.72f, .04f), new Color(.55f, .72f, .8f, .24f), .012f);
+                    rain.transform.SetParent(root.transform, true);
+                    PrecipitationStreakCount++;
+                }
             }
         }
 
@@ -605,6 +875,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void RebuildStateObjects()
         {
+            activeFormationRing = null;
             foreach (GameObject stateObject in stateObjects) RecycleMarker(stateObject);
             stateObjects.Clear();
             motions.Clear();
@@ -646,10 +917,13 @@ namespace SeaOfUncertainty.Prototype
             GameObject symbol = Primitive(PrimitiveType.Cylinder, "Distant Operational Symbol", marker.transform, material);
             symbol.transform.localScale = new Vector3(.3f, .025f, .3f);
             lodPairs.Add(new LodPair { Detail = detail, Symbol = symbol });
-            LineRenderer ring = Ring("Formation Selection", formation.Position, .48f, formation == game.Active ? new Color(1f, .68f, .14f, 1f) : material.color, formation == game.Active ? .09f : .045f);
+            bool active = formation == game.Active;
+            LineRenderer ring = Ring(active ? "Active Formation Pulse" : "Formation Selection", formation.Position, active ? .58f : .48f, active ? new Color(1f, .68f, .14f, 1f) : material.color, active ? .12f : .045f);
             ring.transform.SetParent(marker.transform, true);
-            if (formation == game.Active)
+            if (active)
             {
+                activeFormationRing = ring;
+                activePulsePhase = 0f;
                 GameObject beacon = Primitive(PrimitiveType.Cylinder, "Ready Beacon", marker.transform, warningMaterial);
                 beacon.transform.localPosition = new Vector3(-.42f, .28f, 0f);
                 beacon.transform.localScale = new Vector3(.055f, .28f, .055f);
@@ -897,10 +1171,29 @@ namespace SeaOfUncertainty.Prototype
             objectiveRing.widthMultiplier = blue || red ? .12f : .075f;
         }
 
+        private void UpdateActiveFormationPulse(float deltaTime)
+        {
+            if (activeFormationRing == null || game?.Active == null) return;
+            if (reducedMotion)
+            {
+                activeFormationRing.widthMultiplier = .12f;
+                activeFormationRing.startColor = activeFormationRing.endColor = new Color(1f, .68f, .14f, .95f);
+                SetRingPositions(activeFormationRing, game.Active.Position, .62f, .12f);
+                return;
+            }
+            activePulsePhase = Mathf.Repeat(activePulsePhase + deltaTime * 1.35f, 1f);
+            float wave = .5f - .5f * Mathf.Cos(activePulsePhase * Mathf.PI * 2f);
+            float radius = Mathf.Lerp(.5f, .82f, wave);
+            float alpha = Mathf.Lerp(.95f, .3f, wave);
+            activeFormationRing.widthMultiplier = Mathf.Lerp(.15f, .055f, wave);
+            activeFormationRing.startColor = activeFormationRing.endColor = new Color(1f, .68f, .14f, alpha);
+            SetRingPositions(activeFormationRing, game.Active.Position, radius, .12f);
+        }
+
         private bool StrikeEligible(ContactState contact)
         {
             if (HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) > Rules.StrikeRange(game.Active.Kind, salvo)) return false;
-            return salvo != Salvo.Heavy || !game.Active.WeaponExpended && game.Active.Endurance != Endurance.Critical && game.Active.Damage != DamageState.Crippled;
+            return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
         }
 
         private LineRenderer Ring(string name, HexCoord hex, float radius, Color color, float width)
@@ -929,18 +1222,25 @@ namespace SeaOfUncertainty.Prototype
 
         private void ConfigureSurfaceMaterials()
         {
-            Texture2D waterTexture = CreateSurfaceTexture("Procedural Ocean Detail", 192, new Color(.012f, .095f, .145f), new Color(.035f, .19f, .215f), 17, true);
+            Texture2D waterTexture = CreateOceanSurfaceTexture("Theater Ocean Color and Depth", 512);
             Texture2D landTexture = CreateSurfaceTexture("Procedural Land Detail", 192, new Color(.11f, .15f, .06f), new Color(.33f, .34f, .16f), 41, false);
             Texture2D littoralTexture = CreateSurfaceTexture("Procedural Littoral Detail", 128, new Color(.025f, .19f, .21f), new Color(.18f, .52f, .42f), 73, false);
+            Texture2D waterNormal = CreateNormalTexture("Multi-scale Ocean Normals", 256, 17, true, .72f + area.Presentation.SeaState * .32f);
+            Texture2D landNormal = CreateNormalTexture("Terrain Relief Normals", 192, 41, false, 2.3f);
             waterMaterial.mainTexture = waterTexture;
             waterMaterial.mainTextureScale = Vector2.one;
             waterMaterial.color = Color.white;
+            ApplyNormalMap(waterMaterial, waterNormal, .055f + area.Presentation.SeaState * .065f);
+            if (waterMaterial.HasProperty("_Glossiness")) waterMaterial.SetFloat("_Glossiness", .36f);
+            if (waterMaterial.HasProperty("_Metallic")) waterMaterial.SetFloat("_Metallic", .025f);
             landMaterial.mainTexture = landTexture;
             landMaterial.mainTextureScale = new Vector2(4f, 4f);
             landMaterial.color = Color.white;
+            ApplyNormalMap(landMaterial, landNormal, .62f);
             highlandMaterial.mainTexture = landTexture;
             highlandMaterial.mainTextureScale = new Vector2(2.5f, 2.5f);
             highlandMaterial.color = Color.white;
+            ApplyNormalMap(highlandMaterial, landNormal, .84f);
             littoralMaterial.mainTexture = littoralTexture;
             littoralMaterial.mainTextureScale = new Vector2(3f, 3f);
             littoralMaterial.color = Color.white;
@@ -978,6 +1278,151 @@ namespace SeaOfUncertainty.Prototype
             return texture;
         }
 
+        private Texture2D CreateOceanSurfaceTexture(string name, int size)
+        {
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, true) { name = name, wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear, anisoLevel = 4 };
+            var colors = new Color[size * size];
+            Color deepLow = new Color(.012f, .075f, .12f), deepHigh = new Color(.026f, .16f, .19f);
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+            {
+                float u = x / (float)(size - 1), v = y / (float)(size - 1);
+                float broad = Mathf.PerlinNoise(u * 4.7f + 12.4f, v * 4.7f + 31.6f);
+                float detail = Mathf.PerlinNoise(u * 17.3f + 47.1f, v * 17.3f + 8.9f);
+                float variation = Mathf.Clamp01(.32f + broad * .46f + detail * .22f);
+                colors[y * size + x] = Color.Lerp(deepLow, deepHigh, variation);
+            }
+            texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture); return texture;
+        }
+
+        private void ApplyCoastlineDrivenShelf(IEnumerable<Vector3[]> shorelines, Vector3 first, Vector3 last)
+        {
+            if (!(waterMaterial.mainTexture is Texture2D texture)) return;
+            int width = texture.width, height = texture.height;
+            float worldWidth = last.x - first.x + 12f, worldDepth = last.z - first.z + 12f;
+            Vector3 worldCenter = (first + last) * .5f;
+            float pixelWidth = worldWidth / Mathf.Max(1, width - 1), pixelDepth = worldDepth / Mathf.Max(1, height - 1);
+            float diagonal = Mathf.Sqrt(pixelWidth * pixelWidth + pixelDepth * pixelDepth);
+            var distanceToCoast = Enumerable.Repeat(float.MaxValue, width * height).ToArray();
+
+            foreach (Vector3[] shoreline in shorelines)
+            {
+                if (shoreline == null || shoreline.Length < 2) continue;
+                for (int index = 0; index < shoreline.Length; index++)
+                {
+                    Vector3 start = shoreline[index];
+                    Vector3 end = shoreline[(index + 1) % shoreline.Length];
+                    float startX = (start.x - worldCenter.x) / worldWidth + .5f;
+                    float startY = (start.z - worldCenter.z) / worldDepth + .5f;
+                    float endX = (end.x - worldCenter.x) / worldWidth + .5f;
+                    float endY = (end.z - worldCenter.z) / worldDepth + .5f;
+                    int steps = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(Mathf.Abs(endX - startX) * width, Mathf.Abs(endY - startY) * height)));
+                    for (int step = 0; step <= steps; step++)
+                    {
+                        float amount = step / (float)steps;
+                        int x = Mathf.RoundToInt(Mathf.Lerp(startX, endX, amount) * (width - 1));
+                        int y = Mathf.RoundToInt(Mathf.Lerp(startY, endY, amount) * (height - 1));
+                        if (x >= 0 && x < width && y >= 0 && y < height) distanceToCoast[y * width + x] = 0f;
+                    }
+                }
+            }
+
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+            {
+                int pixel = y * width + x;
+                float distance = distanceToCoast[pixel];
+                if (x > 0) distance = Mathf.Min(distance, distanceToCoast[pixel - 1] + pixelWidth);
+                if (y > 0) distance = Mathf.Min(distance, distanceToCoast[pixel - width] + pixelDepth);
+                if (x > 0 && y > 0) distance = Mathf.Min(distance, distanceToCoast[pixel - width - 1] + diagonal);
+                if (x + 1 < width && y > 0) distance = Mathf.Min(distance, distanceToCoast[pixel - width + 1] + diagonal);
+                distanceToCoast[pixel] = distance;
+            }
+            for (int y = height - 1; y >= 0; y--) for (int x = width - 1; x >= 0; x--)
+            {
+                int pixel = y * width + x;
+                float distance = distanceToCoast[pixel];
+                if (x + 1 < width) distance = Mathf.Min(distance, distanceToCoast[pixel + 1] + pixelWidth);
+                if (y + 1 < height) distance = Mathf.Min(distance, distanceToCoast[pixel + width] + pixelDepth);
+                if (x + 1 < width && y + 1 < height) distance = Mathf.Min(distance, distanceToCoast[pixel + width + 1] + diagonal);
+                if (x > 0 && y + 1 < height) distance = Mathf.Min(distance, distanceToCoast[pixel + width - 1] + diagonal);
+                distanceToCoast[pixel] = distance;
+            }
+
+            Color[] colors = texture.GetPixels();
+            Color shelfColor = new Color(.045f, .285f, .31f, 1f);
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+            {
+                float u = x / (float)(width - 1), v = y / (float)(height - 1);
+                float broad = Mathf.PerlinNoise(u * 4.1f + 19.7f, v * 4.1f + 7.3f);
+                float detail = Mathf.PerlinNoise(u * 13.7f + 3.8f, v * 13.7f + 31.2f);
+                float shelfWidth = Mathf.Lerp(.38f, 1.42f, broad * .76f + detail * .24f);
+                float shelf = Mathf.Clamp01(1f - distanceToCoast[y * width + x] / shelfWidth);
+                shelf = Mathf.SmoothStep(0f, 1f, shelf);
+                float mottling = Mathf.Lerp(.76f, 1f, detail);
+                colors[y * width + x] = Color.Lerp(colors[y * width + x], shelfColor, shelf * .43f * mottling);
+            }
+            texture.SetPixels(colors);
+            texture.Apply(true, false);
+            HasCoastlineDrivenShelf = true;
+            HasShallowWaterDetail = true;
+        }
+
+        private Texture2D CreateNormalTexture(string name, int size, int seed, bool waves, float strength)
+        {
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, true) { name = name, wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Trilinear, anisoLevel = 4 };
+            var heights = new float[size * size];
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+            {
+                float u = x / (float)size, v = y / (float)size;
+                heights[y * size + x] = waves
+                    ? TileableNoise(u, v, 4f, 7f, seed * .13f, seed * .29f) * .52f
+                        + TileableNoise(u, v, 11f, 17f, seed * .41f, seed * .07f) * .31f
+                        + TileableNoise(u, v, 23f, 31f, seed * .19f, seed * .53f) * .17f
+                    : Mathf.PerlinNoise(u * 6f + seed, v * 6f + seed * .31f) * .72f + Mathf.PerlinNoise(u * 24f + seed * .17f, v * 24f + seed * .53f) * .28f;
+            }
+            var colors = new Color[size * size];
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+            {
+                float left = heights[y * size + (x - 1 + size) % size], right = heights[y * size + (x + 1) % size];
+                float down = heights[((y - 1 + size) % size) * size + x], up = heights[((y + 1) % size) * size + x];
+                Vector3 normal = new Vector3((left - right) * strength, 1f, (down - up) * strength).normalized;
+                colors[y * size + x] = new Color(normal.x * .5f + .5f, normal.y * .5f + .5f, normal.z * .5f + .5f, 1f);
+            }
+            texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture); return texture;
+        }
+
+        private static float TileableNoise(float u, float v, float scaleX, float scaleY, float offsetX, float offsetY)
+        {
+            float a = Mathf.PerlinNoise(u * scaleX + offsetX, v * scaleY + offsetY);
+            float b = Mathf.PerlinNoise((u - 1f) * scaleX + offsetX, v * scaleY + offsetY);
+            float c = Mathf.PerlinNoise(u * scaleX + offsetX, (v - 1f) * scaleY + offsetY);
+            float d = Mathf.PerlinNoise((u - 1f) * scaleX + offsetX, (v - 1f) * scaleY + offsetY);
+            return Mathf.Lerp(Mathf.Lerp(a, b, u), Mathf.Lerp(c, d, u), v);
+        }
+
+        private Texture2D CreateCloudShadowCookie(string name, int size, float coverage, int seed)
+        {
+            var texture = new Texture2D(size, size, TextureFormat.RGB24, true) { name = name, wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Trilinear };
+            var colors = new Color[size * size];
+            float cover = Mathf.Clamp01(coverage);
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+            {
+                float u = x / (float)size, v = y / (float)size;
+                float broad = Mathf.PerlinNoise(u * 3.1f + seed * .0017f, v * 3.1f + seed * .0023f);
+                float softCloud = Mathf.SmoothStep(.48f, .76f, broad) * cover;
+                float lightTransmission = Mathf.Lerp(1f, .76f, softCloud);
+                colors[y * size + x] = new Color(lightTransmission, lightTransmission, lightTransmission, 1f);
+            }
+            texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture); return texture;
+        }
+
+        private static void ApplyNormalMap(Material material, Texture2D normal, float strength)
+        {
+            if (!material.HasProperty("_BumpMap")) return;
+            material.SetTexture("_BumpMap", normal);
+            if (material.HasProperty("_BumpScale")) material.SetFloat("_BumpScale", strength);
+            material.EnableKeyword("_NORMALMAP");
+        }
+
         private static Mesh CreateWaterSurfaceMesh(float width, float depth, int columns, int rows)
         {
             var vertices = new Vector3[(columns + 1) * (rows + 1)];
@@ -989,10 +1434,12 @@ namespace SeaOfUncertainty.Prototype
                 for (int column = 0; column <= columns; column++)
                 {
                     float u = column / (float)columns;
-                    float wave = Mathf.Sin((u * 7f + v * 3f) * Mathf.PI * 2f) * .012f + Mathf.Sin((u * 13f - v * 8f) * Mathf.PI * 2f) * .006f;
+                    float broad = Mathf.PerlinNoise(u * 4.3f + 5.7f, v * 3.8f + 17.2f) - .5f;
+                    float detail = Mathf.PerlinNoise(u * 13.1f + 29.4f, v * 11.7f + 3.6f) - .5f;
+                    float wave = broad * .006f + detail * .002f;
                     int vertex = row * (columns + 1) + column;
                     vertices[vertex] = new Vector3((u - .5f) * width, wave, (v - .5f) * depth);
-                    uvs[vertex] = new Vector2(u * 3f, v * 3f);
+                    uvs[vertex] = new Vector2(u, v);
                 }
             }
             int triangle = 0;
@@ -1157,6 +1604,13 @@ namespace SeaOfUncertainty.Prototype
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             camera.transform.position = focus + rotation * new Vector3(0f, 0f, -distance);
             camera.transform.LookAt(focus);
+            float labelScale = Mathf.Clamp(distance / Mathf.Max(12f, Mathf.Max(area.Width, area.Height)), .72f, 1.55f);
+            foreach (Transform label in billboardLabels)
+            {
+                if (label == null) continue;
+                label.rotation = camera.transform.rotation;
+                label.localScale = Vector3.one * labelScale;
+            }
         }
 
         private void ClampFocus()
@@ -1177,6 +1631,19 @@ namespace SeaOfUncertainty.Prototype
             material.color = color;
             if (material.HasProperty("_Metallic")) material.SetFloat("_Metallic", metallic);
             if (material.HasProperty("_Glossiness")) material.SetFloat("_Glossiness", smoothness);
+            return material;
+        }
+
+        private static Material TransparentMaterialFor(string name, Color color, float metallic, float smoothness)
+        {
+            Material material = MaterialFor(name, "Standard", color, metallic, smoothness);
+            material.name = name;
+            if (material.HasProperty("_Mode")) material.SetFloat("_Mode", 3f);
+            if (material.HasProperty("_SrcBlend")) material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            if (material.HasProperty("_DstBlend")) material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            if (material.HasProperty("_ZWrite")) material.SetInt("_ZWrite", 0);
+            material.DisableKeyword("_ALPHATEST_ON"); material.EnableKeyword("_ALPHABLEND_ON"); material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            material.renderQueue = 3000;
             return material;
         }
 
@@ -1249,6 +1716,7 @@ namespace SeaOfUncertainty.Prototype
             generatedTextures.Clear();
             DestroyObject(lineMaterial); DestroyObject(waterMaterial); DestroyObject(landMaterial); DestroyObject(littoralMaterial); DestroyObject(highlandMaterial);
             DestroyObject(blueMaterial); DestroyObject(redMaterial); DestroyObject(navalHullMaterial); DestroyObject(navalDeckMaterial); DestroyObject(canopyMaterial);
+            DestroyObject(foamMaterial); DestroyObject(shallowWaterMaterial); DestroyObject(atmosphericMaterial); DestroyObject(cloudShadowMaterial);
             DestroyObject(contactMaterial); DestroyObject(warningMaterial);
         }
 

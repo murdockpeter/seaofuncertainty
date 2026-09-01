@@ -29,6 +29,9 @@ namespace SeaOfUncertainty.Prototype
         public Side HumanSide => humanSide;
         public bool IsAiTurn => operationMode == OperationMode.SoloVsAi && game?.Active != null && game.Active.Side != humanSide;
         public bool LastToolkitActionSucceeded => lastActionSucceeded;
+        public EntropyEffectDefinition ToolkitPendingEntropyEffect(Side side) => game?.PendingEntropyEffectFor(side);
+        public FormationState ToolkitPendingEntropyFormation(Side side) => game?.PendingEntropyFormationFor(side);
+        public IReadOnlyList<CommandResponseDefinition> ToolkitResponseHand(Side side) => game?.ResponseHand(side) ?? new List<CommandResponseDefinition>();
 
         [Serializable]
         private sealed class OperationSave
@@ -79,6 +82,8 @@ namespace SeaOfUncertainty.Prototype
         private Side handoffSide;
         private bool ageTwoTargetingPenalty = true;
         private bool audioEnabled = true;
+        private OperationalMissionAudio missionAudio;
+        private PrototypeGame audioEventGame;
         private bool highContrast;
         private bool reducedMotion;
         private bool hexGridVisible;
@@ -116,6 +121,8 @@ namespace SeaOfUncertainty.Prototype
             hexGridVisible = PlayerPrefs.GetInt("HexGridVisible", 0) == 1;
             if (Environment.GetCommandLineArgs().Contains("-showHexGrid")) hexGridVisible = true;
             game = new PrototypeGame();
+            missionAudio = GetComponent<OperationalMissionAudio>() ?? gameObject.AddComponent<OperationalMissionAudio>();
+            AttachMissionAudio(game);
             game.AgeTwoTargetingPenalty = ageTwoTargetingPenalty;
             telemetry = new PlaytestRecorder();
             telemetry.StartNew(game);
@@ -206,6 +213,23 @@ namespace SeaOfUncertainty.Prototype
             inspected = game.Active;
             Toast("OPFOR: " + message);
             AfterSuccessfulAction(actor.Side);
+            // AI-owned draws resolve privately, but must never discard a pending human reveal.
+            while (game.PendingEntropyEffectFor(actor.Side) != null) game.ConsumePendingEntropyEffect(actor.Side);
+            return message;
+        }
+        public void ToolkitAcknowledgeEntropyEffect(Side side) => game?.ConsumePendingEntropyEffect(side);
+        public string ToolkitRespondToEntropy(FormationState formation, string cardId)
+        {
+            if (game.RespondToEntropy(formation, cardId, out string message)) lastActionSucceeded = true;
+            else lastActionSucceeded = false;
+            Toast(message);
+            return message;
+        }
+
+        public string ToolkitPlayResponse(string cardId, FormationState formation = null, ContactState contact = null, HexCoord? hex = null, ActionKind? mission = null)
+        {
+            lastActionSucceeded = game.PlayCommandResponse(game.Active.Side, cardId, formation, contact, hex, mission, out string message);
+            Toast(message);
             return message;
         }
         public void ToolkitSetSettings(bool agePenalty, bool audio, bool contrast, bool reduceMotion, bool showHexGrid)
@@ -260,6 +284,12 @@ namespace SeaOfUncertainty.Prototype
 
         public string ToolkitHold() { lastActionSucceeded = false; ExecuteHold(); return toast; }
         public string ToolkitRecover() { lastActionSucceeded = false; ExecuteRecover(); return toast; }
+        public string ToolkitRecover(EntropySource source, string cardId)
+        {
+            lastActionSucceeded = game.Recover(game.Active, source, cardId, out string message);
+            Toast(message);
+            return message;
+        }
 
         private void EnsureStyles()
         {
@@ -379,7 +409,7 @@ namespace SeaOfUncertainty.Prototype
             string scoring = "5 VP   Sole control within one hex of the Inner Sea at T16\n\n3 VP   Designated carrier group remains combat capable\n\n2 VP   Each enemy formation Destroyed\n\n1 VP   Each enemy formation Crippled\n\nTIE     Side closest to the objective, then preservation";
             GUI.Label(new Rect(sheet.x + 850, sheet.y + 130, 650, 290), scoring, body);
             GUI.Label(new Rect(sheet.x + 850, sheet.y + 452, 650, 30), "PROTOTYPE ASSUMPTIONS", panelTitle);
-            string assumptions = $"Strike range: 3 hexes\nAge-2 targeting penalty: {(ageTwoTargetingPenalty ? "ON" : "OFF")}\nReaction: automatic Defend\nContact improvement: Location first\nEndurance: three major Actions";
+            string assumptions = $"Strike range: 3 hexes\nAge-2 targeting penalty: {(ageTwoTargetingPenalty ? "ON" : "OFF")}\nReaction: automatic Defend unless Orderly Withdrawal is prepared\nContact improvement: Location first\nEndurance: three major Actions";
             GUI.Label(new Rect(sheet.x + 850, sheet.y + 496, 650, 170), assumptions, body);
             if (GUI.Button(new Rect(sheet.x + 850, sheet.y + 694, 330, 64), "REVIEW DEPLOYMENT", buttonActive)) screen = AppScreen.Setup;
             if (GUI.Button(new Rect(sheet.x + 1196, sheet.y + 694, 190, 64), "SETTINGS", button)) overlay = Overlay.Settings;
@@ -510,7 +540,7 @@ namespace SeaOfUncertainty.Prototype
             else if (overlay == Overlay.ConfirmHeavy)
             {
                 if (confirmationTarget == null) { overlay = Overlay.None; return; }
-                CombatPreview preview = GetCombatPreview(game.Active, confirmationTarget, Salvo.Heavy, Reaction.Defend);
+                CombatPreview preview = GetCombatPreview(game.Active, confirmationTarget, Salvo.Heavy, game.ReactionFor(confirmationTarget));
                 ContactState contact = game.ContactFor(game.Active.Side, confirmationTarget.Id);
                 GUI.Label(new Rect(rect.x + 44, rect.y + 104, 810, 70), "This commitment expends the formation's Heavy Salvo capability. It cannot be used again until Replenishment is implemented and available.", new GUIStyle(body) { fontSize = 18 });
                 GUI.Label(new Rect(rect.x + 44, rect.y + 204, 810, 36), $"TARGET  {contact.Summary}  •  LAST KNOWN {contact.LastKnownPosition}", panelTitle);
@@ -565,6 +595,7 @@ namespace SeaOfUncertainty.Prototype
         private void ResetScenario(string scenarioId = null)
         {
             game = new PrototypeGame(1978, ScenarioCatalog.Find(string.IsNullOrEmpty(scenarioId) ? "meridian-veil" : scenarioId));
+            AttachMissionAudio(game);
             game.AgeTwoTargetingPenalty = ageTwoTargetingPenalty;
             if (telemetry == null) telemetry = new PlaytestRecorder();
             telemetry.StartNew(game);
@@ -603,6 +634,7 @@ namespace SeaOfUncertainty.Prototype
                 var restored = new PrototypeGame(1978, scenario);
                 restored.RestoreState(data);
                 game = restored;
+                AttachMissionAudio(game);
                 if (telemetry == null) telemetry = new PlaytestRecorder();
                 if (operation?.Playtest != null) telemetry.Restore(operation.Playtest); else telemetry.StartNew(game);
                 feedback = operation?.Feedback ?? new PlaytestFeedback();
@@ -632,6 +664,25 @@ namespace SeaOfUncertainty.Prototype
             PlayerPrefs.SetInt("ReducedMotion", reducedMotion ? 1 : 0);
             PlayerPrefs.SetInt("HexGridVisible", hexGridVisible ? 1 : 0);
             PlayerPrefs.Save();
+        }
+
+        private void AttachMissionAudio(PrototypeGame current)
+        {
+            if (audioEventGame != null) audioEventGame.ActionCompleted -= OnMissionCompleted;
+            audioEventGame = current;
+            if (audioEventGame != null) audioEventGame.ActionCompleted += OnMissionCompleted;
+        }
+
+        private void OnMissionCompleted(FormationState formation, ActionKind mission)
+        {
+            if (!audioEnabled || formation == null) return;
+            if (operationMode == OperationMode.SoloVsAi && formation.Side != humanSide) return;
+            missionAudio?.Play(mission);
+        }
+
+        private void OnDestroy()
+        {
+            if (audioEventGame != null) audioEventGame.ActionCompleted -= OnMissionCompleted;
         }
 
         private void BeginOperation()
@@ -726,7 +777,7 @@ namespace SeaOfUncertainty.Prototype
             GUI.Label(new Rect(rect.x + 16, rect.y + 38, 218, 48), activationReason, small);
             SetTooltip(new Rect(rect.x + 10, rect.y + 34, rect.width - 20, 52), "Activation order: lowest Ready Time, then lower Entropy, then higher Command. The prototype uses stable ID as its reproducible final tie-break.");
             float y = rect.y + 88;
-            foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed).OrderBy(f => f.ReadyTime).ThenBy(f => f.EntropySources).ThenByDescending(f => f.Ratings.Command))
+            foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed).OrderBy(f => f.ReadyTime).ThenBy(f => f.EntropySources).ThenByDescending(f => f.EffectiveCommand))
             {
                 bool active = formation == game.Active;
                 bool selected = formation == inspected;
@@ -737,7 +788,7 @@ namespace SeaOfUncertainty.Prototype
                 GUI.Label(new Rect(row.x + 12, row.y + 7, 158, 22), formation.Name, new GUIStyle(body) { fontStyle = FontStyle.Bold });
                 GUI.Label(new Rect(row.x + 12, row.y + 33, 155, 22), $"{formation.Kind}  •  {formation.Cohesion}", small);
                 DrawBadge(new Rect(row.x + 176, row.y + 13, 42, 38), formation.ReadyTime.ToString("00"), active ? SideColor(formation.Side) : new Color(.13f, .25f, .28f));
-                SetTooltip(row, $"{formation.Name}\nReady T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.Ratings.Command}\n{(active ? activationReason : "Click to inspect this friendly formation.")}");
+                SetTooltip(row, $"{formation.Name}\nReady T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.EffectiveCommand}\n{(active ? activationReason : "Click to inspect this friendly formation.")}");
                 y += 72;
             }
         }
@@ -850,7 +901,8 @@ namespace SeaOfUncertainty.Prototype
             }
             else if (IsStrikePending() && StrikeEligible(contact))
             {
-                CombatPreview preview = GetCombatPreview(game.Active, game.Find(contact.TargetId), CurrentSalvo(), Reaction.Defend);
+                FormationState previewTarget = game.Find(contact.TargetId);
+                CombatPreview preview = GetCombatPreview(game.Active, previewTarget, CurrentSalvo(), game.ReactionFor(previewTarget));
                 GUI.Label(new Rect(c.x - 65, c.y - radius - 29, 130, 18), preview.Band.ToString().ToUpperInvariant(), tiny);
             }
         }
@@ -872,9 +924,9 @@ namespace SeaOfUncertainty.Prototype
             DrawStat(rect.x + 18, rect.y + 132, "MOVE", f.EffectiveMove, new Color(.23f, .74f, .78f));
             DrawStat(rect.x + 128, rect.y + 132, "SEARCH", f.EffectiveSearch, new Color(.23f, .74f, .78f));
             DrawStat(rect.x + 238, rect.y + 132, "STRIKE", f.EffectiveStrike, new Color(.94f, .61f, .2f));
-            DrawStat(rect.x + 18, rect.y + 205, "DEFENSE", f.Ratings.Defense, new Color(.41f, .76f, .61f));
+            DrawStat(rect.x + 18, rect.y + 205, "DEFENSE", f.EffectiveDefense, new Color(.41f, .76f, .61f));
             DrawStat(rect.x + 128, rect.y + 205, "SIGNATURE", f.Ratings.Signature + (f.Loud ? 1 : 0), new Color(.65f, .48f, .82f));
-            DrawStat(rect.x + 238, rect.y + 205, "COMMAND", f.Ratings.Command, new Color(.94f, .61f, .2f));
+            DrawStat(rect.x + 238, rect.y + 205, "COMMAND", f.EffectiveCommand, new Color(.94f, .61f, .2f));
             GUI.Label(new Rect(rect.x + 18, rect.y + 288, 326, 24), "READINESS & CAPABILITY", panelTitle);
             string state = $"READY  T{f.ReadyTime:00}\nENDURANCE  {f.Endurance.ToString().ToUpperInvariant()}\nDAMAGE  {f.Damage.ToString().ToUpperInvariant()}\nWEAPONS  {(f.WeaponExpended ? "HEAVY EXPENDED" : "AVAILABLE")}";
             GUI.Label(new Rect(rect.x + 18, rect.y + 321, 326, 110), state, body);
@@ -885,7 +937,7 @@ namespace SeaOfUncertainty.Prototype
             DrawEntropy(new Rect(rect.x + 234, rect.y + 478, 110, 50), "DESTRUCTION", f.Destruction, new Color(.9f, .22f, .2f));
             GUI.Label(new Rect(rect.x + 18, rect.y + 541, 326, 26), f.Cohesion.ToUpperInvariant(), new GUIStyle(panelTitle) { normal = { textColor = f.EntropySources >= 2 ? new Color(.95f, .38f, .3f) : new Color(.42f, .8f, .65f) } });
             SetTooltip(new Rect(rect.x + 18, rect.y + 538, 326, 32), "Cohesion summarizes marked Entropy sources: 0–1 Cohesive, 2 Disrupted, 3 Disorganized.");
-            GUI.Label(new Rect(rect.x + 18, rect.y + 580, 326, 92), "Standing Mission\nTASK: Control the Inner Sea\nPOSTURE: Balanced\nTRIGGER: Enemy enters objective", small);
+            GUI.Label(new Rect(rect.x + 18, rect.y + 580, 326, 92), $"Standing Mission\nTASK: {f.Mission}\nPOSTURE: Balanced\n{(f.OrderlyWithdrawalReady ? "REACTION: Orderly Withdrawal prepared" : "REACTION: Automatic Defend")}", small);
         }
 
         private void DrawTargetPreview(Rect rect, ContactState contact)
@@ -901,7 +953,7 @@ namespace SeaOfUncertainty.Prototype
             {
                 SearchMode mode = CurrentSearchMode();
                 int range = HexCoord.Distance(game.Active.Position, contact.LastKnownPosition);
-                int modeModifier = Rules.SearchModifier(mode);
+                int modeModifier = game.SearchModifierFor(game.Active, mode);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 210, 326, 28), "AREA SEARCH PREVIEW", panelTitle);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Area center         {contact.LastKnownPosition}\nCenter range         {range} / {Rules.SearchRange(mode)}\nFootprint radius     {Rules.SearchAreaRadius}\nSearch rating        {game.Active.EffectiveSearch:+0;-0;0}\nMode ({mode})      {modeModifier:+0;-0;0}", body);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 430, 326, 175), "Hidden Signature, Loud status, and exact position resolve privately. Success creates or improves Contacts. No detection still costs Time and advances the Ready queue.", small);
@@ -909,12 +961,12 @@ namespace SeaOfUncertainty.Prototype
             else
             {
                 Salvo salvo = CurrentSalvo();
-                CombatPreview preview = GetCombatPreview(game.Active, target, salvo, Reaction.Defend);
+                CombatPreview preview = GetCombatPreview(game.Active, target, salvo, game.ReactionFor(target));
                 GUI.Label(new Rect(rect.x + 18, rect.y + 210, 326, 28), "COMBAT CALCULATION", panelTitle);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Strike rating      {game.Active.EffectiveStrike:+0;-0;0}\nSalvo ({salvo})      {Rules.SalvoModifier(salvo):+0;-0;0}\nTargeting            {Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty):+0;-0;0}\nATTACK                {preview.Attack}\nDEFENSE + Defend      {preview.Defense}\n────────────────\nDIFFERENCE            {preview.Difference:+0;-0;0}", body);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 420, 326, 38), preview.Band.ToString().ToUpperInvariant() + " BAND", new GUIStyle(title) { fontSize = 25, alignment = TextAnchor.MiddleCenter });
                 GUI.Label(new Rect(rect.x + 18, rect.y + 472, 326, 100), CombatOddsText(preview.Band), new GUIStyle(body) { alignment = TextAnchor.MiddleCenter });
-                GUI.Label(new Rect(rect.x + 18, rect.y + 590, 326, 70), salvo == Salvo.Heavy ? "Heavy Salvo expends the formation’s major offensive capability and requires confirmation." : "Defender currently uses the prototype’s automatic Defend reaction.", small);
+                GUI.Label(new Rect(rect.x + 18, rect.y + 590, 326, 70), salvo == Salvo.Heavy ? "Heavy Salvo expends the formation’s major offensive capability and requires confirmation." : target.OrderlyWithdrawalReady ? "Defender has prepared an Evade and two-hex Orderly Withdrawal." : "Defender currently uses the prototype’s automatic Defend reaction.", small);
             }
         }
 
@@ -1069,7 +1121,7 @@ namespace SeaOfUncertainty.Prototype
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
             string alternatives = LegalAlternatives();
             int range = HexCoord.Distance(actor.Position, center);
-            string calculation = $"Area {center}; center range {range}/{Rules.SearchRange(mode)} hexes; footprint radius {Rules.SearchAreaRadius}; Search {actor.EffectiveSearch}; Mode {Rules.SearchModifier(mode):+0;-0;0}; hidden Signature and Loud modifiers resolved privately; base Time 2; Friction {(actor.Friction ? "+1" : "+0")}{(mode == SearchMode.Focused ? $"; Command temporarily occupied {game.Sides[actor.Side].CommandSlots}->{game.Sides[actor.Side].CommandSlots - 1}->{game.Sides[actor.Side].CommandSlots}" : string.Empty)}";
+            string calculation = $"Area {center}; center range {range}/{Rules.SearchRange(mode)} hexes; footprint radius {Rules.SearchAreaRadius}; Search {actor.EffectiveSearch}; Mode {game.SearchModifierFor(actor, mode):+0;-0;0}; hidden Signature and Loud modifiers resolved privately; base Time 2; Friction {(actor.Friction ? "+1" : "+0")}{(mode == SearchMode.Focused ? $"; Command temporarily occupied {game.Sides[actor.Side].CommandSlots}->{game.Sides[actor.Side].CommandSlots - 1}->{game.Sides[actor.Side].CommandSlots}" : string.Empty)}";
             if (game.SearchArea(actor, center, mode, out string message))
             {
                 lastActionSucceeded = true;
@@ -1092,9 +1144,10 @@ namespace SeaOfUncertainty.Prototype
             FormationState actor = game.Active;
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
             string alternatives = LegalAlternatives();
-            CombatPreview preview = GetCombatPreview(actor, target, salvo, Reaction.Defend);
-            string calculation = $"Attack {preview.Attack} vs Defense {preview.Defense}; difference {preview.Difference}; band {preview.Band}; reaction Defend; odds {CombatOddsText(preview.Band).Replace("\n", "; ")}";
-            if (game.Strike(actor, target, salvo, Reaction.Defend, out CombatResult result, out string message))
+            Reaction reaction = game.ReactionFor(target);
+            CombatPreview preview = GetCombatPreview(actor, target, salvo, reaction);
+            string calculation = $"Attack {preview.Attack} vs Defense {preview.Defense}; difference {preview.Difference}; band {preview.Band}; reaction {reaction}; odds {CombatOddsText(preview.Band).Replace("\n", "; ")}";
+            if (game.Strike(actor, target, salvo, reaction, out CombatResult result, out string message))
             {
                 lastActionSucceeded = true;
                 string outcome = message + $" Roll {result.Roll}; damage {result.Damage}.";
@@ -1202,14 +1255,14 @@ namespace SeaOfUncertainty.Prototype
             if (game.Active == null || contact == null || contact.IsLost) return false;
             FormationState target = game.Find(contact.TargetId);
             if (target == null || target.IsDestroyed || HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) > Rules.StrikeRange(game.Active.Kind, pending == PendingAction.StrikeLight ? Salvo.Light : pending == PendingAction.StrikeHeavy ? Salvo.Heavy : Salvo.Standard)) return false;
-            return CurrentSalvo() != Salvo.Heavy || !game.Active.WeaponExpended && game.Active.Endurance != Endurance.Critical && game.Active.Damage != DamageState.Crippled;
+            return CurrentSalvo() != Salvo.Heavy || game.Active.CanHeavySalvo;
         }
 
         private CombatPreview GetCombatPreview(FormationState attacker, FormationState target, Salvo salvo, Reaction reaction)
         {
             ContactState contact = game.ContactFor(attacker.Side, target.Id);
             int attack = attacker.EffectiveStrike + Rules.SalvoModifier(salvo) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
-            int defense = target.Ratings.Defense + (reaction == Reaction.Defend || reaction == Reaction.Evade ? 1 : 0) - (target.Destruction ? 1 : 0);
+            int defense = target.EffectiveDefense + (reaction == Reaction.Defend || reaction == Reaction.Evade ? 1 : 0) - (target.Destruction ? 1 : 0);
             int difference = attack - defense;
             return new CombatPreview { Attack = attack, Defense = defense, Difference = difference, Band = Rules.BandFor(difference) };
         }
@@ -1238,8 +1291,8 @@ namespace SeaOfUncertainty.Prototype
             int minimumEntropy = eligibleSide.Min(f => f.EntropySources);
             List<FormationState> sameEntropy = eligibleSide.Where(f => f.EntropySources == minimumEntropy).ToList();
             if (sameEntropy.Count == 1) return $"T{minimumTime:00} tie: {game.Active.Name} has lower Entropy.";
-            int maximumCommand = sameEntropy.Max(f => f.Ratings.Command);
-            List<FormationState> sameCommand = sameEntropy.Where(f => f.Ratings.Command == maximumCommand).ToList();
+            int maximumCommand = sameEntropy.Max(f => f.EffectiveCommand);
+            List<FormationState> sameCommand = sameEntropy.Where(f => f.EffectiveCommand == maximumCommand).ToList();
             return sameCommand.Count == 1 ? $"T{minimumTime:00} tie: {game.Active.Name} has higher Command." : $"T{minimumTime:00} tie: stable prototype tie-break selected {game.Active.Name}.";
         }
 

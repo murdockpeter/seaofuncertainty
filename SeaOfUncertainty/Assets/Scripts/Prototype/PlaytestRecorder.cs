@@ -216,7 +216,12 @@ namespace SeaOfUncertainty.Prototype
                     char oldMark = oldValue.Length > i ? oldValue[i] : '-';
                     char newMark = newValue.Length > i ? newValue[i] : '-';
                     string key = formationId + ":" + names[i];
-                    if (oldMark != '1' && newMark == '1') { entropyMarkedAt[key] = currentTime; changes.Add($"{formationId} +{names[i]} at T{currentTime:00}"); }
+                    if (oldMark != '1' && newMark == '1')
+                    {
+                        entropyMarkedAt[key] = currentTime;
+                        string cards = newValue.Length > 4 ? newValue.Substring(4) : string.Empty;
+                        changes.Add($"{formationId} +{names[i]} at T{currentTime:00}{(string.IsNullOrEmpty(cards) ? string.Empty : " cards " + cards)}");
+                    }
                     else if (oldMark == '1' && newMark != '1')
                     {
                         int duration = entropyMarkedAt.TryGetValue(key, out int markedAt) ? currentTime - markedAt : -1;
@@ -260,7 +265,11 @@ namespace SeaOfUncertainty.Prototype
         private static string Csv(string value) => "\"" + (value ?? string.Empty).Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ") + "\"";
         private static string ContactKey(ContactState contact) => contact.Owner + ":" + contact.TargetId;
         private static string ContactValue(ContactState contact) => contact.IsLost ? "Lost" : $"{contact.Location}/{contact.Identity}/Age{contact.Age}@{contact.LastKnownPosition}";
-        private static string EntropyValue(FormationState formation) => $"{(formation.Friction ? '1' : '0')}{(formation.Disruption ? '1' : '0')}{(formation.Destruction ? '1' : '0')}";
+        private static string EntropyValue(FormationState formation)
+        {
+            string cards = formation.ActiveEffectCardIds == null ? string.Empty : string.Join("+", formation.ActiveEffectCardIds);
+            return $"{(formation.Friction ? '1' : '0')}{(formation.Disruption ? '1' : '0')}{(formation.Destruction ? '1' : '0')}:{cards}";
+        }
 
         private static void ObjectiveRanges(PrototypeGame game, out int blueRange, out int redRange)
         {

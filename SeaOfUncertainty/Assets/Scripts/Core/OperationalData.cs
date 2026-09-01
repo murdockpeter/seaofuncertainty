@@ -50,6 +50,12 @@ namespace SeaOfUncertainty.Core
         public float MinimumZoom = 9f;
         public float MaximumZoomMultiplier = 2.5f;
         public float PanPadding = 1f;
+        public float SeaState = .35f;
+        public float CloudCover = .18f;
+        public float HazeDensity = .22f;
+        public string WeatherPreset = "Clear";
+        public float Precipitation;
+        public string ElevationResource;
     }
 
     public enum ColorProfile { Maritime, NightOperations, HighContrast }
@@ -210,7 +216,7 @@ namespace SeaOfUncertainty.Core
                 CoastlineResource = "Geography/luzon-strait-coastline",
                 GridOrientationDegrees = 0,
                 Objective = new HexCoord(11, 9),
-                Presentation = new PresentationProfileDefinition { CameraPitch = 58f, CameraYaw = 0, CameraZoomMultiplier = 1.65f, LightingProfile = "MaritimeHaze", WaterProfile = "PhilippineSea", TerrainAssetSet = "LuzonMvp", TimeOfDay = 16f, Visibility = .72f }
+                Presentation = new PresentationProfileDefinition { CameraPitch = 58f, CameraYaw = 0, CameraZoomMultiplier = 1.65f, LightingProfile = "MaritimeHaze", WaterProfile = "PhilippineSea", TerrainAssetSet = "LuzonMvp", TimeOfDay = 16f, Visibility = .72f, SeaState = .42f, CloudCover = .28f, HazeDensity = .38f, WeatherPreset = "Haze" }
             };
 
             AddBlock(area, OperationalTerrain.Land, "Southern Taiwan", 0, 0, 7, 3);

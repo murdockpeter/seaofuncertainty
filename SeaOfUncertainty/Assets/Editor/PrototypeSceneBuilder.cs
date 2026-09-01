@@ -1,5 +1,7 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -56,6 +58,103 @@ namespace SeaOfUncertainty.Editor
             Debug.Log("Sea of Uncertainty Windows prototype built successfully.");
         }
 
+        public static void RunEntropyRevealRegressionTests()
+        {
+            var game = new PrototypeGame(1978);
+            FormationState player = game.Active;
+            FormationState opponent = game.Formations.First(formation => formation.Side != player.Side);
+            EntropyEffectDefinition playerCard = game.MarkEntropy(player, EntropySource.Friction);
+            EntropyEffectDefinition opponentCard = game.MarkEntropy(opponent, EntropySource.Friction);
+            Assert(playerCard != null && opponentCard != null, "Both sides draw independent Friction cards");
+            Assert(game.PendingEntropyEffectFor(player.Side)?.Id == playerCard.Id, "The player's reveal remains queued after an opposing draw");
+            Assert(game.PendingEntropyEffectFor(opponent.Side)?.Id == opponentCard.Id, "The opposing reveal remains independently queued");
+            game.ConsumePendingEntropyEffect(opponent.Side);
+            Assert(game.PendingEntropyEffectFor(player.Side)?.Id == playerCard.Id, "Consuming the opposing reveal cannot consume the player's reveal");
+
+            string saveJson = JsonUtility.ToJson(game.CaptureState());
+            var restored = new PrototypeGame(1978);
+            restored.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(saveJson));
+            Assert(restored.PendingEntropyEffectFor(player.Side)?.Id == playerCard.Id, "The pending player reveal survives save and load");
+            Debug.Log("Entropy reveal regression tests passed.");
+        }
+
+        public static void RunCardExpansionTests()
+        {
+            Assert(EntropyEffectCatalog.All.Count == 36, "The Entropy catalog contains all 36 cards");
+            foreach (EntropySource source in System.Enum.GetValues(typeof(EntropySource))) Assert(EntropyEffectCatalog.For(source).Count() == 12, source + " contains 12 cards");
+            Assert(CommandResponseCatalog.All.Count == 24 && CommandResponseCatalog.All.Select(card => card.Id).Distinct().Count() == 24, "The Command Response catalog contains 24 unique cards");
+
+            var game = new PrototypeGame(1978);
+            Assert(game.EntropyDecks.All(deck => deck.DrawPile.Count == 12), "Each Entropy source deck begins with 12 cards");
+            Assert(game.CommandResponseDecks.Count == 2 && game.CommandResponseDecks.All(deck => deck.Hand.Count == 3 && deck.DrawPile.Count == 21), "Each side begins with three private Responses");
+
+            var missionEventGame = new PrototypeGame(1978);
+            ActionKind? completedMission = null;
+            missionEventGame.ActionCompleted += (formation, mission) => completedMission = mission;
+            Assert(missionEventGame.Hold(missionEventGame.Active, out string heldMessage) && completedMission == ActionKind.Hold, "Completing a mission emits its distinct audio cue signal: " + heldMessage);
+
+            var stackGame = new PrototypeGame(1978);
+            FormationState stackFormation = stackGame.Active;
+            EntropyEffectDefinition firstStackCard = stackGame.MarkEntropy(stackFormation, EntropySource.Friction);
+            EntropyEffectDefinition secondStackCard = stackGame.MarkEntropy(stackFormation, EntropySource.Friction);
+            Assert(firstStackCard != null && secondStackCard != null && firstStackCard.Id != secondStackCard.Id && stackFormation.ActiveEffectCardIds.Count == 2, "Repeated Friction events draw and stack distinct physical cards");
+            Assert(stackGame.Recover(stackFormation, out string stackedRecovery) && stackFormation.Friction && stackFormation.ActiveEffectCardIds.Count == 1, "Recover discards one stacked card while the remaining card keeps its source marked: " + stackedRecovery);
+
+            FormationState actor = game.Active;
+            actor.ActiveEffectCardIds.Add("F-07");
+            Assert(Rules.MoveAllowance(actor, MoveMode.Normal) == 1, "Navigation Drift reduces the first normal Move by one hex");
+            actor.ActiveEffectCardIds.Add("D-08");
+            Assert(!game.SearchArea(actor, actor.Position, SearchMode.Focused, out string jammedMessage) && jammedMessage.Contains("Jammed Circuits"), "Jammed Circuits blocks Focused Search");
+            actor.ActiveEffectCardIds.Add("X-11");
+            Assert(!actor.CanHeavySalvo, "Launcher Damage blocks Heavy Salvo");
+
+            CommandResponseDeckState hand = game.CommandResponseDecks.First(deck => deck.Side == actor.Side);
+            hand.DrawPile.Remove("C-22");
+            if (!hand.Hand.Contains("C-22")) hand.Hand.Add("C-22");
+            int command = actor.EffectiveCommand;
+            Assert(game.PlayCommandResponse(actor.Side, "C-22", actor, null, null, out string responseMessage) && actor.EffectiveCommand == command + 1, "Local Initiative applies +1 Command: " + responseMessage);
+            Assert(hand.DiscardPile.Contains("C-22") && !hand.Hand.Contains("C-22"), "A played Response moves to discard");
+
+            var replanGame = new PrototypeGame(1978);
+            FormationState replanned = replanGame.Active;
+            CommandResponseDeckState replanHand = replanGame.CommandResponseDecks.First(deck => deck.Side == replanned.Side);
+            replanHand.DrawPile.Remove("C-04");
+            if (!replanHand.Hand.Contains("C-04")) replanHand.Hand.Add("C-04");
+            ActionKind newMission = replanned.Mission == ActionKind.Strike ? ActionKind.Search : ActionKind.Strike;
+            int commandBeforeReplan = replanGame.Sides[replanned.Side].CommandSlots;
+            Assert(replanGame.PlayCommandResponse(replanned.Side, "C-04", replanned, null, null, newMission, out string replanMessage), "Rapid Replan resolves: " + replanMessage);
+            Assert(replanned.Mission == newMission && replanned.NextReadyTimeBonus == 1 && replanGame.Sides[replanned.Side].CommandSlots == commandBeforeReplan, "Rapid Replan changes Mission, adds next-Ready cost, and occupies no Command Slot");
+
+            var withdrawalGame = new PrototypeGame(1978);
+            FormationState withdrawalAttacker = withdrawalGame.Active;
+            FormationState withdrawalTarget = withdrawalGame.Formations.First(candidate => candidate.Side != withdrawalAttacker.Side && candidate.Kind == FormationKind.Submarine);
+            withdrawalTarget.Position = new HexCoord(1, 7);
+            withdrawalTarget.Ratings.Defense = 20;
+            ContactState withdrawalContact = withdrawalGame.ContactFor(withdrawalAttacker.Side, withdrawalTarget.Id);
+            if (withdrawalContact == null)
+            {
+                withdrawalContact = new ContactState { Owner = withdrawalAttacker.Side, TargetId = withdrawalTarget.Id };
+                withdrawalGame.Contacts.Add(withdrawalContact);
+            }
+            withdrawalContact.LastKnownPosition = withdrawalTarget.Position;
+            withdrawalContact.Location = LocationQuality.High;
+            CommandResponseDeckState withdrawalHand = withdrawalGame.CommandResponseDecks.First(deck => deck.Side == withdrawalTarget.Side);
+            withdrawalHand.DrawPile.Remove("C-18");
+            if (!withdrawalHand.Hand.Contains("C-18")) withdrawalHand.Hand.Add("C-18");
+            Assert(withdrawalGame.PlayCommandResponse(withdrawalTarget.Side, "C-18", withdrawalTarget, null, null, out string withdrawalMessage) && withdrawalTarget.OrderlyWithdrawalReady, "Orderly Withdrawal can be prepared: " + withdrawalMessage);
+            HexCoord withdrawalStart = withdrawalTarget.Position;
+            int rangeBeforeWithdrawal = HexCoord.Distance(withdrawalAttacker.Position, withdrawalStart);
+            Assert(withdrawalGame.Strike(withdrawalAttacker, withdrawalTarget, Salvo.Light, Reaction.Defend, out CombatResult withdrawalResult, out string strikeMessage), "Strike against prepared withdrawal resolves: " + strikeMessage);
+            Assert(withdrawalResult.Reaction == Reaction.Evade && withdrawalResult.Withdrew && HexCoord.Distance(withdrawalStart, withdrawalTarget.Position) <= 2 && HexCoord.Distance(withdrawalAttacker.Position, withdrawalTarget.Position) > rangeBeforeWithdrawal && !withdrawalTarget.OrderlyWithdrawalReady, "Orderly Withdrawal uses Evade, moves up to two hexes away, and is consumed");
+
+            string json = JsonUtility.ToJson(game.CaptureState());
+            var restored = new PrototypeGame(1978);
+            restored.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(json));
+            Assert(restored.CommandResponseDecks.SelectMany(deck => deck.Hand).SequenceEqual(game.CommandResponseDecks.SelectMany(deck => deck.Hand)), "Response hands survive save and load");
+            Assert(restored.Find(actor.Id).ActiveEffectCardIds.Contains("X-11"), "Expanded Entropy attachments survive save and load");
+            Debug.Log("Card expansion tests passed: 36 Entropy cards, 24 Command Responses, decks, supported mechanics, and save/load.");
+        }
+
         public static void RunCoreSmokeTests()
         {
             EnsureRuntimePanelSettings();
@@ -80,6 +179,41 @@ namespace SeaOfUncertainty.Editor
             Assert(Rules.StrikeRange(FormationKind.SurfaceGroup, Salvo.Standard) == 6, "Surface standard Strike boundary");
             Assert(Rules.StrikeRange(FormationKind.AirGroup, Salvo.Heavy) == 14, "Air heavy Strike boundary");
             Assert(Rules.InterceptionRange == 1, "Interception range is one 20 nm hex");
+            Assert(EntropyEffectCatalog.All.Count == 36 && EntropyEffectCatalog.For(EntropySource.Friction).Count() == 12 && EntropyEffectCatalog.For(EntropySource.Disruption).Count() == 12 && EntropyEffectCatalog.For(EntropySource.Destruction).Count() == 12, "All 36 prototype Entropy effect cards are structured game data");
+            Assert(CommandResponseCatalog.All.Count == 24 && CommandResponseCatalog.All.Select(card => card.Id).Distinct().Count() == 24, "All 24 Command Response cards are structured game data");
+
+            var responseGame = new PrototypeGame(1978);
+            Assert(responseGame.CommandResponseDecks.Count == 2 && responseGame.CommandResponseDecks.All(deck => deck.Hand.Count == 3 && deck.DrawPile.Count == 21), "Each side begins with a deterministic three-card Response hand");
+            CommandResponseDeckState blueResponses = responseGame.CommandResponseDecks.First(deck => deck.Side == Side.Blue);
+            blueResponses.DrawPile.Remove("C-22");
+            if (!blueResponses.Hand.Contains("C-22")) blueResponses.Hand.Add("C-22");
+            FormationState responseFormation = responseGame.Active.Side == Side.Blue ? responseGame.Active : responseGame.Formations.First(formation => formation.Side == Side.Blue);
+            int baseCommand = responseFormation.EffectiveCommand;
+            Assert(responseGame.PlayCommandResponse(Side.Blue, "C-22", responseFormation, null, null, out string responseMessage) && responseFormation.EffectiveCommand == baseCommand + 1, "A supported Command Response resolves and discards: " + responseMessage);
+            Assert(!blueResponses.Hand.Contains("C-22") && blueResponses.DiscardPile.Contains("C-22"), "Played Command Response leaves the hand for the discard pile");
+
+            var cardGame = new PrototypeGame(1978);
+            FormationState cardFormation = cardGame.Active;
+            int frictionDrawCount = cardGame.EntropyDecks.First(deck => deck.Source == EntropySource.Friction).DrawPile.Count;
+            EntropyEffectDefinition frictionCard = cardGame.MarkEntropy(cardFormation, EntropySource.Friction);
+            Assert(frictionCard != null && cardFormation.Friction && cardFormation.ActiveEffectCardIds.Contains(frictionCard.Id), "New Friction draws and attaches one matching effect card");
+            Assert(cardGame.PendingEntropyEffectFor(cardFormation.Side)?.Id == frictionCard.Id && cardGame.PendingEntropyFormationFor(cardFormation.Side) == cardFormation, "A card pull queues a reveal for its owning side");
+            EntropyEffectDefinition stackedFrictionCard = cardGame.MarkEntropy(cardFormation, EntropySource.Friction);
+            Assert(stackedFrictionCard != null && cardFormation.ActiveEffectCardIds.Count == 2, "A repeated Entropy event draws and stacks another physical card");
+            Assert(cardGame.EntropyDecks.First(deck => deck.Source == EntropySource.Friction).DrawPile.Count == frictionDrawCount - 2, "Each pull advances the deterministic source deck");
+            FormationState opposingFormation = cardGame.Formations.First(formation => formation.Side != cardFormation.Side);
+            EntropyEffectDefinition opposingCard = cardGame.MarkEntropy(opposingFormation, EntropySource.Friction);
+            Assert(opposingCard != null && cardGame.PendingEntropyEffectFor(opposingFormation.Side)?.Id == opposingCard.Id, "The opposing side receives its own independent reveal");
+            cardGame.ConsumePendingEntropyEffect(opposingFormation.Side);
+            Assert(cardGame.PendingEntropyEffectFor(cardFormation.Side)?.Id == frictionCard.Id, "Acknowledging an opposing draw cannot overwrite or consume the player's queued reveal");
+            string queuedSave = JsonUtility.ToJson(cardGame.CaptureState());
+            var restoredCardGame = new PrototypeGame(1978);
+            restoredCardGame.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(queuedSave));
+            Assert(restoredCardGame.PendingEntropyEffectFor(cardFormation.Side)?.Id == frictionCard.Id, "Pending card reveals survive save and load");
+            cardGame.ConsumePendingEntropyEffect(cardFormation.Side);
+            Assert(cardGame.Recover(cardFormation, out string cardRecoveryMessage) && cardFormation.Friction && cardFormation.ActiveEffectCardIds.Count == 1, "Recover discards one stacked card and retains the marked source while another remains: " + cardRecoveryMessage);
+            var modifierProbe = new FormationState { Kind = FormationKind.CarrierGroup, Ratings = new Ratings { Move = 3, Search = 3, Strike = 3, Defense = 3, Command = 3 }, ActiveEffectCardIds = new List<string> { "X-01", "X-02", "X-03", "X-04", "X-05", "X-06" } };
+            Assert(modifierProbe.EffectiveMove == 2 && modifierProbe.EffectiveSearch == 2 && modifierProbe.EffectiveStrike == 2 && modifierProbe.EffectiveDefense == 2 && modifierProbe.EffectiveCommand == 2 && !modifierProbe.CanHeavySalvo, "Supported Destruction cards modify formation capabilities");
 
             var exactTie = new List<FormationState>
             {
@@ -138,6 +272,11 @@ namespace SeaOfUncertainty.Editor
                 Assert(luzonMap.UsesProceduralSurfaceTextures, "Land, littoral, and ocean use procedural surface textures");
                 Assert(luzonMap.WaterSurfaceVertexCount >= 4000, "Ocean surface has enough geometry for restrained wave relief");
                 Assert(luzonMap.TerrainReliefCount >= 2, "Major polygon land masses receive coastline-aligned dimensional relief");
+                Assert(luzonMap.HasShallowWaterDetail && luzonMap.HasCoastalFoam && luzonMap.HasCoastlineDrivenShelf, "Coastline-driven shelves, bathymetric contours, and coastal foam enrich the sea-land transition");
+                Assert(luzonMap.HasAtmosphericHaze && luzonMap.CloudShadowCount >= 2 && luzonMap.WeatherPreset == "Haze", "Data-driven haze and moving cloud-shadow layers establish maritime atmosphere");
+                Assert(luzonMap.GeographicLabelCount == luzon.Area.Locations.Count, "Ports, airfields, straits, and objectives receive map-space geographic labels");
+                float renderLuminance = luzonMap.ProbeRenderLuminance();
+                Assert(renderLuminance > .01f && renderLuminance < .95f, "The integrated ocean, terrain, atmosphere, and label camera produces a valid non-black render");
                 Vector3 edge = luzonMap.HexToWorld(new HexCoord(23, 19));
                 Assert(edge.x > 0f && edge.z > 0f, "Floating-origin world coordinates center the theater");
                 Assert(luzonMap.TryWorldToHex(luzonMap.HexToWorld(new HexCoord(11, 9)), out HexCoord roundTrip) && roundTrip.Equals(new HexCoord(11, 9)), "Hex/world conversion round trip");
@@ -160,6 +299,7 @@ namespace SeaOfUncertainty.Editor
                 game.Contacts.Add(new ContactState { Owner = game.Active.Side, TargetId = enemyId, LastKnownPosition = new HexCoord(7, 3), Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 3, IsFalse = true });
                 game.Contacts.Add(new ContactState { Owner = game.Active.Side, TargetId = enemyId, LastKnownPosition = new HexCoord(8, 3), Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 4, IsLost = true });
                 operationalMap.SetState(game, ToolkitActionMode.Strike, MoveMode.Normal, SearchMode.Active, Salvo.Standard);
+                Assert(operationalMap.HasActiveFormationPulse, "The active formation has a dedicated pulse ring");
                 Assert(operationalMap.VisibleFormationCount == game.Formations.FindAll(formation => formation.Side == game.Active.Side && !formation.IsDestroyed).Count, "3D view instantiates only the active side's friendly formations");
                 Assert(operationalMap.FormationMeshVariantCount >= 2 && operationalMap.ContainsRenderedName("Tapered Hull"), "Close formation models use reusable tapered naval meshes instead of stretched-cube hull blockouts");
                 Assert(operationalMap.ContainsRenderedName("Swept Wing") && operationalMap.ContainsRenderedName("Hydrodynamic Pressure Hull"), "Air-group and submarine silhouettes remain recognizable by geometry");
@@ -192,6 +332,12 @@ namespace SeaOfUncertainty.Editor
                 float flyDistance = operationalMap.CameraDistance;
                 operationalMap.FlyCamera(1f, 1f, 1f, 1f, -1f, .25f, true);
                 Assert(operationalMap.FocusWithinBounds && operationalMap.CameraDistance < flyDistance, "Keyboard camera movement, rotation, tilt, and zoom remain bounded");
+                operationalMap.SaveCameraView();
+                float bookmarkedHeading = operationalMap.Heading;
+                operationalMap.FlyCamera(0f, 0f, 1f, 0f, 0f, .4f);
+                Assert(!Mathf.Approximately(operationalMap.Heading, bookmarkedHeading) && operationalMap.RecallCameraView() && Mathf.Approximately(operationalMap.Heading, bookmarkedHeading), "A command-camera view can be saved and recalled");
+                operationalMap.FocusHex(game.Area.Objective);
+                Assert(operationalMap.FocusWithinBounds, "Active/objective focus commands remain inside theater bounds");
                 operationalMap.Pan(new Vector2(20f, -15f));
                 operationalMap.Zoom(1f);
                 operationalMap.ResetCamera();
@@ -201,6 +347,8 @@ namespace SeaOfUncertainty.Editor
             Assert(cameraInputProbe.SetCameraKey(KeyCode.W, true) && cameraInputProbe.CameraInputActive, "WASD camera input can be routed from the operation screen without map focus");
             cameraInputProbe.SetCameraKey(KeyCode.W, false);
             Assert(!cameraInputProbe.CameraInputActive, "Released global camera keys do not leave movement stuck active");
+            cameraInputProbe.SetEdgeScroll(true);
+            Assert(cameraInputProbe.EdgeScrollEnabled, "Optional edge scrolling can be enabled independently of WASD movement");
             FormationState actor = game.Active;
             int originalTime = game.Time;
             var destination = new HexCoord(actor.Position.Q, actor.Position.R > 0 ? actor.Position.R - 1 : actor.Position.R + 1);
@@ -247,7 +395,9 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.Active != null && restored.Active.Id == game.Active.Id, "Save restores active formation");
             Assert(restored.Formations.Count == game.Formations.Count, "Save restores formations");
             Assert(restored.Contacts.Count == game.Contacts.Count, "Save restores Contacts");
-            Assert(saveData.Version == 3 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 3 save uses stable scenario and area IDs");
+            Assert(saveData.Version == 5 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 5 save preserves stable IDs, Entropy decks, and Response hands");
+            Assert(restored.EntropyDecks.Count == 3 && restored.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count) == game.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count), "Save restores Entropy deck state");
+            Assert(restored.CommandResponseDecks.Count == 2 && restored.CommandResponseDecks.All(deck => deck.Hand.Count == 3), "Save restores both private Command Response hands");
             Assert(saveData.HasLastActingSide && restored.LastActingSide == saveData.LastActingSide, "Save restores continuous-activation tie priority");
             saveData.Version = 1; saveData.ScenarioId = null; saveData.OperationalAreaId = null;
             new PrototypeGame().RestoreState(saveData);
@@ -274,6 +424,23 @@ namespace SeaOfUncertainty.Editor
             }
             Assert(aiGame.Time >= aiGame.Scenario.Horizon, "AI commander can complete a full 20 nm scenario without stalling");
 
+            var extendedStrikeGame = new PrototypeGame();
+            FormationState extendedStrikeActor = extendedStrikeGame.Active;
+            FormationState extendedStrikeTarget = extendedStrikeGame.Formations.Find(formation => formation.Side != extendedStrikeActor.Side);
+            extendedStrikeGame.Contacts.Clear();
+            HexCoord extendedFix = extendedStrikeActor.Position;
+            bool foundExtendedFix = false;
+            for (int q = 0; q < extendedStrikeGame.Area.Width && !foundExtendedFix; q++) for (int r = 0; r < extendedStrikeGame.Area.Height && !foundExtendedFix; r++)
+            {
+                var candidate = new HexCoord(q, r);
+                int candidateRange = HexCoord.Distance(extendedStrikeActor.Position, candidate);
+                if (candidateRange > Rules.StrikeRange(extendedStrikeActor.Kind, Salvo.Standard) && candidateRange <= Rules.StrikeRange(extendedStrikeActor.Kind, Salvo.Heavy)) { extendedFix = candidate; foundExtendedFix = true; }
+            }
+            extendedStrikeGame.Contacts.Add(new ContactState { Owner = extendedStrikeActor.Side, TargetId = extendedStrikeTarget.Id, LastKnownPosition = extendedFix, Location = LocationQuality.High, Identity = IdentityQuality.Identified, Age = 0 });
+            AiDecision extendedStrike = PrototypeAiCommander.Choose(extendedStrikeGame);
+            int extendedRange = HexCoord.Distance(extendedStrikeActor.Position, extendedFix);
+            Assert(foundExtendedFix && extendedRange > Rules.StrikeRange(extendedStrikeActor.Kind, Salvo.Standard) && extendedRange <= Rules.StrikeRange(extendedStrikeActor.Kind, Salvo.Heavy) && extendedStrike.Action == ActionKind.Strike && extendedStrike.Salvo == Salvo.Heavy, "AI recognizes a legitimate high-quality Contact in extended Heavy-only range");
+
             var terrainGame = new PrototypeGame(1978, luzon);
             FormationState surface = terrainGame.Active;
             surface.Position = new HexCoord(0, 5);
@@ -291,6 +458,28 @@ namespace SeaOfUncertainty.Editor
             tacticalMap.SetState(restored, ToolkitActionMode.Move, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
             Assert(tacticalMap.focusable, "UI Toolkit tactical map keyboard focus");
             Debug.Log("Sea of Uncertainty core smoke tests passed.");
+        }
+
+        public static void CaptureMapPreview()
+        {
+            ScenarioDefinition scenario = ScenarioCatalog.LuzonStrait();
+            var game = new PrototypeGame(1978, scenario);
+            using (var map = new OperationalMap3D(scenario.Area, 1280, 720))
+            {
+                map.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard, false, true);
+                map.Orbit(new Vector2(0f, -1000f));
+                map.ProbeRenderLuminance();
+                RenderTexture previous = RenderTexture.active;
+                RenderTexture.active = map.Texture;
+                var image = new Texture2D(map.Texture.width, map.Texture.height, TextureFormat.RGB24, false);
+                image.ReadPixels(new Rect(0, 0, map.Texture.width, map.Texture.height), 0, 0, false);
+                image.Apply(false, false);
+                string path = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/Windows/3d-map-preview.png"));
+                File.WriteAllBytes(path, image.EncodeToPNG());
+                Object.DestroyImmediate(image);
+                RenderTexture.active = previous;
+                Debug.Log("3D map preview captured: " + path);
+            }
         }
 
         private static void EnsureRuntimePanelSettings()

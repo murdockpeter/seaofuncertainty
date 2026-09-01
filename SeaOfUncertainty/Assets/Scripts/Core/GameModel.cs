@@ -73,13 +73,36 @@ namespace SeaOfUncertainty.Core
         public int MajorActions;
         public Endurance Endurance;
         public DamageState Damage;
+        public List<string> ActiveEffectCardIds = new List<string>();
+        public List<string> ResolvedEffectCardIds = new List<string>();
+        public int CommandBonus;
+        public int MoveBonus;
+        public int SignatureBonus;
+        public int ReactionDefenseBonus;
+        public int NextReadyTimeBonus;
+        public bool FreeFocusedSearch;
+        public bool IgnoreEntropyNextAction;
+        public bool SuppressDestructionNextAction;
+        public ActionKind Mission = ActionKind.Hold;
+        public bool OrderlyWithdrawalReady;
 
         public int EntropySources => (Friction ? 1 : 0) + (Disruption ? 1 : 0) + (Destruction ? 1 : 0);
         public string Cohesion => EntropySources >= 3 ? "Disorganized" : EntropySources >= 2 ? "Disrupted" : "Cohesive";
         public bool IsDestroyed => Damage == DamageState.Destroyed;
-        public int EffectiveMove => Math.Max(1, Ratings.Move - (Endurance == Endurance.Critical ? 1 : 0) - (Damage == DamageState.Crippled ? 1 : 0));
-        public int EffectiveStrike => Ratings.Strike - (Destruction ? 1 : 0);
-        public int EffectiveSearch => Ratings.Search - (Disruption ? 1 : 0);
+        public int EffectiveMove => Math.Max(1, Ratings.Move - (Endurance == Endurance.Critical ? 1 : 0) - (Damage == DamageState.Crippled ? 1 : 0) - (HasEffect("X-03") ? 1 : 0));
+        public int EffectiveStrike => Ratings.Strike - (Destruction && !IgnoreEntropyNextAction && !SuppressDestructionNextAction ? 1 : 0) - (HasEffect("X-01") && (Kind == FormationKind.CarrierGroup || Kind == FormationKind.AirGroup) ? 1 : 0);
+        public int EffectiveSearch => Ratings.Search - (Disruption && !IgnoreEntropyNextAction ? 1 : 0) - (HasEffect("X-02") ? 1 : 0);
+        public int EffectiveDefense => Math.Max(0, Ratings.Defense - (HasEffect("X-06") ? 1 : 0) - (HasEffect("X-07") ? 1 : 0) + ReactionDefenseBonus);
+        public int EffectiveSignature => Ratings.Signature + (Loud ? 1 : 0) + SignatureBonus;
+        public int EffectiveCommand => Math.Max(0, Ratings.Command + CommandBonus - (HasEffect("X-05") ? 1 : 0) - (HasEffect("X-12") ? 1 : 0));
+        public bool CanHeavySalvo => !WeaponExpended && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect("X-04") && !HasEffect("X-11");
+        public bool HasEffect(string id)
+        {
+            if (ActiveEffectCardIds == null || !ActiveEffectCardIds.Contains(id) || ResolvedEffectCardIds != null && ResolvedEffectCardIds.Contains(id)) return false;
+            if (IgnoreEntropyNextAction) return false;
+            EntropyEffectDefinition effect = EntropyEffectCatalog.Find(id);
+            return !SuppressDestructionNextAction || effect == null || effect.Source != EntropySource.Destruction;
+        }
     }
 
     [Serializable]
@@ -114,6 +137,9 @@ namespace SeaOfUncertainty.Core
         public CombatBand Band;
         public int Roll;
         public DamageState Damage;
+        public Reaction Reaction;
+        public bool Withdrew;
+        public HexCoord WithdrawalDestination;
     }
 
     public static class Rules
@@ -124,7 +150,13 @@ namespace SeaOfUncertainty.Core
             if (kind != FormationKind.AirGroup) return MoveDistance(mode);
             return mode == MoveMode.Cautious ? 4 : mode == MoveMode.Normal ? 6 : 8;
         }
-        public static int MoveAllowance(FormationState formation, MoveMode mode) => formation.Kind == FormationKind.AirGroup ? MoveDistance(formation.Kind, mode) : Math.Min(MoveDistance(formation.Kind, mode), formation.EffectiveMove);
+        public static int MoveAllowance(FormationState formation, MoveMode mode)
+        {
+            int allowance = formation.Kind == FormationKind.AirGroup ? MoveDistance(formation.Kind, mode) : Math.Min(MoveDistance(formation.Kind, mode), formation.EffectiveMove);
+            allowance += formation.MoveBonus;
+            if (formation.HasEffect("F-07")) allowance--;
+            return Math.Max(1, allowance);
+        }
         public static int SearchModifier(SearchMode mode) => mode == SearchMode.Passive ? 0 : mode == SearchMode.Active ? 1 : 2;
         public static int SearchRange(SearchMode mode) => mode == SearchMode.Passive ? 8 : mode == SearchMode.Active ? 10 : 12;
         public const int SearchAreaRadius = 1;
@@ -182,7 +214,7 @@ namespace SeaOfUncertainty.Core
                 tied = tied.Where(f => f.Side != lastActingSide.Value).ToList();
             return tied
                 .OrderBy(f => f.EntropySources)
-                .ThenByDescending(f => f.Ratings.Command)
+                .ThenByDescending(f => f.EffectiveCommand)
                 .ThenBy(f => f.Id, StringComparer.Ordinal)
                 .FirstOrDefault();
         }
