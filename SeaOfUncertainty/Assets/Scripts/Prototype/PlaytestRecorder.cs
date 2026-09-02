@@ -128,6 +128,11 @@ namespace SeaOfUncertainty.Prototype
             Record(game, category, actor, action, mode, null, legalAlternatives, 0, "", "Selection changed before commitment.", null);
         }
 
+        public void RecordCommandEvent(PrototypeGame game, FormationState actor, string category, string detail)
+        {
+            Record(game, category, actor, "Command", null, null, "", 0, detail, detail, null);
+        }
+
         public void RecordRejected(PrototypeGame game, FormationState actor, string action, string mode, string targetId, string reason, float decisionSeconds)
         {
             Record(game, "ActionRejected", actor, action, mode, targetId, "", decisionSeconds, "", reason, null);

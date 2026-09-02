@@ -13,6 +13,12 @@ namespace SeaOfUncertainty.Core
     public enum Salvo { Light, Standard, Heavy }
     public enum Reaction { None, Defend, Evade, Counterattack, Hold }
     public enum ReactionControl { None, HumanDirect, HumanHandoff, Ai }
+    public enum PatrolPosture { Defensive, Balanced, Aggressive }
+    public enum SupportKind { Strike, Search, Defense, AswSearch, Synchronization }
+    public enum CommandSlotStatus { Free, Occupied, Strained }
+    public enum MissionObjectiveKind { CurrentArea, OperationalObjective, FriendlyFormation, Contact, LogisticsFacility }
+    public enum MissionPosture { Cautious, Balanced, Aggressive }
+    public enum MissionTrigger { OnReady, ContactLocated, EntropyMarked, LogisticsRequired, ObjectiveReached }
     public enum LocationQuality { Low, Medium, High }
     public enum IdentityQuality { Unknown, General, Identified }
     public enum Endurance { Ready, Extended, Critical }
@@ -87,6 +93,32 @@ namespace SeaOfUncertainty.Core
         public ActionKind Mission = ActionKind.Hold;
         public bool OrderlyWithdrawalReady;
         public bool Replenishing;
+        public bool PatrolActive;
+        public HexCoord PatrolCenter;
+        public string PatrolProtectedFormationId;
+        public PatrolPosture PatrolPosture;
+        public bool PatrolInterceptionAvailable;
+        public bool SupportActive;
+        public string SupportRecipientId;
+        public SupportKind SupportKind;
+        public bool SupportBlockedUntilRecover;
+        public MissionObjectiveKind MissionObjective = MissionObjectiveKind.CurrentArea;
+        public string MissionObjectiveId;
+        public HexCoord MissionObjectiveHex;
+        public MissionPosture MissionPosture = MissionPosture.Balanced;
+        public MissionTrigger MissionTrigger = MissionTrigger.OnReady;
+        public bool PendingMissionChange;
+        public ActionKind PendingMissionTask;
+        public MissionObjectiveKind PendingMissionObjective;
+        public string PendingMissionObjectiveId;
+        public HexCoord PendingMissionObjectiveHex;
+        public MissionPosture PendingMissionPosture;
+        public MissionTrigger PendingMissionTrigger;
+        public int MissionDeliveryTime;
+        public bool TriggerMissionCommandReady;
+        public bool MissionChangeLockedUntilAction;
+        public bool PushThroughReady;
+        public bool LastActionFollowedMission;
 
         public int EntropySources => (Friction ? 1 : 0) + (Disruption ? 1 : 0) + (Destruction ? 1 : 0);
         public string Cohesion => EntropySources >= 3 ? "Disorganized" : EntropySources >= 2 ? "Disrupted" : "Cohesive";
@@ -123,11 +155,22 @@ namespace SeaOfUncertainty.Core
     }
 
     [Serializable]
+    public sealed class CommandSlotState
+    {
+        public int Index;
+        public CommandSlotStatus Status;
+        public string Purpose;
+        public string FormationId;
+        public int ReleaseTime = -1;
+    }
+
+    [Serializable]
     public sealed class SideState
     {
         public Side Side;
         public int CommandSlots = 3;
         public int CommandStrain;
+        public List<CommandSlotState> SlotStates = new List<CommandSlotState>();
     }
 
     [Serializable]
@@ -224,6 +267,8 @@ namespace SeaOfUncertainty.Core
                 .FirstOrDefault();
         }
 
-        public static int ActionTime(ActionKind action) => action == ActionKind.Patrol || action == ActionKind.Hold ? 1 : action == ActionKind.Replenish ? 3 : 2;
+        public const int PatrolRadius = 1;
+        public const int SupportRange = 2;
+        public static int ActionTime(ActionKind action) => action == ActionKind.Patrol || action == ActionKind.Support || action == ActionKind.Hold ? 1 : action == ActionKind.Replenish ? 3 : 2;
     }
 }

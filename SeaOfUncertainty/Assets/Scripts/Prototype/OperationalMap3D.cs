@@ -862,6 +862,17 @@ namespace SeaOfUncertainty.Prototype
                         color = inRange ? new Color(1f, .45f, .14f, .9f) : new Color(.3f, .34f, .38f, .2f);
                         width = inRange ? .06f : .02f;
                     }
+                    else if (actionMode == ToolkitActionMode.Replenish)
+                    {
+                        bool facility = game.LogisticsFacilitiesFor(game.Active).Any(location => location.Hex.Equals(pair.Key));
+                        if (facility)
+                        {
+                            bool current = pair.Key.Equals(game.Active.Position);
+                            color = current ? new Color(.18f, 1f, .58f, 1f) : new Color(1f, .72f, .16f, .92f);
+                            width = current ? .1f : .075f;
+                        }
+                        else { color = new Color(.25f, .32f, .38f, .14f); width = .018f; }
+                    }
                     if (pair.Key.Equals(area.Objective))
                     {
                         color = Color.Lerp(color, new Color(1f, .72f, .16f, 1f), .65f);
@@ -889,11 +900,41 @@ namespace SeaOfUncertainty.Prototype
                 stateObjects.Add(BuildFormation(formation));
                 VisibleFormationCount++;
             }
+            foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed && f.Side == viewer && (f.PatrolActive || f.SupportActive)))
+                stateObjects.Add(BuildOperationalAssignment(formation));
             foreach (ContactState contact in game.Contacts.Where(c => c.Owner == viewer && !c.IsLost))
             {
                 stateObjects.Add(BuildContact(contact));
                 VisibleContactCount++;
             }
+        }
+
+        private GameObject BuildOperationalAssignment(FormationState formation)
+        {
+            GameObject marker = AcquireMarker(formation.Name + " Operational Assignment");
+            if (formation.PatrolActive)
+            {
+                Color color = formation.PatrolPosture == PatrolPosture.Defensive ? new Color(.18f, .72f, 1f, .78f)
+                    : formation.PatrolPosture == PatrolPosture.Aggressive ? new Color(1f, .38f, .12f, .84f)
+                    : new Color(.25f, 1f, .65f, .76f);
+                LineRenderer areaRing = Ring("Patrol Screen Area", formation.PatrolCenter, 1.62f, color, formation.PatrolInterceptionAvailable ? .075f : .035f);
+                areaRing.transform.SetParent(marker.transform, true);
+                LineRenderer link = Segment("Screen Assignment", HexToWorld(formation.Position) + Vector3.up * .16f, HexToWorld(formation.PatrolCenter) + Vector3.up * .16f, color, .045f);
+                link.transform.SetParent(marker.transform, true);
+            }
+            if (formation.SupportActive)
+            {
+                FormationState recipient = game.Find(formation.SupportRecipientId);
+                if (recipient != null && !recipient.IsDestroyed)
+                {
+                    Color color = new Color(.72f, .48f, 1f, .88f);
+                    LineRenderer link = Segment("Support Relationship", HexToWorld(formation.Position) + Vector3.up * .24f, HexToWorld(recipient.Position) + Vector3.up * .24f, color, .065f);
+                    link.transform.SetParent(marker.transform, true);
+                    LineRenderer recipientRing = Ring("Support Recipient", recipient.Position, .7f, color, .055f);
+                    recipientRing.transform.SetParent(marker.transform, true);
+                }
+            }
+            return marker;
         }
 
         private GameObject BuildFormation(FormationState formation)

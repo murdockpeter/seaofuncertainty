@@ -138,13 +138,22 @@ namespace SeaOfUncertainty.Editor
             }
             withdrawalContact.LastKnownPosition = withdrawalTarget.Position;
             withdrawalContact.Location = LocationQuality.High;
+            ContactState withdrawalThreatContact = withdrawalGame.ContactFor(withdrawalTarget.Side, withdrawalAttacker.Id);
+            if (withdrawalThreatContact == null)
+            {
+                withdrawalThreatContact = new ContactState { Owner = withdrawalTarget.Side, TargetId = withdrawalAttacker.Id };
+                withdrawalGame.Contacts.Add(withdrawalThreatContact);
+            }
+            withdrawalThreatContact.LastKnownPosition = withdrawalAttacker.Position;
+            withdrawalThreatContact.Location = LocationQuality.High;
             CommandResponseDeckState withdrawalHand = withdrawalGame.CommandResponseDecks.First(deck => deck.Side == withdrawalTarget.Side);
             withdrawalHand.DrawPile.Remove("C-18");
             if (!withdrawalHand.Hand.Contains("C-18")) withdrawalHand.Hand.Add("C-18");
             Assert(withdrawalGame.PlayCommandResponse(withdrawalTarget.Side, "C-18", withdrawalTarget, null, null, out string withdrawalMessage) && withdrawalTarget.OrderlyWithdrawalReady, "Orderly Withdrawal can be prepared: " + withdrawalMessage);
             HexCoord withdrawalStart = withdrawalTarget.Position;
             int rangeBeforeWithdrawal = HexCoord.Distance(withdrawalAttacker.Position, withdrawalStart);
-            Assert(withdrawalGame.Strike(withdrawalAttacker, withdrawalTarget, Salvo.Light, Reaction.Defend, out CombatResult withdrawalResult, out string strikeMessage), "Strike against prepared withdrawal resolves: " + strikeMessage);
+            HexCoord withdrawalDestination = withdrawalGame.LegalEvadeDestinations(withdrawalAttacker, withdrawalTarget, 2).First();
+            Assert(withdrawalGame.Strike(withdrawalAttacker, withdrawalTarget, Salvo.Light, Reaction.Evade, withdrawalDestination, out CombatResult withdrawalResult, out string strikeMessage), "Strike against prepared withdrawal resolves: " + strikeMessage);
             Assert(withdrawalResult.Reaction == Reaction.Evade && withdrawalResult.Withdrew && HexCoord.Distance(withdrawalStart, withdrawalTarget.Position) <= 2 && HexCoord.Distance(withdrawalAttacker.Position, withdrawalTarget.Position) > rangeBeforeWithdrawal && !withdrawalTarget.OrderlyWithdrawalReady, "Orderly Withdrawal uses Evade, moves up to two hexes away, and is consumed");
 
             string json = JsonUtility.ToJson(game.CaptureState());
@@ -153,6 +162,210 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.CommandResponseDecks.SelectMany(deck => deck.Hand).SequenceEqual(game.CommandResponseDecks.SelectMany(deck => deck.Hand)), "Response hands survive save and load");
             Assert(restored.Find(actor.Id).ActiveEffectCardIds.Contains("X-11"), "Expanded Entropy attachments survive save and load");
             Debug.Log("Card expansion tests passed: 36 Entropy cards, 24 Command Responses, decks, supported mechanics, and save/load.");
+        }
+
+        public static void RunCommandMissionTests()
+        {
+            var freeGame = new PrototypeGame(1978);
+            FormationState freeActor = freeGame.Active;
+            Assert(freeGame.CommandSlotsFor(freeActor.Side).Count == 3 && freeGame.CommandSlotsFor(freeActor.Side).All(slot => slot.Status == CommandSlotStatus.Free), "Each side begins with three individually modeled free Command Slots");
+            string missionActionMessage = string.Empty;
+            Assert(freeActor.Mission == ActionKind.Search && freeGame.SearchArea(freeActor, freeActor.Position, SearchMode.Passive, out missionActionMessage), "Initial submarine Search follows its Standing Mission: " + missionActionMessage);
+            Assert(freeActor.LastActionFollowedMission && freeGame.Sides[freeActor.Side].CommandSlots == 3, "A mission-following Action occupies no Command Attention");
+
+            var retaskGame = new PrototypeGame(1978);
+            FormationState retasked = retaskGame.Active;
+            Assert(retaskGame.Hold(retasked, out string retaskMessage), "An immediate out-of-Mission Hold can be ordered: " + retaskMessage);
+            Assert(!retasked.LastActionFollowedMission && retaskGame.Sides[retasked.Side].CommandSlots == 3 && retaskGame.Log.Any(entry => entry.Contains("COMMAND OCCUPIED") && entry.Contains("out-of-Mission")), "Immediate retasking occupies a Slot through action resolution, then releases it and records telemetry-visible log state");
+
+            var editorGame = new PrototypeGame(1978);
+            FormationState edited = editorGame.Active;
+            HexCoord moveDestination = Enumerable.Range(0, editorGame.Area.Width).SelectMany(q => Enumerable.Range(0, editorGame.Area.Height).Select(r => new HexCoord(q, r)))
+                .First(hex => editorGame.Area.Contains(hex) && editorGame.Area.TerrainAt(hex) != OperationalTerrain.Land && HexCoord.Distance(edited.Position, hex) == 1);
+            Assert(editorGame.AssignStandingMission(edited, ActionKind.Move, MissionObjectiveKind.OperationalObjective, null, editorGame.Area.Objective, MissionPosture.Cautious, MissionTrigger.ObjectiveReached, out string editMessage), "Standing Mission editor assigns Task, Objective, Posture, and Trigger: " + editMessage);
+            Assert(edited.Mission == ActionKind.Move && edited.MissionObjective == MissionObjectiveKind.OperationalObjective && edited.MissionPosture == MissionPosture.Cautious && edited.MissionTrigger == MissionTrigger.ObjectiveReached && editorGame.Sides[edited.Side].CommandSlots == 2, "Immediate Mission change occupies one individual Slot until the Formation acts");
+            Assert(editorGame.Move(edited, moveDestination, MoveMode.Cautious, out string editedMoveMessage) && edited.LastActionFollowedMission && editorGame.Sides[edited.Side].CommandSlots == 3, "Executing the newly assigned Task is attention-free and releases Mission-change attention: " + editedMoveMessage);
+
+            var priorityGame = new PrototypeGame(1978);
+            FormationState priority = priorityGame.Active;
+            priority.Friction = true; priority.ActiveEffectCardIds.Add("F-03"); priority.ActiveEffectCardIds.Add("F-12");
+            Assert(priorityGame.AssignStandingMission(priority, ActionKind.Hold, MissionObjectiveKind.CurrentArea, null, priority.Position, MissionPosture.Balanced, MissionTrigger.OnReady, out _), "F-03 still permits a Mission change when two Slots are free");
+            Assert(priorityGame.Sides[priority.Side].CommandSlots == 1 && priority.NextReadyTimeBonus == 1, "F-03 occupies one additional Slot and F-12 adds +1 Time to the next Ready schedule");
+
+            var delegatedGame = new PrototypeGame(1978);
+            FormationState delegated = delegatedGame.Active;
+            CommandResponseDeckState delegatedHand = delegatedGame.CommandResponseDecks.First(deck => deck.Side == delegated.Side);
+            delegatedHand.DrawPile.Remove("C-07"); if (!delegatedHand.Hand.Contains("C-07")) delegatedHand.Hand.Add("C-07");
+            Assert(delegatedGame.PlayCommandResponse(delegated.Side, "C-07", delegated, null, null, out string delegateMessage) && delegated.MissionChangeLockedUntilAction, "C-07 grants delegated authority and locks Mission changes: " + delegateMessage);
+            Assert(!delegatedGame.AssignStandingMission(delegated, ActionKind.Hold, MissionObjectiveKind.CurrentArea, null, delegated.Position, MissionPosture.Balanced, MissionTrigger.OnReady, out string lockedMessage) && lockedMessage.Contains("Delegated Authority"), "Delegated Authority rejects Mission editing until the Formation acts");
+
+            var latencyGame = new PrototypeGame(1978);
+            FormationState delayed = latencyGame.Active;
+            ActionKind originalTask = delayed.Mission;
+            delayed.Disruption = true; delayed.ActiveEffectCardIds.Add("D-02");
+            Assert(latencyGame.AssignStandingMission(delayed, ActionKind.Move, MissionObjectiveKind.OperationalObjective, null, latencyGame.Area.Objective, MissionPosture.Balanced, MissionTrigger.ObjectiveReached, out string delayMessage), "D-02 accepts a delayed order: " + delayMessage);
+            Assert(delayed.PendingMissionChange && delayed.Mission == originalTask && delayed.MissionDeliveryTime == latencyGame.Time + 1, "Communications Latency keeps the existing Mission in force for one Time");
+            string delayedJson = JsonUtility.ToJson(latencyGame.CaptureState());
+            var delayedRestore = new PrototypeGame(1978);
+            delayedRestore.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(delayedJson));
+            Assert(delayedRestore.Find(delayed.Id).PendingMissionChange && delayedRestore.CommandSlotsFor(delayed.Side).Any(slot => slot.Purpose == "Delayed Mission Order"), "Pending orders and occupied individual Slots survive save/load");
+            int delayGuard = 0;
+            while (latencyGame.Time < delayed.MissionDeliveryTime && delayGuard++ < 40) Assert(latencyGame.Hold(latencyGame.Active, out string cadence), "Advance delayed order clock: " + cadence);
+            Assert(!delayed.PendingMissionChange && delayed.Mission == ActionKind.Move && latencyGame.CommandSlotsFor(delayed.Side).All(slot => slot.Purpose != "Delayed Mission Order"), "Delayed Mission arrives and its Command Slot releases at delivery Time");
+
+            var brokenGame = new PrototypeGame(1978);
+            FormationState broken = brokenGame.Active;
+            broken.Disruption = true; broken.ActiveEffectCardIds.Add("D-04");
+            broken.MissionTrigger = MissionTrigger.EntropyMarked;
+            broken.Friction = true; broken.ActiveEffectCardIds.Add("F-01");
+            Assert(!brokenGame.AssignStandingMission(broken, ActionKind.Hold, MissionObjectiveKind.CurrentArea, null, broken.Position, MissionPosture.Balanced, MissionTrigger.OnReady, out string brokenMessage) && brokenMessage.Contains("Broken Link"), "D-04 rejects direct new orders");
+            Assert(!brokenGame.Recover(broken, EntropySource.Friction, "F-01", out string blockedTrigger) && blockedTrigger.Contains("Mission Command"), "Broken Link also blocks an otherwise valid trigger retask until C-03 authorizes it");
+            CommandResponseDeckState brokenHand = brokenGame.CommandResponseDecks.First(deck => deck.Side == broken.Side);
+            brokenHand.DrawPile.Remove("C-03"); if (!brokenHand.Hand.Contains("C-03")) brokenHand.Hand.Add("C-03");
+            Assert(brokenGame.PlayCommandResponse(broken.Side, "C-03", broken, null, null, out string missionCommandMessage) && broken.TriggerMissionCommandReady, "C-03 prepares one Broken Link Trigger: " + missionCommandMessage);
+            Assert(brokenGame.Recover(broken, EntropySource.Friction, "F-01", out string triggeredRecover) && broken.Mission == ActionKind.Recover && !broken.TriggerMissionCommandReady, "Authorized Entropy Trigger automatically retasks and executes without Command Attention: " + triggeredRecover);
+
+            var flashGame = new PrototypeGame(1978);
+            FormationState flash = flashGame.Active;
+            flash.Disruption = true; flash.ActiveEffectCardIds.Add("D-04");
+            CommandResponseDeckState flashHand = flashGame.CommandResponseDecks.First(deck => deck.Side == flash.Side);
+            flashHand.DrawPile.Remove("C-17"); if (!flashHand.Hand.Contains("C-17")) flashHand.Hand.Add("C-17");
+            Assert(flashGame.PlayCommandResponse(flash.Side, "C-17", flash, null, null, ActionKind.Hold, out string flashMessage) && flash.Mission == ActionKind.Hold && flashGame.Sides[flash.Side].CommandStrain == 1, "C-17 penetrates Broken Link immediately and marks Command Strain: " + flashMessage);
+            flash.Friction = true; flash.Destruction = true;
+            Assert(flashGame.PushThrough(flash, out string pushMessage) && flashGame.Sides[flash.Side].CommandStrain == 2 && flashGame.CommandSlotsFor(flash.Side).Count(slot => slot.Status == CommandSlotStatus.Strained) == 1, "Push Through reaches the two-Strain threshold and removes one Slot: " + pushMessage);
+
+            var pushGame = new PrototypeGame(1978);
+            FormationState pushed = pushGame.Active;
+            pushed.Friction = pushed.Disruption = pushed.Destruction = true;
+            HexCoord pushedDestination = Enumerable.Range(0, pushGame.Area.Width).SelectMany(q => Enumerable.Range(0, pushGame.Area.Height).Select(r => new HexCoord(q, r)))
+                .First(hex => pushGame.Area.Contains(hex) && pushGame.Area.TerrainAt(hex) != OperationalTerrain.Land && HexCoord.Distance(pushed.Position, hex) == 1);
+            Assert(!pushGame.Move(pushed, pushedDestination, MoveMode.Cautious, out string disorganizedMessage) && disorganizedMessage.Contains("Push Through"), "Disorganized formations cannot begin complex Actions without Push Through");
+            string pushedMessage = string.Empty;
+            Assert(pushGame.PushThrough(pushed, out _) && pushGame.Move(pushed, pushedDestination, MoveMode.Cautious, out pushedMessage), "Push Through authorizes exactly one complex Action: " + pushedMessage);
+
+            Side flashSide = flash.Side;
+            FormationState headquarters = flashGame.Formations.First(candidate => candidate.Side == flashSide && candidate.Kind == FormationKind.CarrierGroup);
+            headquarters.Position = flashGame.LogisticsFacilitiesFor(headquarters).First().Hex;
+            PrototypeGame.SaveData hqState = flashGame.CaptureState(); hqState.ActiveFormationId = headquarters.Id; flashGame.RestoreState(hqState); headquarters = flashGame.Find(headquarters.Id);
+            Assert(flashGame.RestoreCommand(headquarters, out string restoreMessage) && flashGame.Sides[flashSide].CommandStrain == 0 && flashGame.CommandSlotsFor(flashSide).All(slot => slot.Status == CommandSlotStatus.Free), "Carrier HQ Recovery at logistics removes two Strain and restores the strained Slot: " + restoreMessage);
+
+            var aiMissionGame = new PrototypeGame(1978);
+            FormationState aiMissionActor = aiMissionGame.Active;
+            foreach (CommandSlotState slot in aiMissionGame.CommandSlotsFor(aiMissionActor.Side)) { slot.Status = CommandSlotStatus.Strained; slot.Purpose = "Test Strain"; }
+            aiMissionGame.Sides[aiMissionActor.Side].CommandSlots = 0;
+            Assert(PrototypeAiCommander.Choose(aiMissionGame).Action == aiMissionActor.Mission, "AI continues its Standing Mission when no Command Attention is free");
+            Debug.Log("Command Attention and Standing Mission tests passed: vocabulary, slot lifecycle, editor state, triggers, delayed orders, cards, strain, Push Through, HQ Recovery, AI-safe authorization, and save/load.");
+        }
+
+        public static void RunReplenishmentTests()
+        {
+            Assert(Rules.ActionTime(ActionKind.Replenish) == 3, "Replenishment has a three-Time base schedule");
+            var accessGame = new PrototypeGame(1978);
+            FormationState naval = accessGame.Active;
+            FormationState air = accessGame.Formations.First(candidate => candidate.Side == naval.Side && candidate.Kind == FormationKind.AirGroup);
+            HexCoord westPort = accessGame.Area.Locations.First(location => location.Id == "west-haven").Hex;
+            HexCoord westAirfield = accessGame.Area.Locations.First(location => location.Id == "west-haven-airfield").Hex;
+            naval.Position = westPort;
+            air.Position = westPort;
+            Assert(accessGame.HasLogisticsAccess(naval) && !accessGame.HasLogisticsAccess(air), "Naval formations use scenario Ports while air groups cannot replenish there");
+            air.Position = westAirfield;
+            naval.Position = westAirfield;
+            Assert(accessGame.HasLogisticsAccess(air) && !accessGame.HasLogisticsAccess(naval), "Air groups use scenario Airfields while naval formations cannot replenish there");
+
+            var portMoveGame = new PrototypeGame(1978);
+            FormationState portMover = portMoveGame.Active;
+            portMover.Position = new HexCoord(1, 3);
+            Assert(portMoveGame.Move(portMover, westPort, MoveMode.Cautious, out string portMoveMessage), "A naval formation may enter a data-defined Land Port endpoint: " + portMoveMessage);
+
+            var game = new PrototypeGame(1978);
+            FormationState formation = game.Active;
+            formation.Position = westPort;
+            formation.Endurance = Endurance.Critical;
+            formation.WeaponExpended = true;
+            formation.Damage = DamageState.Crippled;
+            formation.MajorActions = 2;
+            formation.Destruction = true;
+            formation.ActiveEffectCardIds.Add("X-10");
+            int actionTime = game.Time;
+            Assert(game.ReplenishmentPreview(formation).Contains("Heavy Salvo") && game.ReplenishmentPreview(formation).Contains("X") == false, "Replenishment preview exposes restoration without leaking unrelated state");
+            Assert(game.Replenish(formation, "X-10", out string replenishMessage), "Eligible Formation replenishes: " + replenishMessage);
+            Assert(formation.Endurance == Endurance.Extended && !formation.WeaponExpended && formation.Damage == DamageState.Heavy && formation.MajorActions == 0, "One service package improves Endurance and damage one step, reloads Heavy Salvo, and resets the action track");
+            Assert(!formation.ActiveEffectCardIds.Contains("X-10") && !formation.Destruction && formation.ReadyTime == actionTime + 4, "Selected Destruction card is repaired and X-10 adds one Time to its own Replenishment");
+            Assert(formation.Replenishing && game.AvailableReactions(game.Active, formation).SequenceEqual(new[] { Reaction.None }), "A servicing Formation cannot React before its Ready Time arrives");
+
+            string json = JsonUtility.ToJson(game.CaptureState());
+            var restored = new PrototypeGame(1978);
+            restored.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(json));
+            Assert(restored.Find(formation.Id).Replenishing && restored.Find(formation.Id).ReadyTime == formation.ReadyTime, "In-progress Replenishment survives save and load");
+            int guard = 0;
+            while (game.Active != formation && game.Active != null && guard++ < 80) Assert(game.Hold(game.Active, out string cadenceMessage), "Advance servicing clock: " + cadenceMessage);
+            Assert(game.Active == formation && !formation.Replenishing, "Reaction availability returns when the replenished Formation becomes Ready");
+
+            var emptyGame = new PrototypeGame(1978);
+            FormationState empty = emptyGame.Active;
+            empty.Position = westPort;
+            Assert(!emptyGame.Replenish(empty, null, out string emptyMessage) && emptyMessage.Contains("no Endurance"), "Replenishment rejects a Formation with nothing to restore");
+            empty.Endurance = Endurance.Extended;
+            Assert(PrototypeAiCommander.Choose(emptyGame).Action == ActionKind.Replenish, "AI chooses legal Replenishment when useful at a compatible facility");
+            Debug.Log("Replenishment and logistics tests passed: typed access, Port movement, restoration, X-10 timing, reaction lockout, AI, and save/load.");
+        }
+
+        public static void RunPatrolSupportTests()
+        {
+            Assert(Rules.PatrolRadius == 1 && Rules.SupportRange == 2 && Rules.ActionTime(ActionKind.Patrol) == 1 && Rules.ActionTime(ActionKind.Support) == 1, "Patrol and Support use their locked geometry and one-Time schedules");
+
+            var patrolGame = new PrototypeGame(1978);
+            FormationState screener = patrolGame.Active;
+            HexCoord screenCenter = screener.Position;
+            Assert(patrolGame.Patrol(screener, screenCenter, PatrolPosture.Aggressive, null, out string patrolMessage), "Aggressive Patrol can be assigned: " + patrolMessage);
+            Assert(screener.PatrolActive && screener.PatrolInterceptionAvailable && screener.Loud && screener.ReadyTime == patrolGame.Time + 1, "Aggressive Screen persists, is Loud, and readies one Time later");
+            string patrolJson = JsonUtility.ToJson(patrolGame.CaptureState());
+            var restoredPatrol = new PrototypeGame(1978);
+            restoredPatrol.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(patrolJson));
+            Assert(restoredPatrol.Find(screener.Id).PatrolActive && restoredPatrol.Find(screener.Id).PatrolInterceptionAvailable, "Screen assignments survive save and load");
+
+            FormationState mover = patrolGame.Formations.First(candidate => candidate.Side != screener.Side && !candidate.IsDestroyed);
+            HexCoord entry = Enumerable.Range(0, patrolGame.Area.Width).SelectMany(q => Enumerable.Range(0, patrolGame.Area.Height).Select(r => new HexCoord(q, r)))
+                .First(hex => patrolGame.Area.Contains(hex) && patrolGame.Area.TerrainAt(hex) != OperationalTerrain.Land && HexCoord.Distance(screenCenter, hex) == 1);
+            HexCoord start = Enumerable.Range(0, patrolGame.Area.Width).SelectMany(q => Enumerable.Range(0, patrolGame.Area.Height).Select(r => new HexCoord(q, r)))
+                .First(hex => patrolGame.Area.Contains(hex) && patrolGame.Area.TerrainAt(hex) != OperationalTerrain.Land && HexCoord.Distance(entry, hex) == 1 && HexCoord.Distance(screenCenter, hex) == 2);
+            mover.Position = start;
+            PrototypeGame.SaveData patrolState = patrolGame.CaptureState();
+            patrolState.ActiveFormationId = mover.Id;
+            patrolGame.RestoreState(patrolState);
+            screener = patrolGame.Find(screener.Id); mover = patrolGame.Find(mover.Id);
+            Assert(patrolGame.Move(mover, entry, MoveMode.Cautious, out string interceptMessage), "Enemy may enter a screened area: " + interceptMessage);
+            Assert(!screener.PatrolInterceptionAvailable && patrolGame.ContactFor(screener.Side, mover.Id) != null && interceptMessage.Contains("intercepted"), "Entry triggers exactly one extra interception and creates targeting information");
+
+            var supportGame = new PrototypeGame(1978);
+            FormationState supporter = supportGame.Active;
+            FormationState recipient = supportGame.Formations.First(candidate => candidate.Side == supporter.Side && candidate != supporter && !candidate.IsDestroyed);
+            recipient.Position = supporter.Position;
+            Assert(supportGame.Support(supporter, recipient, SupportKind.Strike, out string supportMessage), "Strike Support can be assigned: " + supportMessage);
+            Assert(supporter.SupportActive && supporter.SupportRecipientId == recipient.Id && supportGame.PendingSupportBonus(recipient, SupportKind.Strike) == 1, "Support persists as a range-two +1 relationship until used");
+            string supportJson = JsonUtility.ToJson(supportGame.CaptureState());
+            var restoredSupport = new PrototypeGame(1978);
+            restoredSupport.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(supportJson));
+            Assert(restoredSupport.Find(supporter.Id).SupportActive && restoredSupport.Find(supporter.Id).SupportRecipientId == recipient.Id, "Support assignments survive save and load");
+
+            FormationState target = supportGame.Formations.First(candidate => candidate.Side != recipient.Side && !candidate.IsDestroyed);
+            target.Position = recipient.Position;
+            target.Ratings.Defense = 20;
+            ContactState contact = supportGame.ContactFor(recipient.Side, target.Id);
+            if (contact == null) { contact = new ContactState { Owner = recipient.Side, TargetId = target.Id }; supportGame.Contacts.Add(contact); }
+            contact.LastKnownPosition = target.Position; contact.Location = LocationQuality.High; contact.Identity = IdentityQuality.Identified; contact.Age = 0;
+            PrototypeGame.SaveData supportState = supportGame.CaptureState(); supportState.ActiveFormationId = recipient.Id; supportGame.RestoreState(supportState);
+            supporter = supportGame.Find(supporter.Id); recipient = supportGame.Find(recipient.Id); target = supportGame.Find(target.Id);
+            Assert(supportGame.Strike(recipient, target, Salvo.Light, Reaction.Hold, out CombatResult supportedStrike, out string strikeMessage), "Recipient can spend Strike Support: " + strikeMessage);
+            Assert(!supporter.SupportActive && supportedStrike.Attack == recipient.EffectiveStrike + 1 + Rules.TargetingModifier(supportGame.ContactFor(recipient.Side, target.Id), supportGame.AgeTwoTargetingPenalty), "Matching Support adds +1 and is consumed without stacking");
+
+            var blockedGame = new PrototypeGame(1978);
+            FormationState blocked = blockedGame.Active;
+            blocked.ActiveEffectCardIds.Add("F-08"); blocked.Friction = true;
+            HexCoord highTempoDestination = Enumerable.Range(0, blockedGame.Area.Width).SelectMany(q => Enumerable.Range(0, blockedGame.Area.Height).Select(r => new HexCoord(q, r)))
+                .First(hex => blockedGame.Area.Contains(hex) && blockedGame.Area.TerrainAt(hex) != OperationalTerrain.Land && HexCoord.Distance(blocked.Position, hex) == 1);
+            Assert(blockedGame.Move(blocked, highTempoDestination, MoveMode.HighTempo, out _) && blocked.SupportBlockedUntilRecover, "F-08 blocks later Support after High Tempo until Recover");
+            Debug.Log("Patrol / Screen and Support tests passed: timing, geometry, persistence, interception, modifiers, cards, and save/load.");
         }
 
         public static void RunReactionTests()
@@ -207,6 +420,12 @@ namespace SeaOfUncertainty.Editor
             Reaction aiReaction = PrototypeAiCommander.ChooseReaction(aiReactionGame, aiAttacker, aiTarget);
             HexCoord? aiEvade = PrototypeAiCommander.ChooseEvadeDestination(aiReactionGame, aiAttacker, aiTarget);
             Assert(aiReaction == Reaction.Evade && aiEvade.HasValue && aiReactionGame.LegalEvadeDestinations(aiAttacker, aiTarget, 2).Contains(aiEvade.Value), "AI selects the prepared legal Evade without consulting hidden enemy state");
+            Assert(PrototypeGame.ReactionController(OperationMode.SoloVsAi, Side.Blue, Side.Blue) == ReactionControl.HumanDirect && PrototypeGame.ReactionController(OperationMode.SoloVsAi, Side.Blue, Side.Red) == ReactionControl.Ai && PrototypeGame.ReactionController(OperationMode.LocalHotseat, Side.Blue, Side.Red) == ReactionControl.HumanHandoff, "Solo and Local Hotseat route Reaction control to the correct chooser");
+
+            PrototypeGame blindReactionGame = ReactionFixture(out FormationState blindAttacker, out FormationState blindTarget);
+            blindReactionGame.Contacts.RemoveAll(contact => contact.Owner == blindTarget.Side && contact.TargetId == blindAttacker.Id);
+            Assert(!blindReactionGame.AvailableReactions(blindAttacker, blindTarget).Contains(Reaction.Counterattack), "A defender cannot infer or Counterattack an attacker for which it has no usable Contact");
+            Assert(blindReactionGame.LegalEvadeDestinations(blindAttacker, blindTarget, 1).Count > 0, "A defender without attacker location data can still Evade without receiving a hidden exact-position clue");
             Debug.Log("Player-selected reaction tests passed: timing, refresh, Defend, Evade, Counterattack, Hold, restrictions, save/load, and AI choice.");
         }
 
@@ -482,7 +701,7 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.Active != null && restored.Active.Id == game.Active.Id, "Save restores active formation");
             Assert(restored.Formations.Count == game.Formations.Count, "Save restores formations");
             Assert(restored.Contacts.Count == game.Contacts.Count, "Save restores Contacts");
-            Assert(saveData.Version == 5 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 5 save preserves stable IDs, Entropy decks, and Response hands");
+            Assert(saveData.Version == 6 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 6 save preserves stable IDs, Entropy decks, Response hands, Command Slots, and Standing Missions");
             Assert(restored.EntropyDecks.Count == 3 && restored.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count) == game.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count), "Save restores Entropy deck state");
             Assert(restored.CommandResponseDecks.Count == 2 && restored.CommandResponseDecks.All(deck => deck.Hand.Count == 3), "Save restores both private Command Response hands");
             Assert(saveData.HasLastActingSide && restored.LastActingSide == saveData.LastActingSide, "Save restores continuous-activation tie priority");

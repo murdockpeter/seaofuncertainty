@@ -12,9 +12,11 @@ namespace SeaOfUncertainty.Core
         public SearchMode SearchMode;
         public Salvo Salvo;
         public string TargetId;
+        public PatrolPosture PatrolPosture;
+        public SupportKind SupportKind;
         public string Rationale;
 
-        public string ModeName => Action == ActionKind.Move ? MoveMode.ToString() : Action == ActionKind.Search ? SearchMode.ToString() : Action == ActionKind.Strike ? Salvo.ToString() : "Default";
+        public string ModeName => Action == ActionKind.Move ? MoveMode.ToString() : Action == ActionKind.Search ? SearchMode.ToString() : Action == ActionKind.Strike ? Salvo.ToString() : Action == ActionKind.Patrol ? PatrolPosture.ToString() : Action == ActionKind.Support ? SupportKind.ToString() : "Default";
     }
 
     public static class PrototypeAiCommander
@@ -31,6 +33,12 @@ namespace SeaOfUncertainty.Core
                 .ThenBy(contact => contact.TargetId, StringComparer.Ordinal)
                 .ToList();
 
+            if (game.Sides[actor.Side].CommandSlots == 0)
+            {
+                AiDecision standingMission = ChooseStandingMission(game, actor, contacts);
+                if (standingMission != null) return standingMission;
+            }
+
             ContactState strikeContact = contacts
                 .Where(contact => game.Find(contact.TargetId) != null && SelectSalvo(actor, contact).HasValue)
                 .OrderByDescending(contact => contact.Identity)
@@ -44,8 +52,16 @@ namespace SeaOfUncertainty.Core
                 return new AiDecision { Action = ActionKind.Strike, TargetId = strikeContact.TargetId, Salvo = selectedSalvo, Rationale = selectedSalvo == Salvo.Heavy ? "Commit the expendable Heavy capability to a high-quality identified Contact inside extended range." : "Engage the strongest usable owned Contact already inside weapon range." };
             }
 
+            if (game.HasLogisticsAccess(actor) && game.NeedsReplenishment(actor))
+                return new AiDecision { Action = ActionKind.Replenish, Rationale = "Use current logistics access to restore Endurance, weapons, damage, and one capability loss." };
+
             if (actor.Friction || actor.Disruption)
                 return new AiDecision { Action = ActionKind.Recover, Rationale = "Clear recoverable Entropy before another complex action." };
+
+            FormationState supportRecipient = game.Formations.Where(candidate => candidate.Side == actor.Side && candidate != actor && !candidate.IsDestroyed && HexCoord.Distance(actor.Position, candidate.Position) <= Rules.SupportRange)
+                .OrderByDescending(candidate => candidate.EffectiveStrike).ThenBy(candidate => candidate.Id, StringComparer.Ordinal).FirstOrDefault();
+            if (!actor.SupportActive && !actor.SupportBlockedUntilRecover && supportRecipient != null && actor.Kind == FormationKind.AirGroup && !actor.HasEffect("X-08"))
+                return new AiDecision { Action = ActionKind.Support, TargetId = supportRecipient.Id, SupportKind = SupportKind.Strike, Rationale = "Assign available air Support to the strongest nearby friendly striking formation." };
 
             ContactState searchContact = contacts.FirstOrDefault(contact => HexCoord.Distance(actor.Position, contact.LastKnownPosition) <= Rules.SearchRange(actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active));
             if (searchContact != null && (actor.Kind == FormationKind.Submarine || actor.EffectiveSearch >= 3 || searchContact.Age > 0 || searchContact.Location < LocationQuality.High))
@@ -57,6 +73,9 @@ namespace SeaOfUncertainty.Core
 
             AiDecision movement = ChooseObjectiveMove(game, actor);
             if (movement != null) return movement;
+
+            if (!actor.PatrolActive)
+                return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = PatrolPosture.Balanced, Rationale = "Screen the objective area with a persistent interception." };
 
             SearchMode fallbackMode = actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active;
             HexCoord searchCenter = HexCoord.Distance(actor.Position, game.Area.Objective) <= Rules.SearchRange(fallbackMode) ? game.Area.Objective : actor.Position;
@@ -99,6 +118,9 @@ namespace SeaOfUncertainty.Core
                     HexCoord? destination = reaction == Reaction.Evade ? evadeDestination ?? ChooseEvadeDestination(game, actor, target) : null;
                     return game.Strike(actor, target, decision.Salvo, reaction, destination, out _, out message);
                 case ActionKind.Recover: return game.Recover(actor, out message);
+                case ActionKind.Patrol: return game.Patrol(actor, decision.Hex, decision.PatrolPosture, null, out message);
+                case ActionKind.Support: return game.Support(actor, game.Find(decision.TargetId), decision.SupportKind, out message);
+                case ActionKind.Replenish: return game.Replenish(actor, null, out message);
                 default: return game.Hold(actor, out message);
             }
         }
@@ -131,6 +153,29 @@ namespace SeaOfUncertainty.Core
                 .FirstOrDefault();
             if (candidates.Count == 0 || HexCoord.Distance(destination, game.Area.Objective) >= currentDistance) return null;
             return new AiDecision { Action = ActionKind.Move, Hex = destination, MoveMode = mode, Rationale = "Improve position toward the public operational objective." };
+        }
+
+        private static AiDecision ChooseStandingMission(PrototypeGame game, FormationState actor, List<ContactState> contacts)
+        {
+            switch (actor.Mission)
+            {
+                case ActionKind.Move: return ChooseObjectiveMove(game, actor);
+                case ActionKind.Search:
+                    SearchMode searchMode = actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active;
+                    HexCoord center = HexCoord.Distance(actor.Position, actor.MissionObjectiveHex) <= Rules.SearchRange(searchMode) ? actor.MissionObjectiveHex : actor.Position;
+                    return new AiDecision { Action = ActionKind.Search, Hex = center, SearchMode = searchMode, Rationale = "No Command Attention is free; continue the assigned Standing Mission." };
+                case ActionKind.Strike:
+                    ContactState target = contacts.FirstOrDefault(contact => game.Find(contact.TargetId) != null && SelectSalvo(actor, contact).HasValue);
+                    return target == null ? null : new AiDecision { Action = ActionKind.Strike, TargetId = target.TargetId, Salvo = SelectSalvo(actor, target).Value, Rationale = "No Command Attention is free; execute the assigned Strike Mission." };
+                case ActionKind.Patrol: return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = PatrolPosture.Balanced, Rationale = "No Command Attention is free; establish the assigned Screen." };
+                case ActionKind.Support:
+                    FormationState recipient = game.Formations.Where(candidate => candidate.Side == actor.Side && candidate != actor && !candidate.IsDestroyed && HexCoord.Distance(actor.Position, candidate.Position) <= Rules.SupportRange).OrderBy(candidate => candidate.Id).FirstOrDefault();
+                    return recipient == null ? null : new AiDecision { Action = ActionKind.Support, TargetId = recipient.Id, SupportKind = SupportKind.Strike, Rationale = "No Command Attention is free; execute the assigned Support Mission." };
+                case ActionKind.Recover: return actor.Friction || actor.Disruption ? new AiDecision { Action = ActionKind.Recover, Rationale = "No Command Attention is free; execute the assigned Recover Mission." } : null;
+                case ActionKind.Replenish: return game.HasLogisticsAccess(actor) && game.NeedsReplenishment(actor) ? new AiDecision { Action = ActionKind.Replenish, Rationale = "No Command Attention is free; execute the assigned Replenishment Mission." } : null;
+                case ActionKind.Hold: return new AiDecision { Action = ActionKind.Hold, Rationale = "No Command Attention is free; maintain the assigned Hold Mission." };
+                default: return null;
+            }
         }
 
         private static Salvo? SelectSalvo(FormationState actor, ContactState contact)

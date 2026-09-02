@@ -9,7 +9,7 @@ An operational naval wargame prototype about acting effectively inside incomplet
 3. Press Play.
 4. Choose **Begin Operation**, select **Meridian Veil**, review the briefing, and lock the fixed test deployment.
 5. Use the secure handoff screen whenever control passes between sides.
-6. The highlighted formation is Ready. Choose Move, Search, Strike, Recover, or Hold.
+6. The highlighted formation is Ready. Choose Move, Search, Strike, Recover, Hold, Patrol/Screen, Support, or Replenish.
 7. For Move, choose a commitment and destination hex. For Search, choose any highlighted area hex. For Strike, choose an eligible Contact.
 8. Use **Menu** during play to save, load, restart, adjust settings, or return to the main menu. A saved operation adds **Continue** to the main menu.
 
@@ -41,7 +41,10 @@ The prototype is deliberately pass-and-play for now. Each side sees only its own
 - Contact Location, Identity, and Age;
 - bounded search and combat dice;
 - light/standard/heavy strike commitment;
-- reaction (currently defaults to Defend);
+- player-selected Defend, Evade, Counterattack, and Hold reactions;
+- persistent Patrol/Screen areas, interception postures, and targeted Support assignments;
+- typed logistics access and multi-part Replenishment service packages;
+- individual Command Attention slots, structured Standing Missions, automatic triggers, Push Through, and HQ Recovery;
 - entropy, cohesion, endurance, and damage;
 - three Command Slots per side.
 
@@ -108,5 +111,8 @@ node tools/build-luzon-coastline.cjs
 The generated Unity resource is `Assets/Resources/Geography/luzon-strait-coastline.json`. The geographic mesh is presentation-only; authoritative movement and terrain remain on the 20 nm axial grid.
 - Original rules archive: `rules/SeaOfUncertainty/index.html`
 - Rules deep dive and implementation decisions: `design/RULES_DEEP_DIVE.md`
+- Patrol/Screen and Support rulings: `design/PATROL_SUPPORT_RULES.md`
+- Replenishment and logistics rulings: `design/REPLENISHMENT_RULES.md`
+- Command Attention and Standing Mission rulings: `design/COMMAND_MISSIONS_RULES.md`
 - Playtest protocol: `design/PLAYTEST_PROTOCOL.md`
 - 3D implementation constitution: `design/3D_DESIGN_CONSTITUTION.md`

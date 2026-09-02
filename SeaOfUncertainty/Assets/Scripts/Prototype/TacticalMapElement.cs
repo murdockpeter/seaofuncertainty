@@ -7,7 +7,7 @@ using UnityEngine.UIElements;
 
 namespace SeaOfUncertainty.Prototype
 {
-    public enum ToolkitActionMode { None, Move, Search, Strike }
+    public enum ToolkitActionMode { None, Move, Search, Strike, Replenish }
 
     public sealed class TacticalMapElement : VisualElement
     {
@@ -317,7 +317,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void UpdateReadout(HexCoord? hex)
         {
-            string overlay = actionMode == ToolkitActionMode.Move ? "MOVE AREA" : actionMode == ToolkitActionMode.Search ? "SEARCH COVERAGE" : actionMode == ToolkitActionMode.Strike ? "STRIKE RANGE" : "COMMAND VIEW";
+            string overlay = actionMode == ToolkitActionMode.Move ? "MOVE AREA" : actionMode == ToolkitActionMode.Search ? "SEARCH COVERAGE" : actionMode == ToolkitActionMode.Strike ? "STRIKE RANGE" : actionMode == ToolkitActionMode.Replenish ? "LOGISTICS ACCESS" : "COMMAND VIEW";
             if (headingReadout != null) headingReadout.text = presentation == null ? "NORTH 000°" : $"HDG {presentation.Heading:000}°  •  PITCH {presentation.CameraPitch:00}°  •  EDGE {(EdgeScrollEnabled ? "ON" : "OFF")}  •  {overlay}";
             if (hexReadout == null) return;
             if (!hex.HasValue || game?.Active == null) { hexReadout.text = $"{game?.Area?.NauticalMilesPerHex ?? 20} NM HEX SCALE"; return; }

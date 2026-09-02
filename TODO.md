@@ -1,6 +1,6 @@
 # Sea of Uncertainty - Definitive TODO
 
-Last audited against the repository: **2026-09-01**
+Last audited against the repository: **2026-09-02**
 Unity baseline: **6000.2.12f1**
 
 This is the single authoritative project backlog. Design notes explain intent, but work is planned and tracked here.
@@ -19,58 +19,60 @@ Work these sections approximately in order. Do not expand simulation detail unti
 
 ### 1. Player-selected reactions
 
-- [x] Resolve the current prototype's automatic Defend reaction with its Defense modifier.
+- [x] Implement Defend with its +1 Defense modifier.
 - [x] Implement C-18 Orderly Withdrawal as a prepared one-use Evade: +1 Defense, then a deterministic withdrawal of up to two valid hexes away from the attacker.
 - [x] Display prepared Orderly Withdrawal status and the resolved reaction in previews, the dossier, log, and telemetry outcome.
-- [ ] **Decision:** Define exactly when a formation regains its Reaction.
-- [ ] **Decision:** Decide whether reactions change Ready Time.
-- [ ] **Decision:** Define defender reaction timing in Solo and Local Hotseat, including secure handoff behavior.
-- [ ] Let the defender choose Defend, Evade, Counterattack, or Hold during a reaction window.
-- [ ] Implement ordinary Evade destination selection and one-hex post-combat movement.
-- [ ] Implement Counterattack targeting, sequencing, Contact requirements, expenditure, and restrictions.
-- [ ] Implement Hold as a reaction.
-- [ ] Enforce one Reaction between the formation's own Actions.
-- [ ] Enforce Disrupted, Disorganized, damaged, and replenishing Reaction restrictions.
-- [ ] Teach the AI to select legal reactions without hidden information.
-- [ ] Display Reaction available/spent state on formations and the timeline.
-- [ ] Add complete reaction-window tests for Solo, Local Hotseat, AI, save/load, and information security.
+- [x] **Decision:** A formation's Reaction refreshes immediately after it completes its own Action; advancing Time alone does not refresh it.
+- [x] **Decision:** Reactions do not change Ready Time.
+- [x] **Decision:** Choose reactions after Strike commitment and before the roll; Solo routes the choice to the human or AI defender, and Local Hotseat uses a secure defender handoff.
+- [x] Let the defender choose Defend, Evade, Counterattack, or Hold during a reaction window.
+- [x] Implement ordinary Evade destination selection and one-hex post-combat movement.
+- [x] Implement Counterattack targeting, sequencing, Contact requirements, Light return Strike, and restrictions.
+- [x] Implement Hold as a reaction.
+- [x] Enforce one Reaction between the formation's own Actions.
+- [x] Enforce Disrupted, Disorganized, Crippled, Fire Control Hit, missing-Contact, Destroyed, and replenishing restrictions.
+- [x] Teach the AI to select a legal reaction and Evade destination without hidden information.
+- [x] Display Reaction available/spent/unavailable state on formations and the timeline.
+- [x] Add authoritative reaction tests for timing, refresh, all choices, restrictions, Solo/Hotseat routing, AI, save/load, and information discipline.
 
 ### 2. Patrol / Screen
 
-- [ ] **Decision:** Define Patrol/Screen area size and geometry.
-- [ ] **Decision:** Define interception timing, range, and the `+1 interception Reaction` rule.
-- [ ] Define Defensive, Balanced, and Aggressive postures.
-- [ ] Implement Patrol/Screen as a playable one-Time action.
-- [ ] Assign a protected formation, objective, route, or area.
-- [ ] Display Patrol/Screen areas and relationships on the map and timeline.
-- [ ] Trigger legal interception when enemy movement enters a screened area.
-- [ ] Apply posture benefits, costs, Signature changes, and entropy interactions.
-- [ ] Add Patrol/Screen AI use, telemetry, save/load, and deterministic tests.
+- [x] **Decision:** Define Patrol/Screen as a radius-one area centered in the screener's hex or an adjacent hex.
+- [x] **Decision:** Resolve the one extra interception after enemy movement commits inside the area; keep it separate from the ordinary Reaction.
+- [x] Define Defensive, Balanced, and Aggressive postures.
+- [x] Implement Patrol/Screen as a playable one-Time action.
+- [x] Assign a protected formation, objective, or area.
+- [ ] Add named route-segment assignment after plotted routes exist.
+- [x] Display Patrol/Screen areas and relationships on the map and timeline.
+- [x] Trigger legal interception when enemy movement enters a screened area.
+- [x] Apply posture benefits, costs, Signature changes, and entropy interactions.
+- [x] Add Patrol/Screen AI use, telemetry, save/load, and deterministic tests.
 
 ### 3. Support
 
-- [ ] **Decision:** Define Support duration and whether it persists until used.
-- [ ] **Decision:** Define `+1 synchronization` and stacking limits.
-- [ ] Implement Support as a playable action with supporting formation, recipient, action, and bonus selection.
-- [ ] Implement Strike, Search, Defense, ASW Search, and synchronization Support.
-- [ ] Schedule the supporting formation's next Ready Time.
-- [ ] Display active Support relationships on the map, dossiers, and timeline.
-- [ ] Connect F-08, F-10, D-06, D-11, X-08, and C-24 to the finished Support rules.
-- [ ] Add Support AI use, telemetry, save/load, and deterministic tests.
+- [x] **Decision:** Support persists until used, range breaks, the supporter acts again, or either participant becomes unavailable.
+- [x] **Decision:** Support is +1; same-kind assignments do not stack and Search plus ASW Search is capped at +1 against submarines.
+- [x] Implement Support as a playable action with supporting formation, recipient, action, and bonus selection.
+- [x] Implement Strike, Search, Defense, ASW Search, and stored synchronization Support.
+- [x] Schedule the supporting formation's next Ready Time.
+- [x] Display active Support relationships on the map, dossiers, and timeline.
+- [x] Connect F-08, F-10, D-06, D-11, X-08, and C-24 to the finished Support rules.
+- [x] Add Support AI use, telemetry, save/load, and deterministic tests.
+- [ ] Consume stored synchronization Support when the synchronized-action parent system is implemented.
 
 ### 4. Replenishment and logistics
 
 - [x] Store data-driven ports, airfields, logistics regions, and terrain locations in operational areas.
 - [x] Apply the existing logistics-location check to relevant Recover timing.
-- [ ] **Decision:** Define logistics access by formation type and scenario.
-- [ ] **Decision:** Define exactly what one Replenish action restores.
-- [ ] Implement Replenish as a playable three-Time action.
-- [ ] Restrict reactions while replenishing.
-- [ ] Restore Endurance and Heavy Salvo expenditure according to the final rule.
-- [ ] Repair eligible capability loss and Destruction cards.
-- [ ] Display valid logistics locations, access, and restoration preview.
-- [ ] Connect X-10 and remaining logistics-dependent cards to the finished system.
-- [ ] Add Replenishment AI use, telemetry, save/load, and deterministic tests.
+- [x] **Decision:** Naval formations use scenario-region Ports/Anchorages; air groups use scenario-region Airfields; facilities are neutral until ownership exists.
+- [x] **Decision:** One service package improves Endurance and Damage one step, reloads Heavy Salvo, resets major-action wear, and repairs one selected Destruction card.
+- [x] Implement Replenish as a playable three-Time action.
+- [x] Restrict reactions while replenishing and restore them when the formation becomes Ready.
+- [x] Restore Endurance and Heavy Salvo expenditure according to the final rule.
+- [x] Repair eligible capability loss and Destruction cards.
+- [x] Display valid logistics locations, typed access, X-10 timing, and restoration preview.
+- [x] Connect X-10 and existing F-06 logistics timing to the finished system.
+- [x] Add Replenishment AI use, telemetry, save/load, and deterministic tests.
 
 ### 5. Command Attention and Standing Missions
 
@@ -80,20 +82,20 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Assign initial Mission tasks by formation role.
 - [x] Implement C-04 Rapid Replan: select a formation and playable task, occupy no Command Slot, and add +1 Time to its next Ready scheduling.
 - [x] Reject Rapid Replan when Broken Link prevents new orders.
-- [ ] **Decision:** Standardize `spend`, `use`, `assign`, and `occupy` terminology.
-- [ ] **Decision:** Define when each kind of Command Slot use becomes free.
-- [ ] Model individual Slot state and release conditions instead of only an integer count.
-- [ ] **Decision:** Finalize Task, Objective, Posture, and Trigger vocabularies.
-- [ ] **Decision:** Define what a Trigger authorizes automatically.
-- [ ] Implement the full Standing Mission editor.
-- [ ] Determine whether an action follows the current Mission.
-- [ ] Allow mission-following actions without Command Attention.
-- [ ] Charge Command Attention for immediate out-of-mission retasking.
-- [ ] Implement delayed mission changes, Broken Link behavior, and trigger-authorized changes.
-- [ ] Implement F-03, F-12, D-02, D-04, C-03, and C-17 against the final Mission/Command rules.
-- [ ] Implement Command Strain, its two-Strain Slot reduction, Restore Command, and HQ Recovery.
-- [ ] Implement Push Through and forcing a Disorganized formation into a complex Action.
-- [ ] Instrument every Mission change, out-of-mission action, Slot occupation, release, and strain event.
+- [x] **Decision:** Standardize `spend`, `use`, `assign`, `occupy`, and `strain` terminology.
+- [x] **Decision:** Define action-resolution, next-formation-action, and timed-delivery Slot release conditions.
+- [x] Model three individual Free, Occupied, or Strained Slot states with purpose and release data.
+- [x] **Decision:** Finalize Task, Objective, Posture, and Trigger vocabularies.
+- [x] **Decision:** Define Contact Located, Entropy Marked, Logistics Required, and Objective Reached automatic authorizations.
+- [x] Implement the full Standing Mission editor.
+- [x] Determine whether an action follows the current Mission by its Task.
+- [x] Allow mission-following actions without Command Attention.
+- [x] Occupy Command Attention through resolution for immediate out-of-mission retasking.
+- [x] Implement delayed mission changes, Broken Link behavior, and trigger-authorized changes.
+- [x] Implement F-03, F-12, D-02, D-04, C-03, and C-17 against the final Mission/Command rules.
+- [x] Implement Command Strain, its two-Strain Slot reduction, Restore Command, and HQ Recovery.
+- [x] Implement Push Through and gate Disorganized formations' complex Actions.
+- [x] Instrument every Mission change, out-of-mission action, Slot occupation, release, and strain event.
 
 ## Rules completion backlog
 
@@ -155,9 +157,9 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Implement immediate printed Command responses for F-01, F-02, and F-07.
 - [ ] **Decision:** Finalize the exhaustive complex-Action and major-Action lists.
 - [ ] **Decision:** Finalize whether universal source penalties stack with individual card effects after paired playtests.
-- [ ] Implement the remaining 14 effects after their Mission, Synchronization, Support, Replenishment, or uncertainty-geometry parent systems exist: F-02, F-03, F-05, F-08, F-10, F-12, D-02, D-03, D-04, D-06, D-11, D-12, X-08, X-10.
+- [ ] Implement the remaining 4 effects after their Synchronization or uncertainty-geometry parent systems exist: F-02, F-05, D-03, D-12.
 - [ ] Implement every remaining printed entropy response and its exact play window/cost.
-- [ ] Define and implement Destruction-card repair/reorganization and discard rules.
+- [x] Define and implement Destruction-card repair and discard through Replenishment.
 
 ### Command Response deck
 
@@ -170,8 +172,8 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Keep unsupported cards visible but disabled with an explicit parent-system message.
 - [ ] **Decision:** Finalize deck construction, hand limit, discard reshuffle, draw triggers, and exact play windows.
 - [ ] Implement C-02 and C-10 after Synchronized Strikes exist.
-- [ ] Implement C-03 and C-17 after full Standing Mission triggers and Command Strain exist.
-- [ ] Implement C-24 after Screen/Support assignment exists.
+- [x] Implement C-03 Mission Command and C-17 Flash Order against Standing Mission triggers and Command Strain.
+- [x] Implement C-24 Task Group Reshuffle against active Screen/Support assignments.
 - [ ] Add gameplay draw/replacement triggers beyond the starting hand.
 - [ ] Teach the AI to evaluate and play supported Response cards without hidden information.
 
@@ -379,8 +381,8 @@ Do not prioritize this section until the core loop and information model are sta
 
 ### Core-loop alpha
 
-- [ ] All eight gameplay verbs are playable: Move, Search, Strike, Patrol/Screen, Support, Recover, Replenish, and Hold. **Partial:** Move, Search, Strike, Recover, and Hold are playable.
-- [ ] The defender receives a meaningful, legal reaction choice during combat. **Partial:** Automatic Defend and prepared Orderly Withdrawal work.
+- [x] All eight gameplay verbs are playable: Move, Search, Strike, Patrol/Screen, Support, Recover, Replenish, and Hold.
+- [ ] The defender receives a meaningful, legal reaction choice during combat in blind human testing. **Implemented:** Defend, Evade, Counterattack, Hold, secure Hotseat handoff, Solo human routing, and AI choice are active.
 - [ ] Players can explain why every formation acts next in blind testing.
 - [ ] Players understand calculations and consequences before committing in blind testing.
 - [ ] Contact uncertainty has a clear spatial meaning.

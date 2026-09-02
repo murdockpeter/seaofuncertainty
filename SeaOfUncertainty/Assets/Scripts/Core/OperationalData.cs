@@ -170,6 +170,11 @@ namespace SeaOfUncertainty.Core
             AddTerrain(area, OperationalTerrain.Land, "Southern Chain", (2, 9), (3, 8), (4, 9), (8, 9));
             AddTerrain(area, OperationalTerrain.Strait, "Meridian Narrows", (8, 4), (8, 5));
 
+            AddLocation(area, "west-haven", "West Haven", LocationKind.Port, 1, 2, 0, 0);
+            AddLocation(area, "west-haven-airfield", "West Haven Airfield", LocationKind.Airfield, 1, 1, 0, 0);
+            AddLocation(area, "east-haven", "East Haven", LocationKind.Port, 10, 7, 0, 0);
+            AddLocation(area, "east-haven-airfield", "East Haven Airfield", LocationKind.Airfield, 10, 8, 0, 0);
+
             var scenario = new ScenarioDefinition
             {
                 Id = "meridian-veil",
@@ -181,6 +186,8 @@ namespace SeaOfUncertainty.Core
                 SpecialRules = "Automatic Defend reaction; fixed paired-test deployment.",
                 VictoryConditions = "Control the Inner Sea at T16; preserve the carrier; score enemy damage."
             };
+            scenario.LogisticsRegions.Add(Region("west-haven-logistics", "West Haven Logistics Access", new[] { new HexCoord(1, 2), new HexCoord(1, 1) }));
+            scenario.LogisticsRegions.Add(Region("east-haven-logistics", "East Haven Logistics Access", new[] { new HexCoord(10, 7), new HexCoord(10, 8) }));
 
             AddFormation(scenario, "B-CV", "CSG Resolute", Side.Blue, FormationKind.CarrierGroup, 1, 4, 1, 2, 3, 1, 4, 3, 1);
             AddFormation(scenario, "B-SG", "SAG Valiant", Side.Blue, FormationKind.SurfaceGroup, 2, 7, 0, 2, 2, 2, 3, 3, 2);

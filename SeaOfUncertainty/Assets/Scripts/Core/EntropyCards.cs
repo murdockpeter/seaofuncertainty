@@ -35,9 +35,8 @@ namespace SeaOfUncertainty.Core
     {
         private static readonly HashSet<string> inactiveSystemCards = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "F-02", "F-03", "F-05", "F-08", "F-10", "F-12",
-            "D-02", "D-03", "D-04", "D-06", "D-11", "D-12",
-            "X-08", "X-10"
+            "F-02", "F-05",
+            "D-03", "D-12"
         };
 
         private static readonly List<EntropyEffectDefinition> cards = new List<EntropyEffectDefinition>

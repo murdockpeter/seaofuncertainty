@@ -287,6 +287,85 @@ namespace SeaOfUncertainty.Prototype
         }
 
         public string ToolkitHold() { lastActionSucceeded = false; ExecuteHold(); return toast; }
+        public string ToolkitPatrol(HexCoord center, PatrolPosture posture, FormationState protectedFormation = null)
+        {
+            lastActionSucceeded = false;
+            FormationState actor = game.Active;
+            PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
+            string alternatives = LegalAlternatives();
+            lastActionSucceeded = game.Patrol(actor, center, posture, protectedFormation, out string message);
+            if (lastActionSucceeded)
+            {
+                telemetry.RecordAction(game, before, actor, "Patrol", posture.ToString(), protectedFormation?.Id ?? center.ToString(), alternatives, DecisionSeconds(), $"Time 1; radius {Rules.PatrolRadius}; one interception", message);
+                pending = PendingAction.None; inspected = game.Active; AfterSuccessfulAction(actor.Side);
+            }
+            else telemetry.RecordRejected(game, actor, "Patrol", posture.ToString(), center.ToString(), message, DecisionSeconds());
+            Toast(message);
+            return message;
+        }
+        public string ToolkitSupport(FormationState recipient, SupportKind kind)
+        {
+            lastActionSucceeded = false;
+            FormationState actor = game.Active;
+            PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
+            string alternatives = LegalAlternatives();
+            lastActionSucceeded = game.Support(actor, recipient, kind, out string message);
+            if (lastActionSucceeded)
+            {
+                telemetry.RecordAction(game, before, actor, "Support", kind.ToString(), recipient?.Id ?? string.Empty, alternatives, DecisionSeconds(), $"Time 1; range {Rules.SupportRange}; +1 until used", message);
+                pending = PendingAction.None; inspected = game.Active; AfterSuccessfulAction(actor.Side);
+            }
+            else telemetry.RecordRejected(game, actor, "Support", kind.ToString(), recipient?.Id ?? string.Empty, message, DecisionSeconds());
+            Toast(message);
+            return message;
+        }
+        public string ToolkitReplenish(string destructionCardId = null)
+        {
+            lastActionSucceeded = false;
+            FormationState actor = game.Active;
+            PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
+            string alternatives = LegalAlternatives();
+            string preview = game.ReplenishmentPreview(actor);
+            lastActionSucceeded = game.Replenish(actor, destructionCardId, out string message);
+            if (lastActionSucceeded)
+            {
+                telemetry.RecordAction(game, before, actor, "Replenish", destructionCardId ?? "Sustainment", actor.Position.ToString(), alternatives, DecisionSeconds(), $"Base Time 3; {preview}", message);
+                pending = PendingAction.None; inspected = game.Active; AfterSuccessfulAction(actor.Side);
+            }
+            else telemetry.RecordRejected(game, actor, "Replenish", destructionCardId ?? "Sustainment", actor.Position.ToString(), message, DecisionSeconds());
+            Toast(message);
+            return message;
+        }
+        public string ToolkitAssignStandingMission(FormationState formation, ActionKind task, MissionObjectiveKind objective, string objectiveId, HexCoord objectiveHex, MissionPosture posture, MissionTrigger trigger)
+        {
+            lastActionSucceeded = game.AssignStandingMission(formation, task, objective, objectiveId, objectiveHex, posture, trigger, out string message);
+            telemetry.RecordChoice(game, formation, lastActionSucceeded ? "MissionChanged" : "MissionChangeRejected", task.ToString(), $"{objective}/{posture}/{trigger}", LegalAlternatives());
+            Toast(message);
+            return message;
+        }
+        public string ToolkitPushThrough()
+        {
+            lastActionSucceeded = game.PushThrough(game.Active, out string message);
+            telemetry.RecordChoice(game, game.Active, lastActionSucceeded ? "CommandStrainMarked" : "PushThroughRejected", "PushThrough", game.Sides[game.Active.Side].CommandStrain.ToString(), LegalAlternatives());
+            Toast(message);
+            return message;
+        }
+        public string ToolkitRestoreCommand()
+        {
+            lastActionSucceeded = false;
+            FormationState actor = game.Active;
+            PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
+            string alternatives = LegalAlternatives();
+            lastActionSucceeded = game.RestoreCommand(actor, out string message);
+            if (lastActionSucceeded)
+            {
+                telemetry.RecordAction(game, before, actor, "RestoreCommand", "HQRecovery", actor.Position.ToString(), alternatives, DecisionSeconds(), "Recover action at logistics; remove up to 2 Command Strain", message);
+                pending = PendingAction.None; inspected = game.Active; AfterSuccessfulAction(actor.Side);
+            }
+            else telemetry.RecordRejected(game, actor, "RestoreCommand", "HQRecovery", actor.Position.ToString(), message, DecisionSeconds());
+            Toast(message);
+            return message;
+        }
         public string ToolkitRecover() { lastActionSucceeded = false; ExecuteRecover(); return toast; }
         public string ToolkitRecover(EntropySource source, string cardId)
         {
@@ -544,7 +623,7 @@ namespace SeaOfUncertainty.Prototype
             else if (overlay == Overlay.ConfirmHeavy)
             {
                 if (confirmationTarget == null) { overlay = Overlay.None; return; }
-                CombatPreview preview = GetCombatPreview(game.Active, confirmationTarget, Salvo.Heavy, game.ReactionFor(confirmationTarget));
+                CombatPreview preview = GetCombatPreview(game.Active, confirmationTarget, Salvo.Heavy, Reaction.Defend);
                 ContactState contact = game.ContactFor(game.Active.Side, confirmationTarget.Id);
                 GUI.Label(new Rect(rect.x + 44, rect.y + 104, 810, 70), "This commitment expends the formation's Heavy Salvo capability. It cannot be used again until Replenishment is implemented and available.", new GUIStyle(body) { fontSize = 18 });
                 GUI.Label(new Rect(rect.x + 44, rect.y + 204, 810, 36), $"TARGET  {contact.Summary}  •  LAST KNOWN {contact.LastKnownPosition}", panelTitle);
@@ -672,10 +751,12 @@ namespace SeaOfUncertainty.Prototype
 
         private void AttachMissionAudio(PrototypeGame current)
         {
-            if (audioEventGame != null) audioEventGame.ActionCompleted -= OnMissionCompleted;
+            if (audioEventGame != null) { audioEventGame.ActionCompleted -= OnMissionCompleted; audioEventGame.CommandEvent -= OnCommandEvent; }
             audioEventGame = current;
-            if (audioEventGame != null) audioEventGame.ActionCompleted += OnMissionCompleted;
+            if (audioEventGame != null) { audioEventGame.ActionCompleted += OnMissionCompleted; audioEventGame.CommandEvent += OnCommandEvent; }
         }
+
+        private void OnCommandEvent(FormationState formation, string category, string detail) => telemetry?.RecordCommandEvent(game, formation, category, detail);
 
         private void OnMissionCompleted(FormationState formation, ActionKind mission)
         {
@@ -686,7 +767,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void OnDestroy()
         {
-            if (audioEventGame != null) audioEventGame.ActionCompleted -= OnMissionCompleted;
+            if (audioEventGame != null) { audioEventGame.ActionCompleted -= OnMissionCompleted; audioEventGame.CommandEvent -= OnCommandEvent; }
         }
 
         private void BeginOperation()
@@ -906,7 +987,7 @@ namespace SeaOfUncertainty.Prototype
             else if (IsStrikePending() && StrikeEligible(contact))
             {
                 FormationState previewTarget = game.Find(contact.TargetId);
-                CombatPreview preview = GetCombatPreview(game.Active, previewTarget, CurrentSalvo(), game.ReactionFor(previewTarget));
+                CombatPreview preview = GetCombatPreview(game.Active, previewTarget, CurrentSalvo(), Reaction.Defend);
                 GUI.Label(new Rect(c.x - 65, c.y - radius - 29, 130, 18), preview.Band.ToString().ToUpperInvariant(), tiny);
             }
         }
@@ -965,12 +1046,12 @@ namespace SeaOfUncertainty.Prototype
             else
             {
                 Salvo salvo = CurrentSalvo();
-                CombatPreview preview = GetCombatPreview(game.Active, target, salvo, game.ReactionFor(target));
+                CombatPreview preview = GetCombatPreview(game.Active, target, salvo, Reaction.Defend);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 210, 326, 28), "COMBAT CALCULATION", panelTitle);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Strike rating      {game.Active.EffectiveStrike:+0;-0;0}\nSalvo ({salvo})      {Rules.SalvoModifier(salvo):+0;-0;0}\nTargeting            {Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty):+0;-0;0}\nATTACK                {preview.Attack}\nDEFENSE + Defend      {preview.Defense}\n────────────────\nDIFFERENCE            {preview.Difference:+0;-0;0}", body);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 420, 326, 38), preview.Band.ToString().ToUpperInvariant() + " BAND", new GUIStyle(title) { fontSize = 25, alignment = TextAnchor.MiddleCenter });
                 GUI.Label(new Rect(rect.x + 18, rect.y + 472, 326, 100), CombatOddsText(preview.Band), new GUIStyle(body) { alignment = TextAnchor.MiddleCenter });
-                GUI.Label(new Rect(rect.x + 18, rect.y + 590, 326, 70), salvo == Salvo.Heavy ? "Heavy Salvo expends the formation’s major offensive capability and requires confirmation." : target.OrderlyWithdrawalReady ? "Defender has prepared an Evade and two-hex Orderly Withdrawal." : "Defender currently uses the prototype’s automatic Defend reaction.", small);
+                GUI.Label(new Rect(rect.x + 18, rect.y + 590, 326, 70), salvo == Salvo.Heavy ? "Heavy Salvo expends the formation’s major offensive capability and requires confirmation." : "The defender chooses a legal Reaction after Strike commitment.", small);
             }
         }
 
@@ -1251,7 +1332,8 @@ namespace SeaOfUncertainty.Prototype
             int searchable = mapHexes.Count(hex => HexCoord.Distance(game.Active.Position, hex) <= Rules.SearchRange(CurrentSearchMode()));
             int strikeable = game.Contacts.Count(c => c.Owner == game.Active.Side && !c.IsLost && HexCoord.Distance(game.Active.Position, c.LastKnownPosition) <= Rules.StrikeRange(game.Active.Kind, CurrentSalvo()));
             bool recover = game.Active.Friction || game.Active.Disruption;
-            return $"Move({legalMoveHexes} hexes); Search({searchable} area hexes); Strike({strikeable} Contacts); Recover({recover}); Hold(true)";
+            int supportable = game.Formations.Count(candidate => candidate.Side == game.Active.Side && candidate != game.Active && !candidate.IsDestroyed && HexCoord.Distance(game.Active.Position, candidate.Position) <= Rules.SupportRange);
+            return $"Move({legalMoveHexes} hexes); Search({searchable} area hexes); Strike({strikeable} Contacts); Patrol(true); Support({supportable} formations); Recover({recover}); Replenish({game.HasLogisticsAccess(game.Active) && game.NeedsReplenishment(game.Active)}); Hold(true)";
         }
 
         private bool StrikeEligible(ContactState contact)
@@ -1265,8 +1347,8 @@ namespace SeaOfUncertainty.Prototype
         private CombatPreview GetCombatPreview(FormationState attacker, FormationState target, Salvo salvo, Reaction reaction)
         {
             ContactState contact = game.ContactFor(attacker.Side, target.Id);
-            int attack = attacker.EffectiveStrike + Rules.SalvoModifier(salvo) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
-            int defense = target.EffectiveDefense + (reaction == Reaction.Defend || reaction == Reaction.Evade ? 1 : 0) - (target.Destruction ? 1 : 0);
+            int attack = attacker.EffectiveStrike + Rules.SalvoModifier(salvo) + game.PendingSupportBonus(attacker, SupportKind.Strike) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
+            int defense = target.EffectiveDefense + (reaction == Reaction.Defend || reaction == Reaction.Evade ? 1 : 0) + game.PendingSupportBonus(target, SupportKind.Defense) + game.PatrolDefenseBonus(target) - (target.Destruction ? 1 : 0);
             int difference = attack - defense;
             return new CombatPreview { Attack = attack, Defense = defense, Difference = difference, Band = Rules.BandFor(difference) };
         }
