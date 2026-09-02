@@ -63,7 +63,27 @@ namespace SeaOfUncertainty.Core
             return new AiDecision { Action = ActionKind.Search, Hex = searchCenter, SearchMode = fallbackMode, Rationale = "Search the operational objective when no stronger Contact or movement opportunity exists." };
         }
 
+        public static Reaction ChooseReaction(PrototypeGame game, FormationState attacker, FormationState defender)
+        {
+            IReadOnlyList<Reaction> legal = game.AvailableReactions(attacker, defender);
+            if (legal.Contains(Reaction.None)) return Reaction.None;
+            if (defender.OrderlyWithdrawalReady && legal.Contains(Reaction.Evade)) return Reaction.Evade;
+            if ((defender.Damage >= DamageState.Heavy || defender.Endurance == Endurance.Critical) && legal.Contains(Reaction.Evade)) return Reaction.Evade;
+            if (legal.Contains(Reaction.Counterattack) && defender.EffectiveStrike >= attacker.EffectiveDefense) return Reaction.Counterattack;
+            return legal.Contains(Reaction.Defend) ? Reaction.Defend : legal[0];
+        }
+
+        public static HexCoord? ChooseEvadeDestination(PrototypeGame game, FormationState attacker, FormationState defender)
+        {
+            int allowance = defender.OrderlyWithdrawalReady ? 2 : 1;
+            IReadOnlyList<HexCoord> legal = game.LegalEvadeDestinations(attacker, defender, allowance);
+            return legal.Count > 0 ? legal[0] : (HexCoord?)null;
+        }
+
         public static bool Execute(PrototypeGame game, AiDecision decision, out string message)
+            => Execute(game, decision, null, null, out message);
+
+        public static bool Execute(PrototypeGame game, AiDecision decision, Reaction? selectedReaction, HexCoord? evadeDestination, out string message)
         {
             message = "AI has no legal decision.";
             if (game?.Active == null || decision == null) return false;
@@ -75,7 +95,9 @@ namespace SeaOfUncertainty.Core
                 case ActionKind.Strike:
                     FormationState target = game.Find(decision.TargetId);
                     if (target == null) { message = "The selected Contact no longer supports a target."; return false; }
-                    return game.Strike(actor, target, decision.Salvo, Reaction.Defend, out _, out message);
+                    Reaction reaction = selectedReaction ?? ChooseReaction(game, actor, target);
+                    HexCoord? destination = reaction == Reaction.Evade ? evadeDestination ?? ChooseEvadeDestination(game, actor, target) : null;
+                    return game.Strike(actor, target, decision.Salvo, reaction, destination, out _, out message);
                 case ActionKind.Recover: return game.Recover(actor, out message);
                 default: return game.Hold(actor, out message);
             }

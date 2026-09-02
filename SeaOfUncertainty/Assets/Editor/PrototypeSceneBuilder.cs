@@ -155,6 +155,93 @@ namespace SeaOfUncertainty.Editor
             Debug.Log("Card expansion tests passed: 36 Entropy cards, 24 Command Responses, decks, supported mechanics, and save/load.");
         }
 
+        public static void RunReactionTests()
+        {
+            PrototypeGame defendGame = ReactionFixture(out FormationState defendAttacker, out FormationState defendTarget);
+            int defenderReadyBefore = defendTarget.ReadyTime;
+            Assert(defendGame.AvailableReactions(defendAttacker, defendTarget).Count == 4, "A coherent ready defender with targeting data may choose all four Reactions");
+            Assert(defendGame.Strike(defendAttacker, defendTarget, Salvo.Light, Reaction.Defend, null, out CombatResult defendResult, out string defendMessage), "Defend reaction resolves: " + defendMessage);
+            Assert(defendResult.Reaction == Reaction.Defend && defendTarget.HasReacted && defendTarget.ReadyTime == defenderReadyBefore, "Defend grants a reaction without changing defender Ready Time");
+            Assert(defendGame.AvailableReactions(defendAttacker, defendTarget).SequenceEqual(new[] { Reaction.None }), "A spent Formation cannot react again before its own Action");
+
+            string reactedSave = JsonUtility.ToJson(defendGame.CaptureState());
+            var reactedRestore = new PrototypeGame(1978);
+            reactedRestore.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(reactedSave));
+            Assert(reactedRestore.Find(defendTarget.Id).HasReacted, "Spent Reaction state survives save and load");
+
+            int refreshGuard = 0;
+            while (defendGame.Active != defendTarget && defendGame.Active != null && refreshGuard++ < 40) Assert(defendGame.Hold(defendGame.Active, out string cadenceMessage), "Advance to defender Action: " + cadenceMessage);
+            Assert(defendGame.Active == defendTarget, "The reacted defender eventually becomes the active Formation");
+            Assert(defendGame.Hold(defendTarget, out string refreshMessage) && !defendTarget.HasReacted, "A Formation refreshes its Reaction after completing its own Action: " + refreshMessage);
+
+            PrototypeGame evadeGame = ReactionFixture(out FormationState evadeAttacker, out FormationState evadeTarget);
+            HexCoord evadeStart = evadeTarget.Position;
+            IReadOnlyList<HexCoord> oneHexEvades = evadeGame.LegalEvadeDestinations(evadeAttacker, evadeTarget, 1);
+            Assert(oneHexEvades.Count > 0, "The reaction fixture exposes at least one legal one-hex Evade destination");
+            Assert(evadeGame.Strike(evadeAttacker, evadeTarget, Salvo.Light, Reaction.Evade, oneHexEvades[0], out CombatResult evadeResult, out string evadeMessage), "Evade reaction resolves with a legal destination: " + evadeMessage);
+            Assert(evadeResult.Reaction == Reaction.Evade && evadeResult.Withdrew && HexCoord.Distance(evadeStart, evadeTarget.Position) == 1 && evadeTarget.HasReacted, "Ordinary Evade gains Defense and moves exactly one legal hex after combat");
+
+            PrototypeGame holdGame = ReactionFixture(out FormationState holdAttacker, out FormationState holdTarget);
+            HexCoord holdPosition = holdTarget.Position;
+            int holdBaseDefense = holdTarget.EffectiveDefense;
+            Assert(holdGame.Strike(holdAttacker, holdTarget, Salvo.Light, Reaction.Hold, null, out CombatResult holdResult, out string holdReactionMessage), "Hold reaction resolves: " + holdReactionMessage);
+            Assert(holdResult.Defense == holdBaseDefense && holdTarget.Position.Equals(holdPosition) && holdTarget.HasReacted, "Hold preserves position, adds no Defense, and spends the Reaction");
+
+            PrototypeGame counterGame = ReactionFixture(out FormationState counterAttacker, out FormationState counterTarget);
+            Assert(counterGame.Strike(counterAttacker, counterTarget, Salvo.Light, Reaction.Counterattack, null, out CombatResult counterResult, out string counterMessage), "Counterattack reaction resolves: " + counterMessage);
+            Assert(counterResult.Counterattacked && counterResult.CounterattackRoll >= 1 && counterResult.CounterattackRoll <= 6 && counterTarget.HasReacted, "Counterattack makes one bounded Light return strike and spends the Reaction");
+
+            PrototypeGame restrictedGame = ReactionFixture(out FormationState restrictedAttacker, out FormationState restrictedTarget);
+            restrictedTarget.Friction = true;
+            restrictedTarget.Disruption = true;
+            Assert(!restrictedGame.AvailableReactions(restrictedAttacker, restrictedTarget).Contains(Reaction.Counterattack), "Disrupted formations cannot Counterattack");
+            restrictedTarget.Friction = false;
+            restrictedTarget.Disruption = false;
+            restrictedTarget.Damage = DamageState.Crippled;
+            Assert(!restrictedGame.AvailableReactions(restrictedAttacker, restrictedTarget).Contains(Reaction.Counterattack), "Crippled formations cannot Counterattack");
+            restrictedTarget.Replenishing = true;
+            Assert(restrictedGame.AvailableReactions(restrictedAttacker, restrictedTarget).SequenceEqual(new[] { Reaction.None }), "Replenishing formations cannot react");
+
+            PrototypeGame aiReactionGame = ReactionFixture(out FormationState aiAttacker, out FormationState aiTarget);
+            aiTarget.OrderlyWithdrawalReady = true;
+            Reaction aiReaction = PrototypeAiCommander.ChooseReaction(aiReactionGame, aiAttacker, aiTarget);
+            HexCoord? aiEvade = PrototypeAiCommander.ChooseEvadeDestination(aiReactionGame, aiAttacker, aiTarget);
+            Assert(aiReaction == Reaction.Evade && aiEvade.HasValue && aiReactionGame.LegalEvadeDestinations(aiAttacker, aiTarget, 2).Contains(aiEvade.Value), "AI selects the prepared legal Evade without consulting hidden enemy state");
+            Debug.Log("Player-selected reaction tests passed: timing, refresh, Defend, Evade, Counterattack, Hold, restrictions, save/load, and AI choice.");
+        }
+
+        private static PrototypeGame ReactionFixture(out FormationState attacker, out FormationState defender)
+        {
+            var game = new PrototypeGame(1978);
+            attacker = game.Active;
+            Side attackingSide = attacker.Side;
+            defender = game.Formations.First(formation => formation.Side != attackingSide && formation.Kind == FormationKind.Submarine);
+            defender.Position = new HexCoord(1, 7);
+            defender.Ratings.Defense = 20;
+            attacker.Ratings.Defense = 20;
+            ContactState attackContact = game.ContactFor(attacker.Side, defender.Id);
+            if (attackContact == null)
+            {
+                attackContact = new ContactState { Owner = attacker.Side, TargetId = defender.Id };
+                game.Contacts.Add(attackContact);
+            }
+            attackContact.LastKnownPosition = defender.Position;
+            attackContact.Location = LocationQuality.High;
+            attackContact.Identity = IdentityQuality.Identified;
+            attackContact.Age = 0;
+            ContactState returnContact = game.ContactFor(defender.Side, attacker.Id);
+            if (returnContact == null)
+            {
+                returnContact = new ContactState { Owner = defender.Side, TargetId = attacker.Id };
+                game.Contacts.Add(returnContact);
+            }
+            returnContact.LastKnownPosition = attacker.Position;
+            returnContact.Location = LocationQuality.High;
+            returnContact.Identity = IdentityQuality.Identified;
+            returnContact.Age = 0;
+            return game;
+        }
+
         public static void RunCoreSmokeTests()
         {
             EnsureRuntimePanelSettings();

@@ -11,7 +11,8 @@ namespace SeaOfUncertainty.Core
     public enum MoveMode { Cautious, Normal, HighTempo }
     public enum SearchMode { Passive, Active, Focused }
     public enum Salvo { Light, Standard, Heavy }
-    public enum Reaction { Defend, Evade, Counterattack, Hold }
+    public enum Reaction { None, Defend, Evade, Counterattack, Hold }
+    public enum ReactionControl { None, HumanDirect, HumanHandoff, Ai }
     public enum LocationQuality { Low, Medium, High }
     public enum IdentityQuality { Unknown, General, Identified }
     public enum Endurance { Ready, Extended, Critical }
@@ -85,6 +86,7 @@ namespace SeaOfUncertainty.Core
         public bool SuppressDestructionNextAction;
         public ActionKind Mission = ActionKind.Hold;
         public bool OrderlyWithdrawalReady;
+        public bool Replenishing;
 
         public int EntropySources => (Friction ? 1 : 0) + (Disruption ? 1 : 0) + (Destruction ? 1 : 0);
         public string Cohesion => EntropySources >= 3 ? "Disorganized" : EntropySources >= 2 ? "Disrupted" : "Cohesive";
@@ -140,6 +142,9 @@ namespace SeaOfUncertainty.Core
         public Reaction Reaction;
         public bool Withdrew;
         public HexCoord WithdrawalDestination;
+        public bool Counterattacked;
+        public int CounterattackRoll;
+        public DamageState CounterattackDamage;
     }
 
     public static class Rules

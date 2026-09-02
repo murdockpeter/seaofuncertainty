@@ -275,6 +275,9 @@ namespace SeaOfUncertainty.Core
         }
 
         public bool Strike(FormationState attacker, FormationState target, Salvo salvo, Reaction reaction, out CombatResult result, out string message)
+            => Strike(attacker, target, salvo, reaction, null, out result, out message);
+
+        public bool Strike(FormationState attacker, FormationState target, Salvo salvo, Reaction reaction, HexCoord? evadeDestination, out CombatResult result, out string message)
         {
             result = null;
             if (attacker != Active) { message = "Only the highlighted Ready formation may act."; return false; }
@@ -284,8 +287,15 @@ namespace SeaOfUncertainty.Core
             if (HexCoord.Distance(attacker.Position, contact.LastKnownPosition) > strikeRange) { message = $"{attacker.Kind} {salvo} Strike range is {strikeRange} hexes ({strikeRange * Area.NauticalMilesPerHex} nm)."; return false; }
             if (salvo == Salvo.Heavy && !attacker.CanHeavySalvo)
             { message = "Heavy Salvo is unavailable to this formation."; return false; }
-            Reaction resolvedReaction = ReactionFor(target, reaction);
-            if (resolvedReaction == Reaction.Counterattack && target.HasEffect("X-09")) { message = "Fire Control Hit prevents this Formation from Counterattacking."; return false; }
+            IReadOnlyList<Reaction> legalReactions = AvailableReactions(attacker, target);
+            Reaction resolvedReaction = reaction;
+            if (target.OrderlyWithdrawalReady && reaction == Reaction.Defend && legalReactions.Contains(Reaction.Evade)) resolvedReaction = Reaction.Evade;
+            if (!legalReactions.Contains(resolvedReaction)) { message = $"{resolvedReaction} is not a legal Reaction for {target.Name}."; return false; }
+
+            int evadeAllowance = resolvedReaction == Reaction.Evade ? (target.OrderlyWithdrawalReady ? 2 : 1) : 0;
+            List<HexCoord> legalEvadeDestinations = evadeAllowance > 0 ? LegalEvadeDestinations(attacker, target, evadeAllowance).ToList() : new List<HexCoord>();
+            if (resolvedReaction == Reaction.Evade && evadeDestination.HasValue && !legalEvadeDestinations.Contains(evadeDestination.Value))
+            { message = "Choose a legal Evade destination farther from the attacker."; return false; }
             int salvoModifier = salvo == Salvo.Standard && attacker.HasEffect("X-11") ? Rules.SalvoModifier(Salvo.Light) : Rules.SalvoModifier(salvo);
             int attack = attacker.EffectiveStrike + salvoModifier + Rules.TargetingModifier(contact, AgeTwoTargetingPenalty);
             int defense = target.EffectiveDefense + (resolvedReaction == Reaction.Defend || resolvedReaction == Reaction.Evade ? 1 : 0) - (target.Destruction ? 1 : 0);
@@ -299,13 +309,12 @@ namespace SeaOfUncertainty.Core
             if (attacker.HasEffect("F-04")) DegradeEndurance(attacker);
             bool withdrew = false;
             HexCoord withdrawalDestination = target.Position;
-            if (target.OrderlyWithdrawalReady)
+            if (resolvedReaction != Reaction.None) target.HasReacted = true;
+            if (resolvedReaction == Reaction.Evade)
             {
-                target.OrderlyWithdrawalReady = false;
-                target.HasReacted = true;
                 if (!target.IsDestroyed)
                 {
-                    withdrawalDestination = ChooseWithdrawalDestination(attacker, target, 2);
+                    withdrawalDestination = evadeDestination ?? (legalEvadeDestinations.Count > 0 ? legalEvadeDestinations[0] : target.Position);
                     withdrew = !withdrawalDestination.Equals(target.Position);
                     if (withdrew)
                     {
@@ -314,16 +323,69 @@ namespace SeaOfUncertainty.Core
                         contact.Age = 0;
                     }
                 }
+                if (target.OrderlyWithdrawalReady) target.OrderlyWithdrawalReady = false;
             }
-            result = new CombatResult { Attack = attack, Defense = defense, Difference = difference, Band = band, Roll = roll, Damage = damage, Reaction = resolvedReaction, Withdrew = withdrew, WithdrawalDestination = withdrawalDestination };
-            string withdrawal = resolvedReaction == Reaction.Evade ? withdrew ? $" Orderly Withdrawal to {withdrawalDestination}." : " Orderly Withdrawal could not reach a safer hex." : string.Empty;
-            CompleteAction(attacker, ActionKind.Strike, false, $"{attacker.Name} struck {target.Name}: {attack} vs {defense}, {band}, rolled {roll} — {damage}. Reaction: {resolvedReaction}.{withdrawal}");
+
+            bool counterattacked = false;
+            int counterattackRoll = 0;
+            DamageState counterattackDamage = DamageState.None;
+            string counterattack = string.Empty;
+            if (resolvedReaction == Reaction.Counterattack && !target.IsDestroyed)
+            {
+                ContactState returnContact = ContactFor(target.Side, attacker.Id);
+                int returnAttack = target.EffectiveStrike + Rules.SalvoModifier(Salvo.Light) + Rules.TargetingModifier(returnContact, AgeTwoTargetingPenalty);
+                int returnDefense = attacker.EffectiveDefense - (attacker.Destruction ? 1 : 0);
+                CombatBand returnBand = Rules.BandFor(returnAttack - returnDefense);
+                counterattackRoll = Roll();
+                counterattackDamage = Rules.DamageFor(returnBand, counterattackRoll);
+                ApplyDamage(attacker, counterattackDamage);
+                counterattacked = true;
+                counterattack = $" Counterattack: {returnAttack} vs {returnDefense}, {returnBand}, rolled {counterattackRoll} — {counterattackDamage}.";
+            }
+
+            result = new CombatResult { Attack = attack, Defense = defense, Difference = difference, Band = band, Roll = roll, Damage = damage, Reaction = resolvedReaction, Withdrew = withdrew, WithdrawalDestination = withdrawalDestination, Counterattacked = counterattacked, CounterattackRoll = counterattackRoll, CounterattackDamage = counterattackDamage };
+            string withdrawal = resolvedReaction == Reaction.Evade ? withdrew ? $" Evaded to {withdrawalDestination}." : " Evade had no legal safer destination." : string.Empty;
+            CompleteAction(attacker, ActionKind.Strike, false, $"{attacker.Name} struck {target.Name}: {attack} vs {defense}, {band}, rolled {roll} — {damage}. Reaction: {resolvedReaction}.{withdrawal}{counterattack}");
             message = Log[0];
             return true;
         }
 
         public Reaction ReactionFor(FormationState target, Reaction fallback = Reaction.Defend)
-            => target != null && target.OrderlyWithdrawalReady ? Reaction.Evade : fallback;
+            => target == null || target.HasReacted || target.Replenishing ? Reaction.None : target.OrderlyWithdrawalReady ? Reaction.Evade : fallback;
+
+        public static ReactionControl ReactionController(OperationMode mode, Side humanSide, Side defenderSide)
+            => mode == OperationMode.LocalHotseat ? ReactionControl.HumanHandoff : defenderSide == humanSide ? ReactionControl.HumanDirect : ReactionControl.Ai;
+
+        public IReadOnlyList<Reaction> AvailableReactions(FormationState attacker, FormationState target)
+        {
+            if (attacker == null || target == null || target.IsDestroyed || target.HasReacted || target.Replenishing) return new[] { Reaction.None };
+            var reactions = new List<Reaction> { Reaction.Defend, Reaction.Evade, Reaction.Hold };
+            ContactState returnContact = ContactFor(target.Side, attacker.Id);
+            bool counterattackLegal = target.Damage != DamageState.Crippled && target.EntropySources < 2 && !target.HasEffect("X-09") &&
+                returnContact != null && HexCoord.Distance(target.Position, returnContact.LastKnownPosition) <= Rules.StrikeRange(target.Kind, Salvo.Light);
+            if (counterattackLegal) reactions.Insert(2, Reaction.Counterattack);
+            return reactions;
+        }
+
+        public IReadOnlyList<HexCoord> LegalEvadeDestinations(FormationState attacker, FormationState target, int allowance = 1)
+        {
+            if (attacker == null || target == null || target.IsDestroyed || allowance < 1) return new List<HexCoord>();
+            ContactState threatContact = ContactFor(target.Side, attacker.Id);
+            HexCoord threatPosition = threatContact?.LastKnownPosition ?? target.Position;
+            int currentRange = HexCoord.Distance(threatPosition, target.Position);
+            return Enumerable.Range(0, Area.Width)
+                .SelectMany(q => Enumerable.Range(0, Area.Height).Select(r => new HexCoord(q, r)))
+                .Where(Area.Contains)
+                .Where(candidate => HexCoord.Distance(target.Position, candidate) >= 1 && HexCoord.Distance(target.Position, candidate) <= allowance)
+                .Where(candidate => target.Kind == FormationKind.AirGroup || Area.TerrainAt(candidate) != OperationalTerrain.Land)
+                .Where(candidate => !Formations.Any(formation => formation != target && !formation.IsDestroyed && formation.Position.Equals(candidate)))
+                .Where(candidate => threatContact == null || HexCoord.Distance(threatPosition, candidate) > currentRange)
+                .OrderByDescending(candidate => threatContact == null ? 0 : HexCoord.Distance(threatPosition, candidate))
+                .ThenByDescending(candidate => HexCoord.Distance(target.Position, candidate))
+                .ThenBy(candidate => candidate.Q)
+                .ThenBy(candidate => candidate.R)
+                .ToList();
+        }
 
         public bool Hold(FormationState formation, out string message)
         {
@@ -405,7 +467,6 @@ namespace SeaOfUncertainty.Core
                         else contact.Location--;
                     }
                 }
-                foreach (FormationState formation in Formations) formation.HasReacted = false;
             }
             Active = Rules.NextReady(Formations, lastActingSide);
         }
@@ -626,24 +687,6 @@ namespace SeaOfUncertainty.Core
             }
             message = $"Played {card.Id} {card.Title}.";
             return true;
-        }
-
-        private HexCoord ChooseWithdrawalDestination(FormationState attacker, FormationState target, int allowance)
-        {
-            int currentRange = HexCoord.Distance(attacker.Position, target.Position);
-            return Enumerable.Range(0, Area.Width)
-                .SelectMany(q => Enumerable.Range(0, Area.Height).Select(r => new HexCoord(q, r)))
-                .Where(Area.Contains)
-                .Where(candidate => HexCoord.Distance(target.Position, candidate) <= allowance)
-                .Where(candidate => target.Kind == FormationKind.AirGroup || Area.TerrainAt(candidate) != OperationalTerrain.Land)
-                .Where(candidate => !Formations.Any(formation => formation != target && !formation.IsDestroyed && formation.Position.Equals(candidate)))
-                .Where(candidate => HexCoord.Distance(attacker.Position, candidate) > currentRange)
-                .OrderByDescending(candidate => HexCoord.Distance(attacker.Position, candidate))
-                .ThenByDescending(candidate => HexCoord.Distance(target.Position, candidate))
-                .ThenBy(candidate => candidate.Q)
-                .ThenBy(candidate => candidate.R)
-                .DefaultIfEmpty(target.Position)
-                .First();
         }
 
         private bool RemoveMatchingEffect(FormationState formation, EntropySource source)

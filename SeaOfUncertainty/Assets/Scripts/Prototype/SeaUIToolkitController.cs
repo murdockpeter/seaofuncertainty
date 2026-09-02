@@ -27,6 +27,9 @@ namespace SeaOfUncertainty.Prototype
         private bool aiRunning;
         private bool edgeScrollEnabled;
         private bool entropyRevealBlocking;
+        private FormationState pendingReactionTarget;
+        private Salvo pendingReactionSalvo;
+        private AiDecision pendingAiStrike;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -231,7 +234,18 @@ namespace SeaOfUncertainty.Prototype
             {
                 backend.ToolkitBeginDecision();
                 yield return new WaitForSecondsRealtime(backend.ReducedMotion ? .05f : .22f);
-                backend.ToolkitExecuteAiTurn();
+                AiDecision decision = backend.ToolkitChooseAiDecision();
+                if (decision?.Action == ActionKind.Strike)
+                {
+                    FormationState target = backend.Game.Find(decision.TargetId);
+                    if (target != null && target.Side == backend.HumanSide)
+                    {
+                        aiRunning = false;
+                        BeginStrikeReaction(target, decision.Salvo, decision);
+                        yield break;
+                    }
+                }
+                backend.ToolkitExecuteAiTurn(decision, null, null);
                 if (!backend.LastToolkitActionSucceeded) break;
                 if (backend.IsAiTurn && !backend.IsComplete) ShowAiPlanning();
                 yield return new WaitForSecondsRealtime(backend.ReducedMotion ? .05f : .35f);
@@ -312,10 +326,11 @@ namespace SeaOfUncertainty.Prototype
             foreach (FormationState formation in backend.Game.ActivationQueue())
             {
                 string queueLabel = queuePosition++ == 0 ? "NOW" : $"NEXT {queuePosition - 1}";
-                Button row = ActionButton($"{queueLabel}  •  READY T{formation.ReadyTime:00}\n{formation.Name}\n{formation.Kind}  •  {formation.Cohesion}", () => UpdateDossier(null));
+                string reactionState = formation.Replenishing ? "R UNAVAILABLE" : formation.HasReacted ? "R SPENT" : "R READY";
+                Button row = ActionButton($"{queueLabel}  •  READY T{formation.ReadyTime:00}\n{formation.Name}\n{formation.Kind}  •  {formation.Cohesion}  •  {reactionState}", () => UpdateDossier(null));
                 row.AddToClassList("timeline-row");
                 if (formation == backend.Game.Active) row.AddToClassList("active");
-                row.tooltip = $"Activation queue position {queuePosition} • {formation.Side} • Ready T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.EffectiveCommand}";
+                row.tooltip = $"Activation queue position {queuePosition} • {formation.Side} • Ready T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.EffectiveCommand} • {reactionState}";
                 scroll.Add(row);
             }
             panel.Add(scroll);
@@ -492,7 +507,8 @@ namespace SeaOfUncertainty.Prototype
             stats.Add(Stat("SIGNATURE", formation.EffectiveSignature, "Higher is easier to detect."));
             stats.Add(Stat("COMMAND", formation.EffectiveCommand, "Same-Time initiative and autonomy after attached effects."));
             dossier.Add(stats);
-            dossier.Add(Text($"MISSION {formation.Mission.ToString().ToUpperInvariant()}\nREADY T{formation.ReadyTime:00}\nENDURANCE {formation.Endurance}\nDAMAGE {formation.Damage}\nCOHESION {formation.Cohesion}\nFRICTION {(formation.Friction ? "MARKED" : "CLEAR")}\nDISRUPTION {(formation.Disruption ? "MARKED" : "CLEAR")}\nDESTRUCTION {(formation.Destruction ? "MARKED" : "CLEAR")}{(formation.OrderlyWithdrawalReady ? "\nORDERLY WITHDRAWAL PREPARED" : string.Empty)}", "body-copy"));
+            string reactionStatus = formation.Replenishing ? "UNAVAILABLE" : formation.HasReacted ? "SPENT" : "AVAILABLE";
+            dossier.Add(Text($"MISSION {formation.Mission.ToString().ToUpperInvariant()}\nREACTION {reactionStatus}\nREADY T{formation.ReadyTime:00}\nENDURANCE {formation.Endurance}\nDAMAGE {formation.Damage}\nCOHESION {formation.Cohesion}\nFRICTION {(formation.Friction ? "MARKED" : "CLEAR")}\nDISRUPTION {(formation.Disruption ? "MARKED" : "CLEAR")}\nDESTRUCTION {(formation.Destruction ? "MARKED" : "CLEAR")}{(formation.OrderlyWithdrawalReady ? "\nORDERLY WITHDRAWAL PREPARED" : string.Empty)}", "body-copy"));
             foreach (string cardId in formation.ActiveEffectCardIds ?? new List<string>())
             {
                 EntropyEffectDefinition card = EntropyEffectCatalog.Find(cardId);
@@ -577,8 +593,114 @@ namespace SeaOfUncertainty.Prototype
             else if (actionMode == ToolkitActionMode.Strike)
             {
                 if (target == null) { UpdateDossier(contact); return; }
-                if (salvo == Salvo.Heavy) ConfirmHeavy(target); else ResolveAction(() => backend.ToolkitStrike(target, salvo));
+                if (salvo == Salvo.Heavy) ConfirmHeavy(target); else BeginStrikeReaction(target, salvo);
             }
+        }
+
+        private void BeginStrikeReaction(FormationState target, Salvo committedSalvo, AiDecision aiDecision = null)
+        {
+            pendingReactionTarget = target;
+            pendingReactionSalvo = committedSalvo;
+            pendingAiStrike = aiDecision;
+            IReadOnlyList<Reaction> legal = backend.Game.AvailableReactions(backend.Game.Active, target);
+            if (legal.Count == 1 && legal[0] == Reaction.None)
+            {
+                ResolvePendingStrike(Reaction.None, null);
+                return;
+            }
+
+            ReactionControl control = PrototypeGame.ReactionController(backend.SelectedMode, backend.HumanSide, target.Side);
+            if (control == ReactionControl.Ai)
+            {
+                Reaction aiReaction = PrototypeAiCommander.ChooseReaction(backend.Game, backend.Game.Active, target);
+                HexCoord? aiDestination = aiReaction == Reaction.Evade ? PrototypeAiCommander.ChooseEvadeDestination(backend.Game, backend.Game.Active, target) : null;
+                ResolvePendingStrike(aiReaction, aiDestination);
+                return;
+            }
+
+            if (control == ReactionControl.HumanHandoff) ShowReactionHandoff();
+            else ShowReactionChoice();
+        }
+
+        private void ShowReactionHandoff()
+        {
+            BeginScreen("SECURE REACTION HANDOFF");
+            VisualElement page = El("front-page");
+            VisualElement card = Panel("hero-card", "center");
+            card.Add(Text(pendingReactionTarget.Side.ToString().ToUpperInvariant() + " DEFENDER", "front-title"));
+            card.Add(Text("Pass control to the defending player. The attack is committed; choose the Formation's Reaction before combat is rolled.", "body-copy"));
+            card.Add(ActionButton("ASSUME DEFENSIVE CONTROL", ShowReactionChoice, "primary"));
+            page.Add(card);
+            app.Add(page);
+        }
+
+        private void ShowReactionChoice()
+        {
+            FormationState attacker = backend.Game.Active;
+            FormationState defender = pendingReactionTarget;
+            ContactState attackerContact = backend.Game.ContactFor(defender.Side, attacker.Id);
+            string attackerLabel = attackerContact?.Identity == IdentityQuality.Identified ? attacker.Name : attackerContact == null ? "UNLOCATED STRIKE ORIGIN" : $"HOSTILE CONTACT AT {attackerContact.LastKnownPosition}";
+            BeginScreen($"REACTION  •  {defender.Side.ToString().ToUpperInvariant()} DEFENSE");
+            VisualElement page = El("front-page");
+            VisualElement card = Panel("hero-card");
+            card.Add(Text("INCOMING " + pendingReactionSalvo.ToString().ToUpperInvariant() + " STRIKE", "eyebrow"));
+            card.Add(Text(defender.Name.ToUpperInvariant(), "front-title"));
+            card.Add(Text($"Attacker: {attackerLabel}\nDefender Reaction is available and does not change Ready Time. The choice is consumed until this Formation completes its own Action.", "body-copy"));
+            IReadOnlyList<Reaction> legal = backend.Game.AvailableReactions(attacker, defender);
+            if (legal.Contains(Reaction.Defend)) card.Add(ActionButton("DEFEND  •  +1 DEFENSE", () => ResolvePendingStrike(Reaction.Defend, null), "primary"));
+            if (legal.Contains(Reaction.Evade)) card.Add(ActionButton($"EVADE  •  +1 DEFENSE  •  MOVE {(defender.OrderlyWithdrawalReady ? 2 : 1)} AFTER", ShowEvadeDestinations));
+            if (legal.Contains(Reaction.Counterattack)) card.Add(ActionButton("COUNTERATTACK  •  LIGHT STRIKE AFTER  •  NO DEFENSE BONUS", () => ResolvePendingStrike(Reaction.Counterattack, null), "warning"));
+            if (legal.Contains(Reaction.Hold)) card.Add(ActionButton("HOLD  •  PRESERVE POSITION  •  NO MODIFIER", () => ResolvePendingStrike(Reaction.Hold, null)));
+            page.Add(card);
+            app.Add(page);
+        }
+
+        private void ShowEvadeDestinations()
+        {
+            FormationState attacker = backend.Game.Active;
+            FormationState defender = pendingReactionTarget;
+            ContactState attackerContact = backend.Game.ContactFor(defender.Side, attacker.Id);
+            string attackerLabel = attackerContact?.Identity == IdentityQuality.Identified ? attacker.Name : attackerContact == null ? "the unknown strike origin" : "the last-known hostile position";
+            int allowance = defender.OrderlyWithdrawalReady ? 2 : 1;
+            IReadOnlyList<HexCoord> destinations = backend.Game.LegalEvadeDestinations(attacker, defender, allowance);
+            if (destinations.Count == 0) { ResolvePendingStrike(Reaction.Evade, null); return; }
+            BeginScreen("SELECT EVADE DESTINATION");
+            VisualElement page = El("front-page");
+            VisualElement card = Panel("hero-card");
+            card.Add(Text(defender.Name.ToUpperInvariant(), "front-title"));
+            card.Add(Text($"Choose a valid hex farther from {attackerLabel}. This movement occurs after combat and does not change Ready Time.", "body-copy"));
+            ScrollView choices = new ScrollView();
+            choices.AddToClassList("scroll");
+            foreach (HexCoord destination in destinations)
+            {
+                HexCoord selected = destination;
+                int movement = HexCoord.Distance(defender.Position, selected);
+                int separation = HexCoord.Distance(attacker.Position, selected);
+                choices.Add(ActionButton($"HEX {selected}  •  MOVE {movement}  •  SEPARATION {separation}", () => ResolvePendingStrike(Reaction.Evade, selected)));
+            }
+            card.Add(choices);
+            card.Add(ActionButton("BACK TO REACTIONS", ShowReactionChoice));
+            page.Add(card);
+            app.Add(page);
+        }
+
+        private void ResolvePendingStrike(Reaction reaction, HexCoord? evadeDestination)
+        {
+            FormationState target = pendingReactionTarget;
+            AiDecision aiDecision = pendingAiStrike;
+            pendingReactionTarget = null;
+            pendingAiStrike = null;
+            if (aiDecision == null)
+            {
+                ResolveAction(() => backend.ToolkitStrike(target, pendingReactionSalvo, reaction, evadeDestination));
+                return;
+            }
+
+            backend.ToolkitExecuteAiTurn(aiDecision, reaction, evadeDestination);
+            if (!backend.LastToolkitActionSucceeded) { ShowAiPlanning(true); return; }
+            if (backend.IsComplete) { ShowResults(); return; }
+            if (backend.IsAiTurn) BeginAiSequence();
+            else { backend.ToolkitBeginDecision(); ShowGame(); }
         }
 
         private void ResolveAction(Func<string> action)
@@ -768,12 +890,11 @@ namespace SeaOfUncertainty.Prototype
         {
             ContactState contact = backend.Game.ContactFor(backend.Game.Active.Side, target.Id);
             int attack = backend.Game.Active.EffectiveStrike + 2 + Rules.TargetingModifier(contact, backend.Game.AgeTwoTargetingPenalty);
-            Reaction reaction = backend.Game.ReactionFor(target);
-            int defense = target.EffectiveDefense + (reaction == Reaction.Defend || reaction == Reaction.Evade ? 1 : 0) - (target.Destruction ? 1 : 0);
+            int defense = target.EffectiveDefense + 1 - (target.Destruction ? 1 : 0);
             CombatBand band = Rules.BandFor(attack - defense);
             VisualElement modal = Modal("CONFIRM HEAVY SALVO");
-            modal.Add(Text($"Heavy capability will be expended.\n\nATTACK {attack} vs DEFENSE {defense}\nREACTION {reaction.ToString().ToUpperInvariant()}\n{band.ToString().ToUpperInvariant()} BAND\n{Odds(band)}", "body-copy"));
-            modal.Add(ActionButton("COMMIT HEAVY SALVO", () => { CloseOverlay(); ResolveAction(() => backend.ToolkitStrike(target, Salvo.Heavy)); }, "warning"));
+            modal.Add(Text($"Heavy capability will be expended.\n\nATTACK {attack} vs DEFENSE {defense} if the defender chooses +1 Defense\n{band.ToString().ToUpperInvariant()} BAND\n{Odds(band)}\n\nThe defender chooses a legal Reaction after commitment and before the roll.", "body-copy"));
+            modal.Add(ActionButton("COMMIT HEAVY SALVO", () => { CloseOverlay(); BeginStrikeReaction(target, Salvo.Heavy); }, "warning"));
             modal.Add(ActionButton("CANCEL", CloseOverlay));
         }
 

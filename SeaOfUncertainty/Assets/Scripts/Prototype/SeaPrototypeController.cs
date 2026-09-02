@@ -191,17 +191,21 @@ namespace SeaOfUncertainty.Prototype
             humanSide = playerSide;
         }
 
-        public string ToolkitExecuteAiTurn()
+        public AiDecision ToolkitChooseAiDecision() => IsAiTurn ? PrototypeAiCommander.Choose(game) : null;
+
+        public string ToolkitExecuteAiTurn() => ToolkitExecuteAiTurn(null, null, null);
+
+        public string ToolkitExecuteAiTurn(AiDecision preparedDecision, Reaction? selectedReaction, HexCoord? evadeDestination)
         {
             lastActionSucceeded = false;
             if (!IsAiTurn) return "No AI-controlled formation is Ready.";
             FormationState actor = game.Active;
             string alternatives = LegalAlternatives();
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
-            AiDecision decision = PrototypeAiCommander.Choose(game);
+            AiDecision decision = preparedDecision ?? PrototypeAiCommander.Choose(game);
             if (decision == null) return "AI could not form a legal decision.";
             telemetry.RecordChoice(game, actor, "AiActionChosen", decision.Action.ToString(), decision.ModeName, alternatives);
-            if (!PrototypeAiCommander.Execute(game, decision, out string message))
+            if (!PrototypeAiCommander.Execute(game, decision, selectedReaction, evadeDestination, out string message))
             {
                 var fallback = new AiDecision { Action = ActionKind.Hold, Rationale = "Fallback after the preferred AI action became illegal." };
                 if (!PrototypeAiCommander.Execute(game, fallback, out message)) { Toast(message); return message; }
@@ -274,11 +278,11 @@ namespace SeaOfUncertainty.Prototype
             return toast;
         }
 
-        public string ToolkitStrike(FormationState target, Salvo salvo)
+        public string ToolkitStrike(FormationState target, Salvo salvo, Reaction reaction = Reaction.Defend, HexCoord? evadeDestination = null)
         {
             lastActionSucceeded = false;
             pending = salvo == Salvo.Light ? PendingAction.StrikeLight : salvo == Salvo.Standard ? PendingAction.StrikeStandard : PendingAction.StrikeHeavy;
-            ExecuteStrike(target, true);
+            ExecuteStrike(target, true, reaction, evadeDestination);
             return toast;
         }
 
@@ -1132,7 +1136,7 @@ namespace SeaOfUncertainty.Prototype
             Toast(message);
         }
 
-        private void ExecuteStrike(FormationState target, bool confirmed = false)
+        private void ExecuteStrike(FormationState target, bool confirmed = false, Reaction selectedReaction = Reaction.Defend, HexCoord? evadeDestination = null)
         {
             Salvo salvo = pending == PendingAction.StrikeLight ? Salvo.Light : pending == PendingAction.StrikeHeavy ? Salvo.Heavy : Salvo.Standard;
             if (salvo == Salvo.Heavy && !confirmed)
@@ -1144,10 +1148,10 @@ namespace SeaOfUncertainty.Prototype
             FormationState actor = game.Active;
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
             string alternatives = LegalAlternatives();
-            Reaction reaction = game.ReactionFor(target);
+            Reaction reaction = selectedReaction;
             CombatPreview preview = GetCombatPreview(actor, target, salvo, reaction);
             string calculation = $"Attack {preview.Attack} vs Defense {preview.Defense}; difference {preview.Difference}; band {preview.Band}; reaction {reaction}; odds {CombatOddsText(preview.Band).Replace("\n", "; ")}";
-            if (game.Strike(actor, target, salvo, reaction, out CombatResult result, out string message))
+            if (game.Strike(actor, target, salvo, reaction, evadeDestination, out CombatResult result, out string message))
             {
                 lastActionSucceeded = true;
                 string outcome = message + $" Roll {result.Roll}; damage {result.Damage}.";
