@@ -51,7 +51,7 @@ This makes a named Strait a meaningful one-Action chokepoint without adding faci
 - Air groups cannot establish or contest control. Crippled and Destroyed formations cannot establish or contest control.
 - Final control is adjudicated from actual formation positions. During play, the map may show the viewing side's own presence but must not reveal hidden enemy presence through a control marker.
 
-This is the generic prototype rule. Scenario-specific transit, escort, denial, and withdrawal scoring remains in the victory backlog.
+This remains the generic control rule. Scenario data now layers transit, escort, denial, and withdrawal scoring onto it at the configured horizon.
 
 ## Explicitly deferred
 

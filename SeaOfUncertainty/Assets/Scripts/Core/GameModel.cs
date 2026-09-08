@@ -127,6 +127,7 @@ namespace SeaOfUncertainty.Core
         public bool IsSynchronizedStrikeLeader;
 
         public int EntropySources => (Friction ? 1 : 0) + (Disruption ? 1 : 0) + (Destruction ? 1 : 0);
+        public string EnduranceProgress => $"{Math.Min(MajorActions, 2)}/3 Major Actions";
         public string Cohesion => EntropySources >= 3 ? "Disorganized" : EntropySources >= 2 ? "Disrupted" : "Cohesive";
         public bool IsDestroyed => Damage == DamageState.Destroyed;
         public int EffectiveMove => Math.Max(1, Ratings.Move - (Endurance == Endurance.Critical ? 1 : 0) - (Damage == DamageState.Crippled ? 1 : 0) - (HasEffect("X-03") ? 1 : 0));
@@ -216,6 +217,9 @@ namespace SeaOfUncertainty.Core
 
         public static bool IsMajorAction(ActionKind action)
             => action == ActionKind.Move || action == ActionKind.Search || action == ActionKind.Strike;
+
+        public static string EnduranceEffect(Endurance endurance)
+            => endurance == Endurance.Ready ? "No state penalty" : endurance == Endurance.Extended ? "High Tempo marks Friction; Recover +1 Time" : "Move −1; no Heavy Salvo; complex Actions mark Friction";
 
         public static int MoveDistance(MoveMode mode) => mode == MoveMode.Cautious ? 1 : mode == MoveMode.Normal ? 2 : 3;
         public static int MoveDistance(FormationKind kind, MoveMode mode)

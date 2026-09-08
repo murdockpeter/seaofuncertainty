@@ -20,6 +20,7 @@ namespace SeaOfUncertainty.Prototype
         public int BlueFinalScore => blueFinalScore;
         public int RedFinalScore => redFinalScore;
         public string ResultSummary => resultSummary;
+        public ScenarioOutcome FinalOutcome => finalOutcome;
         public bool AgeTwoPenalty => ageTwoTargetingPenalty;
         public bool AudioEnabled => audioEnabled;
         public bool HighContrast => highContrast;
@@ -95,6 +96,7 @@ namespace SeaOfUncertainty.Prototype
         private int blueFinalScore;
         private int redFinalScore;
         private string resultSummary;
+        private ScenarioOutcome finalOutcome;
         private PlaytestRecorder telemetry;
         private PlaytestFeedback feedback = new PlaytestFeedback();
         private float decisionStartedAt;
@@ -575,8 +577,8 @@ namespace SeaOfUncertainty.Prototype
             GUI.Label(new Rect(sheet.x + 45, sheet.y + 452, 680, 30), "INITIAL INTELLIGENCE", panelTitle);
             GUI.Label(new Rect(sheet.x + 45, sheet.y + 490, 680, 120), "Each side begins with one imperfect Contact. The map displays only the active side’s formations and information picture.", body);
 
-            GUI.Label(new Rect(sheet.x + 850, sheet.y + 82, 650, 30), "PROVISIONAL SCORING", panelTitle);
-            string scoring = "5 VP   Sole control within one hex of the Inner Sea at T16\n\n3 VP   Designated carrier group remains combat capable\n\n2 VP   Each enemy formation Destroyed\n\n1 VP   Each enemy formation Crippled\n\nTIE     Side closest to the objective, then preservation";
+            GUI.Label(new Rect(sheet.x + 850, sheet.y + 82, 650, 30), "OPERATIONAL SCORING", panelTitle);
+            string scoring = string.Join("\n\n", game.Scenario.Objectives.Select(objective => $"{objective.Points} VP   {objective.Title}")) + "\n\nTIE     Combat-capable formations, lower damage burden, then closest naval formation";
             GUI.Label(new Rect(sheet.x + 850, sheet.y + 130, 650, 290), scoring, body);
             GUI.Label(new Rect(sheet.x + 850, sheet.y + 452, 650, 30), "PROTOTYPE ASSUMPTIONS", panelTitle);
             string assumptions = $"Strike range: 3 hexes\nAge-2 targeting penalty: {(ageTwoTargetingPenalty ? "ON" : "OFF")}\nReaction: automatic Defend unless Orderly Withdrawal is prepared\nContact improvement: Location first\nEndurance: three major Actions";
@@ -642,7 +644,7 @@ namespace SeaOfUncertainty.Prototype
             GUI.Label(new Rect(panel.x + 54, panel.y + 86, panel.width - 108, 60), resultSummary, new GUIStyle(title) { fontSize = 42, alignment = TextAnchor.MiddleCenter });
             DrawScoreBlock(new Rect(panel.x + 150, panel.y + 192, 390, 250), Side.Blue, blueFinalScore);
             DrawScoreBlock(new Rect(panel.x + panel.width - 540, panel.y + 192, 390, 250), Side.Red, redFinalScore);
-            GUI.Label(new Rect(panel.x + 210, panel.y + 478, panel.width - 420, 95), "Scoring is provisional and exists to test whether maneuver, information, and preservation matter more than simple destruction.", new GUIStyle(body) { alignment = TextAnchor.MiddleCenter, fontSize = 19 });
+            GUI.Label(new Rect(panel.x + 210, panel.y + 478, panel.width - 420, 95), finalOutcome == null ? "Operational scoring unavailable." : $"Operational objectives decide first. Tie-break: {finalOutcome.DecidingFactor}. Damage never awards VP directly.", new GUIStyle(body) { alignment = TextAnchor.MiddleCenter, fontSize = 19 });
             if (!string.IsNullOrEmpty(telemetry.LastExportDirectory)) GUI.Label(new Rect(panel.x + 120, panel.y + 568, panel.width - 240, 38), "PLAYTEST DATA EXPORTED  •  " + telemetry.LastExportDirectory, new GUIStyle(small) { alignment = TextAnchor.MiddleCenter });
             if (GUI.Button(new Rect(panel.center.x - 465, panel.y + 630, 280, 64), "PLAYTEST FEEDBACK", buttonActive)) overlay = Overlay.Feedback;
             if (GUI.Button(new Rect(panel.center.x - 140, panel.y + 630, 280, 64), "PLAY AGAIN", button)) { ResetScenario(); screen = AppScreen.Briefing; }
@@ -655,7 +657,7 @@ namespace SeaOfUncertainty.Prototype
             Fill(new Rect(rect.x, rect.y, rect.width, 7), SideColor(side));
             GUI.Label(new Rect(rect.x + 20, rect.y + 30, rect.width - 40, 34), side.ToString().ToUpperInvariant(), new GUIStyle(panelTitle) { alignment = TextAnchor.MiddleCenter });
             GUI.Label(new Rect(rect.x + 20, rect.y + 78, rect.width - 40, 100), score.ToString(), new GUIStyle(title) { alignment = TextAnchor.MiddleCenter, fontSize = 72 });
-            GUI.Label(new Rect(rect.x + 20, rect.y + 184, rect.width - 40, 30), "VICTORY POINTS", tiny);
+            GUI.Label(new Rect(rect.x + 20, rect.y + 184, rect.width - 40, 30), "OPERATIONAL POINTS", tiny);
         }
 
         private void DrawOverlay()
@@ -770,6 +772,7 @@ namespace SeaOfUncertainty.Prototype
             if (telemetry == null) telemetry = new PlaytestRecorder();
             telemetry.StartNew(game);
             feedback = new PlaytestFeedback();
+            finalOutcome = null;
             inspected = game.Active;
             pending = PendingAction.None;
             toast = "Select the Ready formation's action. Every choice previews its cost.";
@@ -886,26 +889,14 @@ namespace SeaOfUncertainty.Prototype
 
         private void CompleteScenario()
         {
-            HexCoord objective = game.Area.Objective;
-            blueFinalScore = FinalScore(Side.Blue, objective);
-            redFinalScore = FinalScore(Side.Red, objective);
-            resultSummary = blueFinalScore == redFinalScore ? "OPERATION CONTESTED" : blueFinalScore > redFinalScore ? "BLUE OPERATIONAL VICTORY" : "RED OPERATIONAL VICTORY";
+            finalOutcome = ScenarioScoring.Evaluate(game);
+            blueFinalScore = finalOutcome.Blue.OperationalPoints;
+            redFinalScore = finalOutcome.Red.OperationalPoints;
+            resultSummary = finalOutcome.Summary;
             telemetry.RecordScore(game, blueFinalScore, redFinalScore, resultSummary);
             ExportPlaytest();
             pending = PendingAction.None;
             screen = AppScreen.Results;
-        }
-
-        private int FinalScore(Side side, HexCoord objective)
-        {
-            List<FormationState> friendly = game.Formations.Where(f => f.Side == side && !f.IsDestroyed).ToList();
-            List<FormationState> enemy = game.Formations.Where(f => f.Side != side).ToList();
-            int score = game.Controls(side, objective) ? 5 : 0;
-            FormationState carrier = game.Formations.FirstOrDefault(f => f.Side == side && f.Kind == FormationKind.CarrierGroup);
-            if (carrier != null && !carrier.IsDestroyed && carrier.Damage < DamageState.Crippled) score += 3;
-            score += enemy.Count(f => f.Damage == DamageState.Destroyed) * 2;
-            score += enemy.Count(f => f.Damage == DamageState.Crippled);
-            return score;
         }
 
         private void AfterSuccessfulAction(Side actingSide)
@@ -1097,7 +1088,7 @@ namespace SeaOfUncertainty.Prototype
             DrawStat(rect.x + 128, rect.y + 205, "SIGNATURE", f.Ratings.Signature + (f.Loud ? 1 : 0), new Color(.65f, .48f, .82f));
             DrawStat(rect.x + 238, rect.y + 205, "COMMAND", f.EffectiveCommand, new Color(.94f, .61f, .2f));
             GUI.Label(new Rect(rect.x + 18, rect.y + 288, 326, 24), "READINESS & CAPABILITY", panelTitle);
-            string state = $"READY  T{f.ReadyTime:00}\nENDURANCE  {f.Endurance.ToString().ToUpperInvariant()}\nDAMAGE  {f.Damage.ToString().ToUpperInvariant()}\nWEAPONS  {(f.WeaponExpended ? "HEAVY EXPENDED" : "AVAILABLE")}";
+            string state = $"READY  T{f.ReadyTime:00}\nENDURANCE  {f.Endurance.ToString().ToUpperInvariant()}  •  {f.EnduranceProgress.ToUpperInvariant()}\nDAMAGE  {f.Damage.ToString().ToUpperInvariant()}\nWEAPONS  {(f.WeaponExpended ? "HEAVY EXPENDED" : "AVAILABLE")}";
             GUI.Label(new Rect(rect.x + 18, rect.y + 321, 326, 110), state, body);
             SetTooltip(new Rect(rect.x + 18, rect.y + 321, 326, 110), $"Ready Time: when the formation may act again.\nEndurance {f.Endurance}: operational staying power.\nDamage {f.Damage}: current physical impairment.\nWeapons: whether Heavy Salvo remains available.");
             GUI.Label(new Rect(rect.x + 18, rect.y + 441, 326, 24), "ENTROPY / COHESION", panelTitle);

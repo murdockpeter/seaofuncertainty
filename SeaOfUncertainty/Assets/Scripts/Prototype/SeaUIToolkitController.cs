@@ -168,8 +168,8 @@ namespace SeaOfUncertainty.Prototype
             card.Add(Text("CONTROL THE OPERATIONAL OBJECTIVE", "heading"));
             card.Add(Text("MISSION", "eyebrow"));
             card.Add(Text(backend.Game.Scenario.Summary + $" Resolve at Time {backend.Game.Scenario.Horizon}. Preserve your carrier group in combat-capable condition. Destruction is a means to those operational ends.", "body-copy"));
-            card.Add(Text("PROVISIONAL SCORING", "eyebrow"));
-            card.Add(Text("5 VP — Sole objective control\n3 VP — Carrier remains combat capable\n2 VP — Enemy Destroyed\n1 VP — Enemy Crippled", "body-copy"));
+            card.Add(Text("OPERATIONAL SCORING", "eyebrow"));
+            card.Add(Text(string.Join("\n", backend.Game.Scenario.Objectives.Select(objective => $"{objective.Points} VP — {objective.Title}")) + "\nTIES — combat-capable formations, lower damage burden, then closest surviving naval formation", "body-copy"));
             card.Add(Text($"ASSUMPTIONS\n20 nm hexes • 2 hours / Ready Time • Formation-specific Strike ranges • Age-2 penalty {(backend.AgeTwoPenalty ? "ON" : "OFF")} • Automatic Defend • MODE {(backend.SelectedMode == OperationMode.SoloVsAi ? "SOLO VS AI" : "LOCAL HOTSEAT")}", "muted"));
             VisualElement row = El("row");
             row.Add(ActionButton("REVIEW SETUP", ShowSetup, "primary"));
@@ -360,6 +360,7 @@ namespace SeaOfUncertainty.Prototype
                 string queueLabel = queuePosition++ == 0 ? "NOW" : $"NEXT {queuePosition - 1}";
                 string reactionState = formation.Replenishing ? "REPLENISHING • R UNAVAILABLE" : formation.HasReacted ? "R SPENT" : "R READY";
                 Button row = ActionButton($"{queueLabel}  •  READY T{formation.ReadyTime:00}\n{formation.Name}\n{formation.Kind}  •  {formation.Cohesion}  •  {reactionState}", () => UpdateDossier(null));
+                row.text += $"\nENDURANCE {formation.Endurance.ToString().ToUpperInvariant()}  •  {formation.EnduranceProgress.ToUpperInvariant()}";
                 row.AddToClassList("timeline-row");
                 if (formation.PatrolActive) row.text += $"\nSCREEN {formation.PatrolPosture.ToString().ToUpperInvariant()} • INTERCEPT {(formation.PatrolInterceptionAvailable ? "READY" : "SPENT")}";
                 else if (formation.SupportActive) row.text += $"\nSUPPORT {formation.SupportKind.ToString().ToUpperInvariant()} → {backend.Game.Find(formation.SupportRecipientId)?.Name ?? formation.SupportRecipientId}";
@@ -569,6 +570,7 @@ namespace SeaOfUncertainty.Prototype
             dossier.Add(stats);
             string reactionStatus = formation.Replenishing ? "UNAVAILABLE" : formation.HasReacted ? "SPENT" : "AVAILABLE";
             dossier.Add(Text($"MISSION TASK {formation.Mission.ToString().ToUpperInvariant()}\nOBJECTIVE {formation.MissionObjective.ToString().ToUpperInvariant()} {(string.IsNullOrEmpty(formation.MissionObjectiveId) ? formation.MissionObjectiveHex.ToString() : formation.MissionObjectiveId)}\nPOSTURE {formation.MissionPosture.ToString().ToUpperInvariant()}\nTRIGGER {formation.MissionTrigger.ToString().ToUpperInvariant()}{(formation.PendingMissionChange ? $"\nPENDING MISSION DELIVERY T{formation.MissionDeliveryTime:00}" : string.Empty)}\nLAST ACTION {(formation.LastActionFollowedMission ? "FOLLOWED MISSION" : "IMMEDIATE RETASK")}\nREACTION {reactionStatus}\nREADY T{formation.ReadyTime:00}\nENDURANCE {formation.Endurance}\nDAMAGE {formation.Damage}\nCOHESION {formation.Cohesion}\nFRICTION {(formation.Friction ? "MARKED" : "CLEAR")}\nDISRUPTION {(formation.Disruption ? "MARKED" : "CLEAR")}\nDESTRUCTION {(formation.Destruction ? "MARKED" : "CLEAR")}{(formation.OrderlyWithdrawalReady ? "\nORDERLY WITHDRAWAL PREPARED" : string.Empty)}", "body-copy"));
+            dossier.Add(Text($"ENDURANCE TRACK  •  {formation.EnduranceProgress.ToUpperInvariant()}\n{Rules.EnduranceEffect(formation.Endurance).ToUpperInvariant()}", "muted", formation.Endurance == Endurance.Critical ? "amber" : null));
             if (formation.PatrolActive)
                 dossier.Add(Text($"SCREEN {formation.PatrolPosture.ToString().ToUpperInvariant()} • CENTER {formation.PatrolCenter} • RADIUS {Rules.PatrolRadius}\nINTERCEPTION {(formation.PatrolInterceptionAvailable ? "READY" : "SPENT")}{(string.IsNullOrEmpty(formation.PatrolProtectedFormationId) ? string.Empty : " • PROTECTING " + (backend.Game.Find(formation.PatrolProtectedFormationId)?.Name ?? formation.PatrolProtectedFormationId))}", "body-copy", "amber"));
             if (formation.SupportActive)
@@ -1151,7 +1153,9 @@ namespace SeaOfUncertainty.Prototype
             consequence += backend.Game.ActionFollowsMission(active, previewAction) ? " • follows Standing Mission • no Command Attention" : triggeredTask == previewAction ? " • Trigger authorized • no Command Attention" : " • immediate retask • occupy 1 Command Slot through resolution";
             if (active.EntropySources >= 3 && !active.PushThroughReady) consequence += " • PUSH THROUGH REQUIRED";
             string instruction = actionMode == ToolkitActionMode.Move ? "CLICK A GREEN DESTINATION HEX" : actionMode == ToolkitActionMode.Search ? "CLICK ANY HIGHLIGHTED HEX TO SEARCH AN AREA" : "CLICK AN ELIGIBLE CONTACT TO STRIKE";
-            return $"{instruction}\nTIME 2{(friction > 0 ? " +1 Friction" : string.Empty)} → NEXT READY T{backend.Game.Time + 2 + friction:00} • {consequence}";
+            int nextMajor = Math.Min(3, active.MajorActions + 1);
+            Endurance nextEndurance = nextMajor == 3 && active.Endurance < Endurance.Critical ? (Endurance)((int)active.Endurance + 1) : active.Endurance;
+            return $"{instruction}\nTIME 2{(friction > 0 ? " +1 Friction" : string.Empty)} → NEXT READY T{backend.Game.Time + 2 + friction:00} • {consequence}\nENDURANCE {active.Endurance.ToString().ToUpperInvariant()} • MAJOR ACTION {nextMajor}/3{(nextMajor == 3 ? $" • AFTER ACTION {nextEndurance.ToString().ToUpperInvariant()}" : string.Empty)}";
         }
 
         private void ShowPause()
@@ -1325,12 +1329,31 @@ namespace SeaOfUncertainty.Prototype
             VisualElement card = Panel("hero-card", "center");
             card.Add(Text(backend.ResultSummary, "front-title"));
             card.Add(Text($"BLUE  {backend.BlueFinalScore} VP        RED  {backend.RedFinalScore} VP", "heading"));
+            if (backend.FinalOutcome != null)
+            {
+                VisualElement breakdowns = El("row");
+                breakdowns.Add(ResultBreakdown(backend.FinalOutcome.Blue));
+                breakdowns.Add(ResultBreakdown(backend.FinalOutcome.Red));
+                card.Add(breakdowns);
+                card.Add(Text("DECIDED BY  •  " + backend.FinalOutcome.DecidingFactor.ToUpperInvariant(), "eyebrow", "amber"));
+            }
             card.Add(Text("Playtest data was exported automatically. Complete the debrief to add qualitative evidence.", "body-copy"));
             card.Add(ActionButton("PLAYTEST DEBRIEF", ShowFeedback, "primary"));
             card.Add(ActionButton("PLAY AGAIN", () => { backend.ToolkitNewScenario(); ShowBriefing(); }));
             card.Add(ActionButton("MAIN MENU", ShowMain));
             page.Add(card);
             app.Add(page);
+        }
+
+        private VisualElement ResultBreakdown(ScenarioSideScore score)
+        {
+            VisualElement panel = Panel();
+            panel.style.width = Length.Percent(47);
+            panel.Add(Text(score.Side.ToString().ToUpperInvariant() + " OBJECTIVES", "subheading"));
+            foreach (ScenarioObjectiveResult objective in score.Objectives)
+                panel.Add(Text($"{(objective.Achieved ? "✓" : "—")}  {objective.Title}  •  {(objective.Achieved ? objective.Points : 0)}/{objective.Points} VP", "muted", objective.Achieved ? "amber" : null));
+            panel.Add(Text($"TIE-BREAKS  •  CAPABLE {score.CombatCapableFormations}  •  DAMAGE {score.DamageBurden}  •  RANGE {(score.ClosestObjectiveRange == int.MaxValue ? "—" : score.ClosestObjectiveRange.ToString())}", "muted"));
+            return panel;
         }
 
         private void ShowFeedback()

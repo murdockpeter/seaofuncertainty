@@ -138,7 +138,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class ScenarioDefinition
     {
-        public int SchemaVersion = 3;
+        public int SchemaVersion = 4;
         public string Id;
         public string DisplayName;
         public string Summary;
@@ -155,6 +155,7 @@ namespace SeaOfUncertainty.Core
         public List<OperationalRegionDefinition> ReinforcementRegions = new List<OperationalRegionDefinition>();
         public List<OperationalRegionDefinition> ExitRegions = new List<OperationalRegionDefinition>();
         public List<OperationalRegionDefinition> LogisticsRegions = new List<OperationalRegionDefinition>();
+        public List<ScenarioObjectiveDefinition> Objectives = new List<ScenarioObjectiveDefinition>();
     }
 
     public static class ScenarioCatalog
@@ -186,6 +187,10 @@ namespace SeaOfUncertainty.Core
             AddLocation(area, "west-haven-airfield", "West Haven Airfield", LocationKind.Airfield, 1, 1, 0, 0);
             AddLocation(area, "east-haven", "East Haven", LocationKind.Port, 10, 7, 0, 0);
             AddLocation(area, "east-haven-airfield", "East Haven Airfield", LocationKind.Airfield, 10, 8, 0, 0);
+            area.Regions.Add(Region("blue-transit-zone", "Eastern Transit Zone", Enumerable.Range(0, area.Height).Select(r => new HexCoord(9, r)).Where(hex => area.TerrainAt(hex) != OperationalTerrain.Land)));
+            area.Regions.Add(Region("red-transit-zone", "Western Transit Zone", Enumerable.Range(0, area.Height).Select(r => new HexCoord(2, r)).Where(hex => area.TerrainAt(hex) != OperationalTerrain.Land)));
+            area.Regions.Add(Region("blue-withdrawal-zone", "Western Withdrawal Zone", Enumerable.Range(0, area.Height).SelectMany(r => new[] { new HexCoord(1, r), new HexCoord(2, r) }).Where(hex => area.TerrainAt(hex) != OperationalTerrain.Land)));
+            area.Regions.Add(Region("red-withdrawal-zone", "Eastern Withdrawal Zone", Enumerable.Range(0, area.Height).SelectMany(r => new[] { new HexCoord(9, r), new HexCoord(10, r) }).Where(hex => area.TerrainAt(hex) != OperationalTerrain.Land)));
 
             var scenario = new ScenarioDefinition
             {
@@ -196,8 +201,9 @@ namespace SeaOfUncertainty.Core
                 Area = area,
                 Weather = "Clear",
                 SpecialRules = "Automatic Defend reaction; fixed paired-test deployment.",
-                VictoryConditions = "Control the Inner Sea at T16; preserve the carrier; score enemy damage."
+                VictoryConditions = "Score operational control, transit, escort, denial, and carrier preservation/withdrawal at T16. Damage breaks tied operational scores."
             };
+            AddOperationalObjectives(scenario, "blue-transit-zone", "red-transit-zone", "blue-withdrawal-zone", "red-withdrawal-zone");
             scenario.LogisticsRegions.Add(Region("west-haven-logistics", "West Haven Logistics Access", new[] { new HexCoord(1, 2), new HexCoord(1, 1) }));
             scenario.LogisticsRegions.Add(Region("east-haven-logistics", "East Haven Logistics Access", new[] { new HexCoord(10, 7), new HexCoord(10, 8) }));
 
@@ -271,9 +277,10 @@ namespace SeaOfUncertainty.Core
                 Weather = "Maritime haze",
                 WeatherSeverity = 1,
                 SpecialRules = "Real geography with fictional factions; prototype logistics and off-map entry regions.",
-                VictoryConditions = "Control the Northern Passage at T24; preserve the carrier; score enemy damage.",
+                VictoryConditions = "Score operational control, transit, escort, denial, and carrier preservation/withdrawal at T24. Damage breaks tied operational scores.",
                 Area = area
             };
+            AddOperationalObjectives(scenario, "red-east", "blue-west", "blue-west", "red-east");
             scenario.DeploymentRegions.Add(area.Regions[0]);
             scenario.DeploymentRegions.Add(area.Regions[1]);
             scenario.ExitRegions.Add(area.Regions[0]);
@@ -316,6 +323,15 @@ namespace SeaOfUncertainty.Core
 
         private static OperationalRegionDefinition Region(string id, string name, IEnumerable<HexCoord> hexes) => new OperationalRegionDefinition { Id = id, Name = name, Hexes = hexes.ToList() };
 
+        private static void AddOperationalObjectives(ScenarioDefinition scenario, string blueTransit, string redTransit, string blueWithdrawal, string redWithdrawal)
+        {
+            scenario.Objectives.Add(new ScenarioObjectiveDefinition { Id = "control", Title = "Sole control of the operational objective", Kind = ScenarioObjectiveKind.Control, Points = 6, Radius = Rules.ControlRadius });
+            scenario.Objectives.Add(new ScenarioObjectiveDefinition { Id = "transit", Title = "Transit a combat-capable naval formation into the opposing approach", Kind = ScenarioObjectiveKind.Transit, Points = 3, BlueRegionId = blueTransit, RedRegionId = redTransit });
+            scenario.Objectives.Add(new ScenarioObjectiveDefinition { Id = "escort", Title = "Maintain a combat-capable naval escort within two hexes of the carrier", Kind = ScenarioObjectiveKind.Escort, Points = 3, Radius = 2 });
+            scenario.Objectives.Add(new ScenarioObjectiveDefinition { Id = "denial", Title = "Deny enemy combat-capable naval presence within two hexes of the objective", Kind = ScenarioObjectiveKind.Denial, Points = 2, Radius = 2 });
+            scenario.Objectives.Add(new ScenarioObjectiveDefinition { Id = "withdrawal", Title = "Preserve the carrier or withdraw it after Heavy damage", Kind = ScenarioObjectiveKind.Withdrawal, Points = 2, BlueRegionId = blueWithdrawal, RedRegionId = redWithdrawal });
+        }
+
         private static void AddFormation(ScenarioDefinition scenario, string id, string name, Side side, FormationKind kind, int q, int r, int ready, int move, int search, int signature, int strike, int defense, int command)
         {
             scenario.Formations.Add(new FormationDefinition
@@ -346,6 +362,17 @@ namespace SeaOfUncertainty.Core
             if (scenario.Area == null) { errors.Add("Operational area is required."); return errors; }
             if (string.IsNullOrWhiteSpace(scenario.Area.Id) || string.IsNullOrWhiteSpace(scenario.Area.DisplayName) || string.IsNullOrWhiteSpace(scenario.Area.Version) || string.IsNullOrWhiteSpace(scenario.Area.Attribution)) errors.Add("Operational-area identity, version, and attribution are required.");
             if (scenario.Horizon < 1 || string.IsNullOrWhiteSpace(scenario.Weather) || string.IsNullOrWhiteSpace(scenario.SpecialRules) || string.IsNullOrWhiteSpace(scenario.VictoryConditions)) errors.Add("Scenario horizon, weather, special rules, and victory conditions are required.");
+            if (scenario.Objectives == null || scenario.Objectives.Count == 0) errors.Add("At least one scored scenario objective is required.");
+            else
+            {
+                foreach (IGrouping<string, ScenarioObjectiveDefinition> duplicate in scenario.Objectives.GroupBy(objective => objective.Id).Where(group => string.IsNullOrWhiteSpace(group.Key) || group.Count() > 1)) errors.Add("Scenario objective ID is missing or duplicated: " + duplicate.Key);
+                foreach (ScenarioObjectiveDefinition objective in scenario.Objectives.Where(objective => objective.Points <= 0 || string.IsNullOrWhiteSpace(objective.Title))) errors.Add("Scenario objective requires a title and positive points: " + objective.Id);
+                HashSet<string> regionIds = new HashSet<string>((scenario.Area.Regions ?? new List<OperationalRegionDefinition>())
+                    .Concat(scenario.DeploymentRegions ?? new List<OperationalRegionDefinition>()).Concat(scenario.ReinforcementRegions ?? new List<OperationalRegionDefinition>())
+                    .Concat(scenario.ExitRegions ?? new List<OperationalRegionDefinition>()).Concat(scenario.LogisticsRegions ?? new List<OperationalRegionDefinition>()).Select(region => region.Id));
+                foreach (ScenarioObjectiveDefinition objective in scenario.Objectives.Where(objective => objective.Kind == ScenarioObjectiveKind.Transit || objective.Kind == ScenarioObjectiveKind.Withdrawal))
+                    if (!regionIds.Contains(objective.BlueRegionId) || !regionIds.Contains(objective.RedRegionId)) errors.Add("Scenario objective references missing Blue/Red regions: " + objective.Id);
+            }
             if (scenario.Area.Width < 1 || scenario.Area.Height < 1) errors.Add("Operational area dimensions must be positive.");
             if (scenario.Area.NauticalMilesPerHex < 1) errors.Add("Hex scale must be positive.");
             if (scenario.Area.Presentation == null || string.IsNullOrWhiteSpace(scenario.Area.Presentation.LightingProfile) || string.IsNullOrWhiteSpace(scenario.Area.Presentation.WaterProfile) || string.IsNullOrWhiteSpace(scenario.Area.Presentation.TerrainAssetSet)) errors.Add("Presentation assets or profiles are incomplete.");
@@ -416,7 +443,7 @@ namespace SeaOfUncertainty.Core
 
     public static class OperationalDataMigration
     {
-        public const int CurrentSchemaVersion = 3;
+        public const int CurrentSchemaVersion = 4;
 
         public static ScenarioDefinition Migrate(ScenarioDefinition scenario)
         {
@@ -429,6 +456,7 @@ namespace SeaOfUncertainty.Core
             if (scenario.ExitRegions == null) scenario.ExitRegions = new List<OperationalRegionDefinition>();
             if (scenario.LogisticsRegions == null) scenario.LogisticsRegions = new List<OperationalRegionDefinition>();
             if (scenario.SensorRanges == null) scenario.SensorRanges = new List<SensorRangeDefinition>();
+            if (scenario.Objectives == null) scenario.Objectives = new List<ScenarioObjectiveDefinition>();
             ScenarioCatalog.AddPrototypeSensorRanges(scenario);
             if (scenario.Area.RestrictedAreas == null) scenario.Area.RestrictedAreas = new List<OperationalRegionDefinition>();
             scenario.SchemaVersion = CurrentSchemaVersion;

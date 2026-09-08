@@ -13,7 +13,7 @@ An operational naval wargame prototype about acting effectively inside incomplet
 7. For Move, choose a commitment and destination hex. For Search, choose any highlighted area hex. For Strike, choose an eligible Contact and then one aim hex inside its possible area.
 8. Use **Menu** during play to save, load, restart, adjust settings, or return to the main menu. A saved operation adds **Continue** to the main menu.
 
-The scenario concludes at operational Time 16 with provisional scoring for objective control, carrier preservation, and enemy formations rendered Crippled or Destroyed.
+Meridian Veil concludes at operational Time 16 and scores five operational aims: control, transit, escort, denial, and carrier preservation or withdrawal. Operational points decide first; surviving combat capability, lower damage burden, and proximity break ties. Damage never awards points directly.
 
 During action selection, the 3D command map highlights legal destinations, Search areas, and eligible Strike Contacts. Strike previews never expose hidden occupancy or defense; an empty, stale, or false aim reports only “no confirmed effect.” Heavy Salvo requires a final confirmation. Hover ratings and status elements for contextual rules help, and use **Inspect** on the after-action feed for the full event history.
 

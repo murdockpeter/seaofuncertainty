@@ -170,15 +170,11 @@ Recommendation: model each Slot as `Free`, `Occupied until Time`, or `Strained`,
 
 ### Endurance and logistics
 
-Defined: three states, some state effects, Replenish time/access requirement, and an initial “three major Actions” test.
-
-Implemented: Move, Search, and Strike are major Actions. Every third major Action degrades Endurance one step and resets the counter. Scenario data defines typed logistics access, and Replenishment restores one Endurance step, reloads Heavy, repairs damage one step, resets the major-action track, and repairs one selected Destruction card.
+Implemented: Move, Search, and Strike are major Actions. Every third major Action degrades Endurance one step and resets the visible counter. Ready has no state penalty. At Extended, Recover takes +1 Time and High Tempo marks Friction. At Critical, Move is reduced by one, Heavy Salvo is prohibited, and every complex Action marks Friction. Scenario data defines typed logistics access, and Replenishment restores one Endurance step, reloads Heavy, repairs damage one step, resets the major-action track, and repairs one selected Destruction card.
 
 ### Victory and scenario
 
-The rules correctly state that destruction serves operational objectives, but no playable victory calculation exists.
-
-Prototype scenario: eight formations on a 12×10 map, with a central Inner Sea objective and a T16 horizon. A scoring pass should evaluate control, preservation, transit, and combat capability—not kill points alone.
+Implemented: each scenario owns scored Control, Transit, Escort, Denial, and Withdrawal objectives. Meridian Veil resolves them at T16. Operational points decide the result; combat-capable formations, lower total damage burden, and closest surviving naval formation break ties in that order. One-sided operational elimination is an immediate loss, while mutual elimination continues through the ordinary objective and tie-break sequence. Damage and destruction award no points directly.
 
 ## Scope order
 

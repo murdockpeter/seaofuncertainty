@@ -978,7 +978,7 @@ namespace SeaOfUncertainty.Core
             if (source == EntropySource.Destruction || !IsEntropyMarked(formation, source)) { message = "Choose an attached Friction or Disruption card to Recover."; return false; }
             if (!string.IsNullOrEmpty(cardId) && (!(formation.ActiveEffectCardIds?.Contains(cardId) ?? false) || EntropyEffectCatalog.Find(cardId)?.Source != source)) { message = "That card is not attached to this Formation."; return false; }
             if (!AuthorizeAction(formation, ActionKind.Recover, out message)) return false;
-            int additionalTime = (formation.HasEffect("F-06") && !IsLogisticsSupported(formation.Position) ? 1 : 0) + (formation.HasEffect("X-10") ? 1 : 0);
+            int additionalTime = (formation.Endurance == Endurance.Extended ? 1 : 0) + (formation.HasEffect("F-06") && !IsLogisticsSupported(formation.Position) ? 1 : 0) + (formation.HasEffect("X-10") ? 1 : 0);
             string discarded = DiscardOneEntropyEffect(formation, source, cardId);
             formation.SupportBlockedUntilRecover = false;
             CompleteAction(formation, ActionKind.Recover, false, $"{formation.Name} recovered one {source} effect{(string.IsNullOrEmpty(discarded) ? string.Empty : " (" + discarded + ")")}. {(IsEntropyMarked(formation, source) ? "Additional matching cards remain." : "The source is now clear.")}", additionalTime);
@@ -1203,6 +1203,7 @@ namespace SeaOfUncertainty.Core
             ClearPatrol(formation);
             ClearSupport(formation);
             bool acceptedRisk = formation.IgnoreEntropyNextAction;
+            bool criticalComplexAction = formation.Endurance == Endurance.Critical;
             int cost = Rules.ActionTime(ActionKind.Strike) + coordinationDrift + formation.NextReadyTimeBonus;
             if (formation.Friction && !acceptedRisk) cost++;
             if (formation.HasEffect("F-01")) cost++;
@@ -1217,6 +1218,7 @@ namespace SeaOfUncertainty.Core
                 if (formation.Endurance < Endurance.Critical) formation.Endurance++;
             }
             if (acceptedRisk) MarkEntropy(formation, EntropySource.Friction);
+            else if (criticalComplexAction && !formation.Friction) MarkEntropy(formation, EntropySource.Friction);
             formation.CommandBonus = 0; formation.MoveBonus = 0; formation.SignatureBonus = 0; formation.MovementSignatureModifier = 0;
             formation.Loud = false; formation.FreeFocusedSearch = false; formation.SuppressDestructionNextAction = false; formation.IgnoreEntropyNextAction = false;
             formation.NextReadyTimeBonus = 0; formation.MissionChangeLockedUntilAction = false; formation.CompletedActions++;
@@ -1237,6 +1239,7 @@ namespace SeaOfUncertainty.Core
             if (action != ActionKind.Patrol) ClearPatrol(formation);
             if (action != ActionKind.Support) ClearSupport(formation);
             bool acceptedRisk = formation.IgnoreEntropyNextAction;
+            bool criticalComplexAction = formation.Endurance == Endurance.Critical && Rules.IsComplexAction(action);
             int cost = Rules.ActionTime(action) + additionalTime + formation.NextReadyTimeBonus;
             bool complex = Rules.IsComplexAction(action);
             if (formation.Friction && complex && !acceptedRisk) cost++;
@@ -1257,6 +1260,7 @@ namespace SeaOfUncertainty.Core
             }
             if (generatedFriction && !formation.Friction) MarkEntropy(formation, EntropySource.Friction);
             if (acceptedRisk) MarkEntropy(formation, EntropySource.Friction);
+            else if (criticalComplexAction && !formation.Friction) MarkEntropy(formation, EntropySource.Friction);
             formation.CommandBonus = 0;
             formation.MoveBonus = 0;
             formation.SignatureBonus = 0;

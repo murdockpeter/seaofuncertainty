@@ -196,19 +196,19 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Degrade after the current three-major-action prototype threshold and reset the counter.
 - [x] Apply current Critical movement and Heavy Salvo restrictions.
 - [x] **Decision:** Major Actions are Move, Search, and Strike; every third major Action degrades Endurance one step and resets the counter.
-- [ ] Display progress toward the next Endurance degradation.
-- [ ] Apply the final Ready, Extended, and Critical rules.
+- [x] Display progress toward the next Endurance degradation.
+- [x] Apply the final Ready, Extended, and Critical rules.
 
 ### Scenario objectives and victory
 
 - [x] Store scenario horizon, objective, weather, special rules, and victory-condition text as data.
 - [x] End scenarios at their configured horizon and show a results screen.
-- [x] Apply provisional scoring for objective proximity/control, carrier preservation, and crippled/destroyed opponents.
+- [x] Replace provisional kill-point scoring with operational-objective scoring and capability tie-breaks.
 - [x] Automatically record and export final scores.
-- [ ] Define and implement the final T16 Meridian Veil scoring model.
-- [ ] Define scenario-specific transit, escort, denial, and withdrawal objectives.
-- [ ] Keep damage/destruction subordinate to operational objectives in final scoring.
-- [ ] Add scoring tests for ties, elimination, contested control, and every scenario objective type.
+- [x] Define and implement the final T16 Meridian Veil scoring model.
+- [x] Define scenario-specific transit, escort, denial, and withdrawal objectives.
+- [x] Keep damage/destruction subordinate to operational objectives in final scoring.
+- [x] Add scoring tests for ties, elimination, contested control, and every scenario objective type.
 
 ## Verified digital foundation
 
