@@ -31,6 +31,8 @@ namespace SeaOfUncertainty.Prototype
         private FormationState pendingReactionTarget;
         private Salvo pendingReactionSalvo;
         private AiDecision pendingAiStrike;
+        private ContactState pendingStrikeContact;
+        private HexCoord pendingStrikeAim;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -258,8 +260,9 @@ namespace SeaOfUncertainty.Prototype
                 AiDecision decision = backend.ToolkitChooseAiDecision();
                 if (decision?.Action == ActionKind.Strike)
                 {
+                    ContactState contact = backend.Game.Contacts.FirstOrDefault(item => item.Owner == backend.Game.Active.Side && !item.IsLost && item.TargetId == decision.TargetId);
                     FormationState target = backend.Game.Find(decision.TargetId);
-                    if (target != null && target.Side == backend.HumanSide)
+                    if (contact != null && target != null && target.Side == backend.HumanSide && target.Position.Equals(decision.Hex))
                     {
                         aiRunning = false;
                         BeginStrikeReaction(target, decision.Salvo, decision);
@@ -488,7 +491,7 @@ namespace SeaOfUncertainty.Prototype
             VisualElement effect = Panel("entropy-card", card.Source.ToString().ToLowerInvariant());
             effect.Add(Text("ATTACHED TO  •  " + formation.Name.ToUpperInvariant(), "eyebrow"));
             effect.Add(Text(card.Effect, "entropy-effect"));
-            if (!string.IsNullOrEmpty(card.Response)) effect.Add(Text("RESPONSE  •  " + card.Response, "body-copy", "amber"));
+            if (!string.IsNullOrEmpty(card.Response)) effect.Add(Text($"RESPONSE  •  {card.Response}\nWINDOW  •  BEFORE THIS FORMATION COMPLETES ITS NEXT ACTION", "body-copy", "amber"));
             modal.Add(effect);
             if (!string.IsNullOrEmpty(card.Response) && formation.HasEffect(card.Id))
             {
@@ -497,7 +500,7 @@ namespace SeaOfUncertainty.Prototype
                     backend.ToolkitRespondToEntropy(formation, card.Id);
                     ShowGame();
                 }, "warning");
-                respond.SetEnabled(card.Id == "F-01" || card.Id == "F-02" || card.Id == "F-07");
+                respond.SetEnabled(backend.ToolkitCanRespondToEntropy(formation, card.Id));
                 modal.Add(respond);
             }
             if (formation == backend.Game.Active && card.Source != EntropySource.Destruction)
@@ -522,15 +525,9 @@ namespace SeaOfUncertainty.Prototype
                 }
                 else if (actionMode == ToolkitActionMode.Strike)
                 {
-                    if (contact.Identity != IdentityQuality.Identified || target == null)
-                    {
-                        dossier.Add(Text($"ATTACK {backend.Game.Active.EffectiveStrike + Rules.SalvoModifier(salvo) + Rules.TargetingModifier(contact, backend.Game.AgeTwoTargetingPenalty)}\nDEFENSE UNRESOLVED\n\nIndividual Strike commitment requires an Identified Contact. Search this possible area to improve Identity; no preview tests hidden target state.", "body-copy", "amber"));
-                        return;
-                    }
                     int attack = backend.Game.Active.EffectiveStrike + Rules.SalvoModifier(salvo) + backend.Game.PendingSupportBonus(backend.Game.Active, SupportKind.Strike) + Rules.TargetingModifier(contact, backend.Game.AgeTwoTargetingPenalty);
-                    int defense = target.EffectiveDefense + 1 + backend.Game.PendingSupportBonus(target, SupportKind.Defense) + backend.Game.PatrolDefenseBonus(target) - (target.Destruction ? 1 : 0);
-                    CombatBand band = Rules.BandFor(attack - defense);
-                    dossier.Add(Text($"ATTACK {attack}\nDEFENSE {defense} IF +1 REACTION\nDIFFERENCE {attack - defense:+0;-0;0}\n\n{band.ToString().ToUpperInvariant()} BAND\n{Odds(band)}\n\nThe defender chooses after commitment.", "body-copy"));
+                    int possible = backend.Game.ContactPossibleHexes(contact).Count;
+                    dossier.Add(Text($"ATTACK {attack}\nDEFENSE UNRESOLVED\nPOSSIBLE AREA {possible} HEX{(possible == 1 ? string.Empty : "ES")}\n\nSelect the Contact, then commit one aim hex. Hidden occupancy, target condition, defensive Support, and Reaction resolve only after commitment.", "body-copy", "amber"));
                 }
                 return;
             }
@@ -588,7 +585,7 @@ namespace SeaOfUncertainty.Prototype
             effect.Add(Text("ATTACHED TO  â€¢  " + formation.Name.ToUpperInvariant(), "eyebrow"));
             effect.Add(Text(card.Effect, "entropy-effect"));
             if (!EntropyEffectCatalog.IsFullyMechanicallySupported(card)) effect.Add(Text("This card is tracked and displayed, but some or all of its parent Mission, Synchronization, Support, Replenish, or uncertainty-geometry system is not active yet.", "body-copy", "amber"));
-            if (!string.IsNullOrEmpty(card.Response)) effect.Add(Text("RESPONSE  â€¢  " + card.Response, "body-copy", "amber"));
+            if (!string.IsNullOrEmpty(card.Response)) effect.Add(Text($"RESPONSE  •  {card.Response}\nWINDOW  •  BEFORE THIS FORMATION COMPLETES ITS NEXT ACTION", "body-copy", "amber"));
             modal.Add(effect);
             if (!string.IsNullOrEmpty(card.Response) && formation.HasEffect(card.Id))
             {
@@ -597,7 +594,7 @@ namespace SeaOfUncertainty.Prototype
                     backend.ToolkitRespondToEntropy(formation, card.Id);
                     ShowEntropyPull(side, onComplete);
                 }, "warning");
-                respond.SetEnabled(card.Id == "F-01" || card.Id == "F-02" || card.Id == "F-07");
+                respond.SetEnabled(backend.ToolkitCanRespondToEntropy(formation, card.Id));
                 modal.Add(respond);
             }
             modal.Add(ActionButton("ACKNOWLEDGE CARD", () =>
@@ -665,7 +662,13 @@ namespace SeaOfUncertainty.Prototype
             foreach (SupportKind kind in Enum.GetValues(typeof(SupportKind)))
             {
                 SupportKind selected = kind;
-                modal.Add(ActionButton(selected.ToString().ToUpperInvariant(), () => { CloseOverlay(); ResolveAction(() => backend.ToolkitSupport(recipient, selected)); }));
+                Button choice = ActionButton(selected.ToString().ToUpperInvariant(), () => { CloseOverlay(); ResolveAction(() => backend.ToolkitSupport(recipient, selected)); });
+                if (selected == SupportKind.Synchronization)
+                {
+                    choice.SetEnabled(backend.Game.CanParticipateInSynchronization(backend.Game.Active));
+                    if (backend.Game.Active.HasEffect("F-05")) choice.text += "  •  +1 TIME";
+                }
+                modal.Add(choice);
             }
             modal.Add(ActionButton("BACK", ShowSupportSetup));
         }
@@ -805,8 +808,48 @@ namespace SeaOfUncertainty.Prototype
             }
             else if (actionMode == ToolkitActionMode.Strike)
             {
-                if (target == null || contact.Identity != IdentityQuality.Identified) { UpdateDossier(contact); return; }
-                if (salvo == Salvo.Heavy) ConfirmHeavy(target); else BeginStrikeReaction(target, salvo);
+                ShowStrikeAim(contact);
+            }
+        }
+
+        private void ShowStrikeAim(ContactState contact)
+        {
+            int range = Rules.StrikeRange(backend.Game.Active.Kind, salvo);
+            List<HexCoord> aims = backend.Game.ContactPossibleHexes(contact)
+                .Where(hex => HexCoord.Distance(backend.Game.Active.Position, hex) <= range)
+                .OrderBy(hex => HexCoord.Distance(hex, contact.LastKnownPosition)).ThenBy(hex => hex.Q).ThenBy(hex => hex.R).ToList();
+            VisualElement modal = Modal("SELECT STRIKE AIM HEX");
+            modal.Add(Text($"{contact.Summary}\nChoose one hex inside the Contact's possible area. Occupancy is tested only after commitment; a false or stale fix reports no confirmed effect.", "body-copy"));
+            ScrollView choices = new ScrollView();
+            choices.AddToClassList("scroll");
+            foreach (HexCoord hex in aims)
+            {
+                HexCoord selected = hex;
+                choices.Add(ActionButton($"HEX {selected}  •  RANGE {HexCoord.Distance(backend.Game.Active.Position, selected)} / {range}", () => CommitStrikeAim(contact, selected)));
+            }
+            modal.Add(choices);
+            modal.Add(ActionButton("CANCEL", CloseOverlay));
+        }
+
+        private void CommitStrikeAim(ContactState contact, HexCoord aim)
+        {
+            pendingStrikeContact = contact;
+            pendingStrikeAim = aim;
+            if (salvo == Salvo.Heavy) ConfirmHeavyContact();
+            else ContinueCommittedStrike();
+        }
+
+        private void ContinueCommittedStrike()
+        {
+            CloseOverlay();
+            FormationState target = pendingStrikeContact == null || pendingStrikeContact.IsFalse ? null : backend.Game.Find(pendingStrikeContact.TargetId);
+            if (target != null && !target.IsDestroyed && target.Position.Equals(pendingStrikeAim)) BeginStrikeReaction(target, salvo);
+            else
+            {
+                ContactState contact = pendingStrikeContact;
+                HexCoord aim = pendingStrikeAim;
+                pendingStrikeContact = null;
+                ResolveAction(() => backend.ToolkitStrikeContact(contact, aim, salvo));
             }
         }
 
@@ -901,11 +944,15 @@ namespace SeaOfUncertainty.Prototype
         {
             FormationState target = pendingReactionTarget;
             AiDecision aiDecision = pendingAiStrike;
+            ContactState contact = pendingStrikeContact;
+            HexCoord aim = pendingStrikeAim;
             pendingReactionTarget = null;
             pendingAiStrike = null;
+            pendingStrikeContact = null;
             if (aiDecision == null)
             {
-                ResolveAction(() => backend.ToolkitStrike(target, pendingReactionSalvo, reaction, evadeDestination));
+                if (contact != null) ResolveAction(() => backend.ToolkitStrikeContact(contact, aim, pendingReactionSalvo, reaction, evadeDestination));
+                else ResolveAction(() => backend.ToolkitStrike(target, pendingReactionSalvo, reaction, evadeDestination));
                 return;
             }
 
@@ -1008,7 +1055,7 @@ namespace SeaOfUncertainty.Prototype
         {
             VisualElement modal = Modal("FIELD MANUAL");
             modal.Add(Text("COMMAND MODES\nSolo vs AI assigns Blue to the player and Red to the deterministic OPFOR commander. Local Hotseat uses secure handoffs between two players. Both modes use identical rules and Ready-Time sequencing.\n\nSCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nMAP CAMERA\nWASD moves with smooth acceleration; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. C focuses the active formation, O focuses the objective, V toggles optional edge scrolling, and F9/F10 save/recall a command view. Middle-drag pans, right-drag freely orbits, and the wheel zooms.\n\nMAP GRID\nUse HEXES OFF / HEXES ON in the command bar, or press G, to toggle the persistent hex overlay. The preference is saved between sessions.\n\nREADY TIME\nThere are no player turns. The earliest formation acts. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable formation order. If only one side is Ready, it continues.\n\nSTANDING MISSIONS\nEach Formation tracks a current Mission task. Rapid Replan changes that task without occupying Command and adds +1 Time when the Formation next schedules Ready.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Cautious gives Signature -1; High Tempo makes the Formation Loud; either lasts until that Formation completes its next Action. Routes cannot cross Land or restricted areas, and a naval Formation entering a Strait must stop. Littoral anywhere on the route adds one Ready-Time. One friendly Formation may end in a hex; opposing Formations may coexist without revealing hidden positions.\n\nCONTROL\nA combat-capable non-air Formation controls an objective within one hex unless the opponent has a qualifying Formation there too. Control is adjudicated from actual positions only for final scoring; the live map does not reveal hidden enemy presence.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE AND REACTION\nAfter a Strike is committed and before the roll, an eligible defender chooses one Reaction. Defend adds +1 Defense. Evade adds +1 Defense and moves one valid hex away after combat. Counterattack makes one Light return Strike if the defender has a usable Contact and is capable. Hold preserves position with no modifier. A Reaction does not change Ready Time, is spent once used, and refreshes after that Formation completes its own Action. Disrupted and Crippled formations cannot Counterattack; replenishing formations cannot react. Local Hotseat uses a secure defender handoff. Solo pauses for a human defender and lets the AI choose for its own formation. Orderly Withdrawal extends one Evade to two hexes.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY AND CARD HAND\nEvery Entropy event draws a physical card, even if that source is already marked. Attached effects stack and appear with Command Responses in the active side's Card Hand at the bottom of the interface. Recover selects and discards one Friction or Disruption card; a source remains marked while another matching card remains. Destruction cards await repair or reorganization.", "body-copy"));
-            modal.Add(Text("SEARCH SPATIAL UPDATE\nThe distances above are the carrier baseline; the live commitment buttons show the active formation's scenario-defined sensor envelope. Declare Location or Identity priority before Search. At Age 0, High/Medium/Low Location covers radius 0/1/2; Age or tracked movement adds up to two rings. Search can privately disprove False Contacts. Individual Strikes currently require Identified Identity.", "body-copy", "amber"));
+            modal.Add(Text("SEARCH, STRIKE, AND DAMAGE UPDATE\nThe distances above are the carrier baseline; live commitment buttons show the active formation's scenario-defined sensor envelope. Declare Location or Identity priority before Search. At Age 0, High/Medium/Low Location covers radius 0/1/2; Age or tracked movement adds up to two rings. Search can privately disprove False Contacts. A Strike selects one aim hex in a Contact's possible area; hidden occupancy is tested only after commitment. Light damage gives −1 Defense through the formation's next completed own Action. Equal repeated damage escalates one step; higher replaces lower. Crippled formations may only Defend or Hold.", "body-copy", "amber"));
             modal.Add(ActionButton("CLOSE", CloseOverlay, "primary"));
         }
 
@@ -1107,15 +1154,13 @@ namespace SeaOfUncertainty.Prototype
             modal.Add(ActionButton("BACK TO FORMATIONS", () => ShowResponseTargets(card)));
         }
 
-        private void ConfirmHeavy(FormationState target)
+        private void ConfirmHeavyContact()
         {
-            ContactState contact = backend.Game.ContactFor(backend.Game.Active.Side, target.Id);
+            ContactState contact = pendingStrikeContact;
             int attack = backend.Game.Active.EffectiveStrike + 2 + backend.Game.PendingSupportBonus(backend.Game.Active, SupportKind.Strike) + Rules.TargetingModifier(contact, backend.Game.AgeTwoTargetingPenalty);
-            int defense = target.EffectiveDefense + 1 + backend.Game.PendingSupportBonus(target, SupportKind.Defense) + backend.Game.PatrolDefenseBonus(target) - (target.Destruction ? 1 : 0);
-            CombatBand band = Rules.BandFor(attack - defense);
             VisualElement modal = Modal("CONFIRM HEAVY SALVO");
-            modal.Add(Text($"Heavy capability will be expended.\n\nATTACK {attack} vs DEFENSE {defense} if the defender chooses +1 Defense\n{band.ToString().ToUpperInvariant()} BAND\n{Odds(band)}\n\nThe defender chooses a legal Reaction after commitment and before the roll.", "body-copy"));
-            modal.Add(ActionButton("COMMIT HEAVY SALVO", () => { CloseOverlay(); BeginStrikeReaction(target, Salvo.Heavy); }, "warning"));
+            modal.Add(Text($"Heavy capability will be expended.\n\nAIM HEX {pendingStrikeAim}\nATTACK {attack}\nDEFENSE AND OCCUPANCY UNRESOLVED\n\nIf the hidden target occupies the aim hex, its defender chooses a legal Reaction before the combat roll. Otherwise the action reports no confirmed effect.", "body-copy"));
+            modal.Add(ActionButton("COMMIT HEAVY SALVO", ContinueCommittedStrike, "warning"));
             modal.Add(ActionButton("CANCEL", CloseOverlay));
         }
 

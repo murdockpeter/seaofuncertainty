@@ -40,7 +40,7 @@ namespace SeaOfUncertainty.Core
             }
 
             ContactState strikeContact = contacts
-                .Where(contact => game.Find(contact.TargetId) != null && SelectSalvo(actor, contact).HasValue)
+                .Where(contact => SelectSalvo(actor, contact).HasValue)
                 .OrderByDescending(contact => contact.Identity)
                 .ThenByDescending(contact => contact.Location)
                 .ThenBy(contact => contact.Age)
@@ -49,7 +49,7 @@ namespace SeaOfUncertainty.Core
             if (strikeContact != null)
             {
                 Salvo selectedSalvo = SelectSalvo(actor, strikeContact).Value;
-                return new AiDecision { Action = ActionKind.Strike, TargetId = strikeContact.TargetId, Salvo = selectedSalvo, Rationale = selectedSalvo == Salvo.Heavy ? "Commit the expendable Heavy capability to a high-quality identified Contact inside extended range." : "Engage the strongest usable owned Contact already inside weapon range." };
+                return new AiDecision { Action = ActionKind.Strike, TargetId = strikeContact.TargetId, Hex = strikeContact.LastKnownPosition, Salvo = selectedSalvo, Rationale = selectedSalvo == Salvo.Heavy ? "Commit the expendable Heavy capability to a high-quality identified Contact inside extended range." : "Engage the strongest usable owned Contact area already inside weapon range." };
             }
 
             if (game.HasLogisticsAccess(actor) && game.NeedsReplenishment(actor))
@@ -112,11 +112,13 @@ namespace SeaOfUncertainty.Core
                 case ActionKind.Move: return game.Move(actor, decision.Hex, decision.MoveMode, out message);
                 case ActionKind.Search: return game.SearchArea(actor, decision.Hex, decision.SearchMode, out message);
                 case ActionKind.Strike:
+                    ContactState contact = game.Contacts.FirstOrDefault(item => item.Owner == actor.Side && !item.IsLost && item.TargetId == decision.TargetId);
+                    if (contact == null) { message = "The selected Contact is no longer usable."; return false; }
                     FormationState target = game.Find(decision.TargetId);
-                    if (target == null) { message = "The selected Contact no longer supports a target."; return false; }
-                    Reaction reaction = selectedReaction ?? ChooseReaction(game, actor, target);
-                    HexCoord? destination = reaction == Reaction.Evade ? evadeDestination ?? ChooseEvadeDestination(game, actor, target) : null;
-                    return game.Strike(actor, target, decision.Salvo, reaction, destination, out _, out message);
+                    bool hit = target != null && !target.IsDestroyed && target.Position.Equals(decision.Hex);
+                    Reaction reaction = hit ? selectedReaction ?? ChooseReaction(game, actor, target) : Reaction.None;
+                    HexCoord? destination = hit && reaction == Reaction.Evade ? evadeDestination ?? ChooseEvadeDestination(game, actor, target) : null;
+                    return game.StrikeContact(actor, contact, decision.Hex, decision.Salvo, reaction, destination, out _, out message);
                 case ActionKind.Recover: return game.Recover(actor, out message);
                 case ActionKind.Patrol: return game.Patrol(actor, decision.Hex, decision.PatrolPosture, null, out message);
                 case ActionKind.Support: return game.Support(actor, game.Find(decision.TargetId), decision.SupportKind, out message);
@@ -151,8 +153,8 @@ namespace SeaOfUncertainty.Core
                     HexCoord center = HexCoord.Distance(actor.Position, actor.MissionObjectiveHex) <= game.SearchRangeFor(actor, searchMode) ? actor.MissionObjectiveHex : actor.Position;
                     return new AiDecision { Action = ActionKind.Search, Hex = center, SearchMode = searchMode, Rationale = "No Command Attention is free; continue the assigned Standing Mission." };
                 case ActionKind.Strike:
-                    ContactState target = contacts.FirstOrDefault(contact => game.Find(contact.TargetId) != null && SelectSalvo(actor, contact).HasValue);
-                    return target == null ? null : new AiDecision { Action = ActionKind.Strike, TargetId = target.TargetId, Salvo = SelectSalvo(actor, target).Value, Rationale = "No Command Attention is free; execute the assigned Strike Mission." };
+                    ContactState target = contacts.FirstOrDefault(contact => SelectSalvo(actor, contact).HasValue);
+                    return target == null ? null : new AiDecision { Action = ActionKind.Strike, TargetId = target.TargetId, Hex = target.LastKnownPosition, Salvo = SelectSalvo(actor, target).Value, Rationale = "No Command Attention is free; execute the assigned Strike Mission." };
                 case ActionKind.Patrol: return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = PatrolPosture.Balanced, Rationale = "No Command Attention is free; establish the assigned Screen." };
                 case ActionKind.Support:
                     FormationState recipient = game.Formations.Where(candidate => candidate.Side == actor.Side && candidate != actor && !candidate.IsDestroyed && HexCoord.Distance(actor.Position, candidate.Position) <= Rules.SupportRange).OrderBy(candidate => candidate.Id).FirstOrDefault();
@@ -166,7 +168,7 @@ namespace SeaOfUncertainty.Core
 
         private static Salvo? SelectSalvo(FormationState actor, ContactState contact)
         {
-            if (contact == null || contact.Identity != IdentityQuality.Identified) return null;
+            if (contact == null) return null;
             int distance = HexCoord.Distance(actor.Position, contact.LastKnownPosition);
             bool heavyAvailable = contact.Identity == IdentityQuality.Identified && contact.Location == LocationQuality.High && actor.CanHeavySalvo;
             if (heavyAvailable && distance <= Rules.StrikeRange(actor.Kind, Salvo.Heavy)) return Salvo.Heavy;

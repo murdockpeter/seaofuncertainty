@@ -53,11 +53,11 @@ Scenarios may override these profiles. Data validation requires exactly one posi
 
 ## False Contacts
 
-- An undisproved False Contact uses exactly the same marker, summary, possible-area geometry, Search eligibility, mission-trigger test, and unidentified Strike restriction as a real Contact of the same public quality.
+- An undisproved False Contact uses exactly the same marker, summary, possible-area geometry, Search eligibility, mission-trigger test, and Strike eligibility as a real Contact of the same public quality.
 - A Search attempts to verify every False Contact whose center lies in the selected radius-one footprint and inside the searcher's sensor envelope.
 - Verification uses Search rating, mode, Support, and range, but no hidden target Signature.
 - Success marks the Contact Lost and privately reports that it was disproved. Failure reports no detection and leaves it unchanged.
-- Individual Strikes require Identified Identity. This keeps false and real unresolved Contacts behaviorally identical until uncertain-area Strike rules are decided and implemented.
+- A Strike selects one aim hex within the Contact's possible area. False, stale, and real Contacts remain behaviorally identical until hidden occupancy is tested after commitment.
 
 ## Information-discipline audit
 
@@ -66,11 +66,11 @@ Scenarios may override these profiles. Data validation requires exactly one posi
 | Map and dossier | Owned formations and owned Contact state | Enemy exact position, identity beyond quality, real/false status | Side-owned filtering; shared false/real marker; geometry derived only from public Contact fields |
 | Search preview | Area, role-specific range, rating, mode, declared priority | Hidden Signature, exact target position, target existence in a blind area | Preview uses only searcher and owned/public data |
 | Search resolution | Successful Contact improvement or private disproof | Failed target identity or exact position | Failures collapse to `no detections`; results are side-private |
-| Strike preview | Attack and targeting for unresolved Contacts | Hidden target Defense, reactions, and whether the Contact is real | Full odds only for Identified Contacts; unresolved Contacts share one preview |
+| Strike preview | Attack, targeting, possible area, selected salvo | Hidden occupancy, target Defense and condition, defensive Support, reactions, and whether the Contact is real | Every Contact uses the same unresolved preview; exact odds are withheld until resolution |
 | Movement | Anonymous one-ring expansion of an existing opposing Contact | Direction, route, distance, exact destination | Movement uncertainty stores only a capped ring count; action logs are side-private |
 | Command Responses | Owner's hand, target, and result | Opponent hand, response target, False Window placement | Response and card logs are side-private; hands were already side-owned |
 | Entropy cards | Owning formation's draw and attached effect | Opponent private draw and information effects | Draw notices and operational logs are side-private |
 | AI | Its formations, owned Contacts, public terrain/objective | Opposing formation state behind Contacts | Candidate selection uses owned Contacts; no real/false branch |
-| Save/load | Complete authoritative state | Cross-side display after restore | Save v7 preserves uncertainty fields and side-scoped log audiences |
+| Save/load | Complete authoritative state | Cross-side display after restore | Save v8 preserves uncertainty, Light-damage duration, and side-scoped log audiences |
 
 Automated regression coverage exercises blank-area failure text, selected improvement priority, excess-success cap, exact possible-hex counts, movement and Age expansion, degradation/loss timing, role-specific ranges, False Contact disproof and presentation, side-private logs, save/load, and AI completion.

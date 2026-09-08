@@ -9,7 +9,7 @@ namespace SeaOfUncertainty.Core
         [Serializable]
         public sealed class SaveData
         {
-            public int Version = 7;
+            public int Version = 9;
             public string ScenarioId;
             public string OperationalAreaId;
             public int Time;
@@ -22,6 +22,7 @@ namespace SeaOfUncertainty.Core
             public List<SideState> Sides = new List<SideState>();
             public List<EntropyDeckState> EntropyDecks = new List<EntropyDeckState>();
             public List<EntropyDrawNotice> PendingEntropyReveals = new List<EntropyDrawNotice>();
+            public List<EntropyResponseWindowState> EntropyResponseWindows = new List<EntropyResponseWindowState>();
             public List<CommandResponseDeckState> CommandResponseDecks = new List<CommandResponseDeckState>();
             public List<string> Log = new List<string>();
             public List<OperationalLogEntry> LogEntries = new List<OperationalLogEntry>();
@@ -33,6 +34,7 @@ namespace SeaOfUncertainty.Core
         public readonly Dictionary<Side, SideState> Sides = new Dictionary<Side, SideState>();
         public readonly List<EntropyDeckState> EntropyDecks = new List<EntropyDeckState>();
         public readonly List<EntropyDrawNotice> PendingEntropyReveals = new List<EntropyDrawNotice>();
+        public readonly List<EntropyResponseWindowState> EntropyResponseWindows = new List<EntropyResponseWindowState>();
         public readonly List<CommandResponseDeckState> CommandResponseDecks = new List<CommandResponseDeckState>();
         public readonly List<string> Log = new List<string>();
         public readonly List<OperationalLogEntry> LogEntries = new List<OperationalLogEntry>();
@@ -75,11 +77,13 @@ namespace SeaOfUncertainty.Core
         {
             if (contact == null || contact.IsLost) return new List<HexCoord>();
             int radius = Rules.ContactUncertaintyRadius(contact);
+            var centers = new List<HexCoord> { contact.LastKnownPosition };
+            if (contact.HasContradictoryPosition) centers.Add(contact.ContradictoryPosition);
             return Enumerable.Range(0, Area.Width)
                 .SelectMany(q => Enumerable.Range(0, Area.Height).Select(r => new HexCoord(q, r)))
                 .Where(Area.Contains)
-                .Where(hex => HexCoord.Distance(contact.LastKnownPosition, hex) <= radius)
-                .OrderBy(hex => HexCoord.Distance(contact.LastKnownPosition, hex))
+                .Where(hex => centers.Any(center => HexCoord.Distance(center, hex) <= radius))
+                .OrderBy(hex => centers.Min(center => HexCoord.Distance(center, hex)))
                 .ThenBy(hex => hex.Q)
                 .ThenBy(hex => hex.R)
                 .ToList();
@@ -112,8 +116,10 @@ namespace SeaOfUncertainty.Core
             if (HexCoord.Distance(supporter.Position, recipient.Position) > Rules.SupportRange) { message = $"Support range is {Rules.SupportRange} hexes."; return false; }
             if (supporter.SupportBlockedUntilRecover) { message = "Fuel Priority Conflict prevents Support until this Formation Recovers."; return false; }
             if ((supporter.Kind == FormationKind.AirGroup || supporter.Kind == FormationKind.CarrierGroup) && supporter.HasEffect("X-08")) { message = "Hangar Damage makes this Formation's air Support unavailable."; return false; }
+            if (kind == SupportKind.Synchronization && !CanParticipateInSynchronization(supporter)) { message = supporter.HasEffect("D-12") ? "Compromised Plot prevents Synchronization until Recover." : "Staff Overload prevents Synchronization until this Formation completes another Action or spends its printed response."; return false; }
             if (!AuthorizeAction(supporter, ActionKind.Support, out message)) return false;
             bool lost = supporter.HasEffect("D-11");
+            int coordinationDelay = kind == SupportKind.Synchronization && supporter.HasEffect("F-05") ? 1 : 0;
             ClearSupport(supporter);
             if (lost) ResolveAttachedEffect(supporter, "D-11");
             else
@@ -125,13 +131,16 @@ namespace SeaOfUncertainty.Core
             }
             CompleteAction(supporter, ActionKind.Support, false, lost
                 ? $"{supporter.Name}'s {kind} Support for {recipient.Name} was lost to misrouted orders."
-                : $"{supporter.Name} assigned {kind} Support (+1) to {recipient.Name} within range {Rules.SupportRange}.");
+                : $"{supporter.Name} assigned {kind} Support (+1) to {recipient.Name} within range {Rules.SupportRange}.{(coordinationDelay > 0 ? " Coordination Drift added +1 Time." : string.Empty)}", coordinationDelay);
             message = Log[0];
             return true;
         }
 
         public int PendingSupportBonus(FormationState recipient, SupportKind kind)
             => EligibleSupporter(recipient, kind) == null ? 0 : 1;
+
+        public bool CanParticipateInSynchronization(FormationState formation)
+            => formation != null && !formation.IsDestroyed && !formation.HasEffect("F-02") && !formation.HasEffect("D-12");
 
         public int PatrolDefenseBonus(FormationState recipient)
             => EligibleScreen(recipient, true) == null ? 0 : 1;
@@ -150,7 +159,7 @@ namespace SeaOfUncertainty.Core
             switch (formation.MissionTrigger)
             {
                 case MissionTrigger.ContactLocated:
-                    return Contacts.Any(contact => contact.Owner == formation.Side && !contact.IsLost && contact.Identity == IdentityQuality.Identified) ? ActionKind.Strike : (ActionKind?)null;
+                    return Contacts.Any(contact => contact.Owner == formation.Side && !contact.IsLost && contact.Location >= LocationQuality.Low) ? ActionKind.Strike : (ActionKind?)null;
                 case MissionTrigger.EntropyMarked:
                     return formation.Friction || formation.Disruption ? ActionKind.Recover : (ActionKind?)null;
                 case MissionTrigger.LogisticsRequired:
@@ -264,6 +273,7 @@ namespace SeaOfUncertainty.Core
             if (formation.Endurance > Endurance.Ready) formation.Endurance--;
             formation.WeaponExpended = false;
             formation.Damage = PreviousDamage(formation.Damage);
+            if (formation.Damage != DamageState.Light) formation.LightDamageExpiresAfterAction = 0;
             formation.MajorActions = 0;
             string repaired = repairable.Count == 0 ? null : string.IsNullOrEmpty(destructionCardId) ? repairable[0] : destructionCardId;
             if (!string.IsNullOrEmpty(repaired)) RemoveAttachedEffect(formation, repaired);
@@ -290,6 +300,7 @@ namespace SeaOfUncertainty.Core
                 Sides = new List<SideState>(Sides.Values),
                 EntropyDecks = EntropyDecks.Select(CloneDeck).ToList(),
                 PendingEntropyReveals = PendingEntropyReveals.Select(notice => new EntropyDrawNotice { CardId = notice.CardId, FormationId = notice.FormationId }).ToList(),
+                EntropyResponseWindows = EntropyResponseWindows.Select(window => new EntropyResponseWindowState { FormationId = window.FormationId, CardId = window.CardId, ExpiresAfterCompletedActions = window.ExpiresAfterCompletedActions }).ToList(),
                 CommandResponseDecks = CommandResponseDecks.Select(CloneResponseDeck).ToList(),
                 Log = new List<string>(Log),
                 LogEntries = LogEntries.Select(entry => new OperationalLogEntry { Text = entry.Text, IsPrivate = entry.IsPrivate, Audience = entry.Audience }).ToList()
@@ -298,7 +309,7 @@ namespace SeaOfUncertainty.Core
 
         public void RestoreState(SaveData data)
         {
-            if (data == null || data.Version < 1 || data.Version > 7) throw new ArgumentException("Unsupported or empty save data.");
+            if (data == null || data.Version < 1 || data.Version > 9) throw new ArgumentException("Unsupported or empty save data.");
             if (data.Version >= 2 && !string.IsNullOrEmpty(data.ScenarioId) && !string.Equals(data.ScenarioId, Scenario.Id, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException($"Save scenario {data.ScenarioId} does not match loaded scenario {Scenario.Id}.");
             Formations.Clear();
             Formations.AddRange(data.Formations ?? new List<FormationState>());
@@ -306,6 +317,7 @@ namespace SeaOfUncertainty.Core
             {
                 if (formation.ActiveEffectCardIds == null) formation.ActiveEffectCardIds = new List<string>();
                 if (formation.ResolvedEffectCardIds == null) formation.ResolvedEffectCardIds = new List<string>();
+                if (data.Version < 8 && formation.Damage == DamageState.Light) formation.LightDamageExpiresAfterAction = formation.CompletedActions + 1;
             }
             Contacts.Clear();
             Contacts.AddRange(data.Contacts ?? new List<ContactState>());
@@ -322,6 +334,10 @@ namespace SeaOfUncertainty.Core
             EnsureEntropyDeckCompleteness();
             PendingEntropyReveals.Clear();
             if (data.Version >= 4 && data.PendingEntropyReveals != null) PendingEntropyReveals.AddRange(data.PendingEntropyReveals.Select(notice => new EntropyDrawNotice { CardId = notice.CardId, FormationId = notice.FormationId }));
+            EntropyResponseWindows.Clear();
+            if (data.Version >= 9 && data.EntropyResponseWindows != null) EntropyResponseWindows.AddRange(data.EntropyResponseWindows.Select(window => new EntropyResponseWindowState { FormationId = window.FormationId, CardId = window.CardId, ExpiresAfterCompletedActions = window.ExpiresAfterCompletedActions }));
+            else foreach (FormationState formation in Formations) foreach (string id in formation.ActiveEffectCardIds.Where(id => EntropyEffectCatalog.Find(id)?.ResponseWindow != EntropyResponseWindow.None))
+                EntropyResponseWindows.Add(new EntropyResponseWindowState { FormationId = formation.Id, CardId = id, ExpiresAfterCompletedActions = formation.CompletedActions + 1 });
             CommandResponseDecks.Clear();
             if (data.Version >= 5 && data.CommandResponseDecks != null && data.CommandResponseDecks.Count > 0) CommandResponseDecks.AddRange(data.CommandResponseDecks.Select(CloneResponseDeck));
             else InitializeCommandResponseDecks(seed);
@@ -359,12 +375,24 @@ namespace SeaOfUncertainty.Core
         public bool RespondToEntropy(FormationState formation, string cardId, out string message)
         {
             if (formation == null || !formation.HasEffect(cardId)) { message = "That effect is not active."; return false; }
-            if (cardId != "F-01" && cardId != "F-02" && cardId != "F-07") { message = "This effect has no immediate printed Command response."; return false; }
-            if (!TryOccupyCommand(formation.Side, 1, "Entropy Response", formation.Id, -1, out message)) return false;
+            EntropyEffectDefinition card = EntropyEffectCatalog.Find(cardId);
+            EntropyResponseWindowState window = EntropyResponseWindows.FirstOrDefault(item => item.FormationId == formation.Id && item.CardId == cardId && formation.CompletedActions < item.ExpiresAfterCompletedActions);
+            if (card == null || string.IsNullOrEmpty(card.Response) || card.ResponseWindow == EntropyResponseWindow.None) { message = "This effect has no printed Command response."; return false; }
+            if (window == null) { message = "That effect's response window has closed; Recover it normally."; return false; }
+            if (!TryOccupyCommand(formation.Side, card.ResponseCommandCost, "Entropy Response", formation.Id, -1, out message)) return false;
             ResolveAttachedEffect(formation, cardId);
-            AddLog($"T{Time:00}  COMMAND RESPONSE — {formation.Name} cancelled {cardId} {EntropyEffectCatalog.Find(cardId)?.Title}.", formation.Side);
+            EntropyResponseWindows.Remove(window);
+            AddLog($"T{Time:00}  COMMAND RESPONSE — {formation.Name} cancelled {cardId} {card.Title}; {card.ResponseCommandCost} Command Slot occupied until its next completed Action.", formation.Side);
             message = Log[0];
             return true;
+        }
+
+        public bool CanRespondToEntropy(FormationState formation, string cardId)
+        {
+            EntropyEffectDefinition card = EntropyEffectCatalog.Find(cardId);
+            return formation != null && formation.HasEffect(cardId) && card != null && !string.IsNullOrEmpty(card.Response) && card.ResponseWindow != EntropyResponseWindow.None &&
+                Sides.TryGetValue(formation.Side, out SideState side) && side.CommandSlots >= card.ResponseCommandCost &&
+                EntropyResponseWindows.Any(item => item.FormationId == formation.Id && item.CardId == cardId && formation.CompletedActions < item.ExpiresAfterCompletedActions);
         }
 
         public bool PlayCommandResponse(Side side, string cardId, FormationState formation, ContactState contact, HexCoord? hex, out string message)
@@ -396,6 +424,8 @@ namespace SeaOfUncertainty.Core
             if (formation.ActiveEffectCardIds == null) formation.ActiveEffectCardIds = new List<string>();
             formation.ActiveEffectCardIds.Add(card.Id);
             PendingEntropyReveals.Add(new EntropyDrawNotice { CardId = card.Id, FormationId = formation.Id });
+            if (card.ResponseWindow != EntropyResponseWindow.None)
+                EntropyResponseWindows.Add(new EntropyResponseWindowState { FormationId = formation.Id, CardId = card.Id, ExpiresAfterCompletedActions = formation.CompletedActions + (formation == Active ? 2 : 1) });
             ApplyImmediateCardEffect(formation, card);
             AddLog($"T{Time:00}  CARD PULL â€” {formation.Name}: {card.Id} {card.Title}. {card.Effect}", formation.Side);
             return card;
@@ -578,6 +608,7 @@ namespace SeaOfUncertainty.Core
                 contact.LastKnownPosition = target.Position;
                 contact.Age = 0;
                 contact.MovementUncertainty = 0;
+                contact.HasContradictoryPosition = false;
                 contact.IsFalse = false;
                 contact.IsLost = false;
                 string label = contact.Identity == IdentityQuality.Identified ? target.Name : "Contact at " + contact.LastKnownPosition;
@@ -604,15 +635,33 @@ namespace SeaOfUncertainty.Core
 
         public bool Strike(FormationState attacker, FormationState target, Salvo salvo, Reaction reaction, HexCoord? evadeDestination, out CombatResult result, out string message)
         {
+            ContactState contact = target == null ? null : ContactFor(attacker.Side, target.Id);
+            if (contact == null) { result = null; message = "A usable Contact is required to Strike."; return false; }
+            return StrikeContact(attacker, contact, contact.LastKnownPosition, salvo, reaction, evadeDestination, out result, out message);
+        }
+
+        public bool StrikeContact(FormationState attacker, ContactState contact, HexCoord aim, Salvo salvo, Reaction reaction, HexCoord? evadeDestination, out CombatResult result, out string message)
+        {
             result = null;
             if (attacker != Active) { message = "Only the highlighted Ready formation may act."; return false; }
-            ContactState contact = ContactFor(attacker.Side, target.Id);
-            if (contact == null) { message = "A usable Contact is required to Strike."; return false; }
-            if (contact.Identity != IdentityQuality.Identified) { message = "Individual Strikes require an Identified Contact; Search the uncertainty area first."; return false; }
+            if (contact == null || contact.Owner != attacker.Side || contact.IsLost || !Contacts.Contains(contact)) { message = "Choose one of your usable Contacts."; return false; }
+            if (!ContactPossibleHexes(contact).Contains(aim)) { message = "Choose an aim hex inside the Contact's possible area."; return false; }
             int strikeRange = Rules.StrikeRange(attacker.Kind, salvo);
-            if (HexCoord.Distance(attacker.Position, contact.LastKnownPosition) > strikeRange) { message = $"{attacker.Kind} {salvo} Strike range is {strikeRange} hexes ({strikeRange * Area.NauticalMilesPerHex} nm)."; return false; }
+            if (HexCoord.Distance(attacker.Position, aim) > strikeRange) { message = $"{attacker.Kind} {salvo} Strike range is {strikeRange} hexes ({strikeRange * Area.NauticalMilesPerHex} nm)."; return false; }
             if (salvo == Salvo.Heavy && !attacker.CanHeavySalvo)
             { message = "Heavy Salvo is unavailable to this formation."; return false; }
+            FormationState target = contact.IsFalse ? null : Find(contact.TargetId);
+            if (target == null || target.IsDestroyed || !target.Position.Equals(aim))
+            {
+                if (!AuthorizeAction(attacker, ActionKind.Strike, out message)) return false;
+                int missedAttack = attacker.EffectiveStrike + Rules.SalvoModifier(salvo) + ConsumeSupportBonus(attacker, SupportKind.Strike) + Rules.TargetingModifier(contact, AgeTwoTargetingPenalty);
+                if (salvo == Salvo.Heavy) attacker.WeaponExpended = true;
+                if (attacker.HasEffect("F-04")) DegradeEndurance(attacker);
+                result = new CombatResult { Attack = missedAttack, Damage = DamageState.None, ResultingDamage = DamageState.None, Reaction = Reaction.None };
+                CompleteAction(attacker, ActionKind.Strike, false, $"{attacker.Name} struck Contact area {aim}: no confirmed effect.");
+                message = Log[0];
+                return true;
+            }
             IReadOnlyList<Reaction> legalReactions = AvailableReactions(attacker, target);
             Reaction resolvedReaction = reaction;
             if (!legalReactions.Contains(resolvedReaction)) { message = $"{resolvedReaction} is not a legal Reaction for {target.Name}."; return false; }
@@ -632,7 +681,7 @@ namespace SeaOfUncertainty.Core
             CombatBand band = Rules.BandFor(difference);
             int roll = Roll();
             DamageState damage = Rules.DamageFor(band, roll);
-            ApplyDamage(target, damage);
+            DamageState resultingDamage = ApplyDamage(target, damage);
             target.ReactionDefenseBonus = 0;
             if (salvo == Salvo.Heavy) attacker.WeaponExpended = true;
             if (attacker.HasEffect("F-04")) DegradeEndurance(attacker);
@@ -650,6 +699,7 @@ namespace SeaOfUncertainty.Core
                         target.Position = withdrawalDestination;
                         contact.LastKnownPosition = withdrawalDestination;
                         contact.Age = 0;
+                        contact.HasContradictoryPosition = false;
                     }
                 }
                 if (target.OrderlyWithdrawalReady) target.OrderlyWithdrawalReady = false;
@@ -658,6 +708,7 @@ namespace SeaOfUncertainty.Core
             bool counterattacked = false;
             int counterattackRoll = 0;
             DamageState counterattackDamage = DamageState.None;
+            DamageState counterattackResultingDamage = DamageState.None;
             string counterattack = string.Empty;
             if (resolvedReaction == Reaction.Counterattack && !target.IsDestroyed)
             {
@@ -667,14 +718,15 @@ namespace SeaOfUncertainty.Core
                 CombatBand returnBand = Rules.BandFor(returnAttack - returnDefense);
                 counterattackRoll = Roll();
                 counterattackDamage = Rules.DamageFor(returnBand, counterattackRoll);
-                ApplyDamage(attacker, counterattackDamage);
+                counterattackResultingDamage = ApplyDamage(attacker, counterattackDamage);
                 counterattacked = true;
-                counterattack = $" Counterattack: {returnAttack} vs {returnDefense}, {returnBand}, rolled {counterattackRoll} — {counterattackDamage}.";
+                counterattack = $" Counterattack: {returnAttack} vs {returnDefense}, {returnBand}, rolled {counterattackRoll} — {DamageResolutionText(counterattackDamage, counterattackResultingDamage)}.";
             }
 
-            result = new CombatResult { Attack = attack, Defense = defense, Difference = difference, Band = band, Roll = roll, Damage = damage, Reaction = resolvedReaction, Withdrew = withdrew, WithdrawalDestination = withdrawalDestination, Counterattacked = counterattacked, CounterattackRoll = counterattackRoll, CounterattackDamage = counterattackDamage };
+            result = new CombatResult { Attack = attack, Defense = defense, Difference = difference, Band = band, Roll = roll, Damage = damage, ResultingDamage = resultingDamage, Reaction = resolvedReaction, Withdrew = withdrew, WithdrawalDestination = withdrawalDestination, Counterattacked = counterattacked, CounterattackRoll = counterattackRoll, CounterattackDamage = counterattackDamage, CounterattackResultingDamage = counterattackResultingDamage };
             string withdrawal = resolvedReaction == Reaction.Evade ? withdrew ? $" Evaded to {withdrawalDestination}." : " Evade had no legal safer destination." : string.Empty;
-            CompleteAction(attacker, ActionKind.Strike, false, $"{attacker.Name} struck {target.Name}: {attack} vs {defense}, {band}, rolled {roll} — {damage}. Reaction: {resolvedReaction}.{withdrawal}{counterattack}");
+            string targetLabel = contact.Identity == IdentityQuality.Identified ? target.Name : $"Contact area {aim}";
+            CompleteAction(attacker, ActionKind.Strike, false, $"{attacker.Name} struck {targetLabel}: {attack} vs {defense}, {band}, rolled {roll} — {DamageResolutionText(damage, resultingDamage)}. Reaction: {resolvedReaction}.{withdrawal}{counterattack}");
             message = Log[0];
             return true;
         }
@@ -688,6 +740,7 @@ namespace SeaOfUncertainty.Core
         public IReadOnlyList<Reaction> AvailableReactions(FormationState attacker, FormationState target)
         {
             if (attacker == null || target == null || target.IsDestroyed || target.HasReacted || target.Replenishing) return new[] { Reaction.None };
+            if (target.Damage == DamageState.Crippled) return new[] { Reaction.Defend, Reaction.Hold };
             var reactions = new List<Reaction> { Reaction.Defend, Reaction.Evade, Reaction.Hold };
             ContactState returnContact = ContactFor(target.Side, attacker.Id);
             bool counterattackLegal = target.Damage != DamageState.Crippled && target.EntropySources < 2 && !target.HasEffect("X-09") &&
@@ -747,7 +800,7 @@ namespace SeaOfUncertainty.Core
 
         private bool AuthorizeAction(FormationState formation, ActionKind action, out string message)
         {
-            bool complex = action == ActionKind.Move || action == ActionKind.Search || action == ActionKind.Strike || action == ActionKind.Patrol || action == ActionKind.Support;
+            bool complex = Rules.IsComplexAction(action);
             bool consumePushThrough = false;
             if (complex && formation.EntropySources >= 3)
             {
@@ -899,14 +952,14 @@ namespace SeaOfUncertainty.Core
             if (action != ActionKind.Support) ClearSupport(formation);
             bool acceptedRisk = formation.IgnoreEntropyNextAction;
             int cost = Rules.ActionTime(action) + additionalTime + formation.NextReadyTimeBonus;
-            bool complex = action == ActionKind.Move || action == ActionKind.Search || action == ActionKind.Strike || action == ActionKind.Support;
+            bool complex = Rules.IsComplexAction(action);
             if (formation.Friction && complex && !acceptedRisk) cost++;
             if (formation.HasEffect("F-01")) cost++;
             if (action == ActionKind.Strike && formation.HasEffect("F-09")) cost++;
             if (formation.HasEffect("X-12")) cost++;
             formation.ReadyTime = Time + cost;
             formation.HasReacted = false;
-            if (action == ActionKind.Move || action == ActionKind.Search || action == ActionKind.Strike)
+            if (Rules.IsMajorAction(action))
             {
                 formation.MajorActions++;
                 if (formation.MajorActions >= 3)
@@ -916,6 +969,7 @@ namespace SeaOfUncertainty.Core
                 }
             }
             if (generatedFriction && !formation.Friction) MarkEntropy(formation, EntropySource.Friction);
+            if (acceptedRisk) MarkEntropy(formation, EntropySource.Friction);
             formation.CommandBonus = 0;
             formation.MoveBonus = 0;
             formation.SignatureBonus = 0;
@@ -926,8 +980,15 @@ namespace SeaOfUncertainty.Core
             formation.IgnoreEntropyNextAction = false;
             formation.NextReadyTimeBonus = 0;
             formation.MissionChangeLockedUntilAction = false;
+            formation.CompletedActions++;
+            EntropyResponseWindows.RemoveAll(window => window.FormationId == formation.Id && formation.CompletedActions >= window.ExpiresAfterCompletedActions);
+            if (formation.HasEffect("F-02") && !EntropyResponseWindows.Any(window => window.FormationId == formation.Id && window.CardId == "F-02")) ResolveAttachedEffect(formation, "F-02");
+            if (formation.Damage == DamageState.Light && formation.LightDamageExpiresAfterAction > 0 && formation.CompletedActions >= formation.LightDamageExpiresAfterAction)
+            {
+                formation.Damage = DamageState.None;
+                formation.LightDamageExpiresAfterAction = 0;
+            }
             ReleaseCommandForFormation(formation);
-            if (acceptedRisk) MarkEntropy(formation, EntropySource.Friction);
             AddLog($"T{Time:00}  {entry} Next Ready T{formation.ReadyTime:00}.", action == ActionKind.Strike ? (Side?)null : formation.Side);
             lastActingSide = formation.Side;
             ActionCompleted?.Invoke(formation, action);
@@ -959,22 +1020,29 @@ namespace SeaOfUncertainty.Core
             if (Active != null && Active.Replenishing && Active.ReadyTime <= Time) Active.Replenishing = false;
         }
 
-        private void ApplyDamage(FormationState target, DamageState damage)
+        private DamageState ApplyDamage(FormationState target, DamageState damage)
         {
-            if (damage == DamageState.None) return;
-            if (damage == DamageState.Light) target.Damage = target.Damage < DamageState.Light ? DamageState.Light : target.Damage;
-            else
+            if (damage == DamageState.None) return target.Damage;
+            DamageState previous = target.Damage;
+            DamageState combined = Rules.CombineDamage(previous, damage);
+            target.Damage = combined;
+            if (combined == DamageState.Light)
             {
-                target.Damage = damage > target.Damage ? damage : target.Damage;
-                MarkEntropy(target, EntropySource.Destruction);
+                target.LightDamageExpiresAfterAction = target.CompletedActions + (target == Active ? 2 : 1);
             }
+            else target.LightDamageExpiresAfterAction = 0;
+            if (combined >= DamageState.Heavy && combined > previous) MarkEntropy(target, EntropySource.Destruction);
             if (target.IsDestroyed)
             {
                 ClearPatrol(target);
                 ClearSupport(target);
                 foreach (FormationState formation in Formations.Where(candidate => candidate.SupportRecipientId == target.Id)) ClearSupport(formation);
             }
+            return target.Damage;
         }
+
+        private static string DamageResolutionText(DamageState rolled, DamageState resulting)
+            => rolled == resulting ? rolled.ToString() : rolled == DamageState.None ? $"no damage; remains {resulting}" : $"{rolled}; cumulative state {resulting}";
 
         private FormationState EligibleSupporter(FormationState recipient, SupportKind kind)
         {
@@ -1027,14 +1095,15 @@ namespace SeaOfUncertainty.Core
             contact.LastKnownPosition = movingEnemy.Position;
             contact.Age = 0;
             contact.MovementUncertainty = 0;
+            contact.HasContradictoryPosition = false;
             contact.IsLost = false;
             int attack = screener.EffectiveStrike + (screener.PatrolPosture == PatrolPosture.Aggressive ? 1 : 0);
             int defense = movingEnemy.EffectiveDefense - (movingEnemy.Destruction ? 1 : 0);
             CombatBand band = Rules.BandFor(attack - defense);
             int roll = Roll();
             DamageState damage = Rules.DamageFor(band, roll);
-            ApplyDamage(movingEnemy, damage);
-            return $" {screener.Name} intercepted from its {screener.PatrolPosture} Screen: {attack} vs {defense}, {band}, rolled {roll} — {damage}.";
+            DamageState resultingDamage = ApplyDamage(movingEnemy, damage);
+            return $" {screener.Name} intercepted from its {screener.PatrolPosture} Screen: {attack} vs {defense}, {band}, rolled {roll} — {DamageResolutionText(damage, resultingDamage)}.";
         }
 
         private void ExpireOutOfRangeSupport(FormationState moved)
@@ -1159,6 +1228,7 @@ namespace SeaOfUncertainty.Core
             {
                 formation.ActiveEffectCardIds.Remove(id);
                 formation.ResolvedEffectCardIds?.Remove(id);
+                EntropyResponseWindows.RemoveAll(window => window.FormationId == formation.Id && window.CardId == id);
                 deck.DiscardPile.Add(id);
             }
         }
@@ -1173,6 +1243,7 @@ namespace SeaOfUncertainty.Core
             }
             formation.ActiveEffectCardIds.Remove(id);
             formation.ResolvedEffectCardIds?.Remove(id);
+            EntropyResponseWindows.RemoveAll(window => window.FormationId == formation.Id && window.CardId == id);
             EntropyDecks.First(deck => deck.Source == source).DiscardPile.Add(id);
             bool remains = formation.ActiveEffectCardIds.Any(candidate => EntropyEffectCatalog.Find(candidate)?.Source == source);
             SetEntropyMarked(formation, source, remains);
@@ -1317,6 +1388,7 @@ namespace SeaOfUncertainty.Core
             EntropyEffectDefinition effect = EntropyEffectCatalog.Find(id);
             if (formation == null || effect == null || formation.ActiveEffectCardIds == null || !formation.ActiveEffectCardIds.Remove(id)) return false;
             formation.ResolvedEffectCardIds?.Remove(id);
+            EntropyResponseWindows.RemoveAll(window => window.FormationId == formation.Id && window.CardId == id);
             bool remains = formation.ActiveEffectCardIds.Any(candidate => EntropyEffectCatalog.Find(candidate)?.Source == effect.Source);
             SetEntropyMarked(formation, effect.Source, remains);
             EntropyDecks.First(deck => deck.Source == effect.Source).DiscardPile.Add(id);
@@ -1350,7 +1422,7 @@ namespace SeaOfUncertainty.Core
 
         private void ApplyImmediateCardEffect(FormationState formation, EntropyEffectDefinition card)
         {
-            ContactState contact = Contacts.Where(candidate => candidate.Owner == formation.Side && !candidate.IsLost && !candidate.IsFalse)
+            ContactState contact = Contacts.Where(candidate => candidate.Owner == formation.Side && !candidate.IsLost)
                 .OrderByDescending(candidate => candidate.Location).ThenByDescending(candidate => candidate.Identity).ThenBy(candidate => candidate.TargetId).FirstOrDefault();
             if (card.Id == "D-01" && contact != null)
             {
@@ -1358,10 +1430,21 @@ namespace SeaOfUncertainty.Core
                 else if (contact.Identity > IdentityQuality.Unknown) contact.Identity--;
                 ResolveAttachedEffect(formation, card.Id);
             }
-            else if (card.Id == "D-07" && contact != null)
+            else if (card.Id == "D-07")
             {
-                HexCoord falseHex = NearbyValidHex(contact.LastKnownPosition, 2);
-                Contacts.Add(new ContactState { Owner = formation.Side, TargetId = NextFalseContactId(), LastKnownPosition = falseHex, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, IsFalse = true });
+                ContactState realContact = Contacts.Where(candidate => candidate.Owner == formation.Side && !candidate.IsLost && !candidate.IsFalse)
+                    .OrderByDescending(candidate => candidate.Location).ThenByDescending(candidate => candidate.Identity).ThenBy(candidate => candidate.TargetId).FirstOrDefault();
+                if (realContact != null)
+                {
+                    HexCoord falseHex = NearbyValidHex(realContact.LastKnownPosition, 2);
+                    Contacts.Add(new ContactState { Owner = formation.Side, TargetId = NextFalseContactId(), LastKnownPosition = falseHex, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, IsFalse = true });
+                    ResolveAttachedEffect(formation, card.Id);
+                }
+            }
+            else if (card.Id == "D-03" && contact != null)
+            {
+                contact.HasContradictoryPosition = true;
+                contact.ContradictoryPosition = NearbyValidHex(contact.LastKnownPosition, 1);
                 ResolveAttachedEffect(formation, card.Id);
             }
             else if (card.Id == "D-09" && contact != null)

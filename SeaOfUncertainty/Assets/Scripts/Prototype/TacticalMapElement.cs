@@ -120,6 +120,12 @@ namespace SeaOfUncertainty.Prototype
                 int radius = Rules.ContactUncertaintyRadius(contact);
                 int possibleHexes = game.ContactPossibleHexes(contact).Count;
                 marker.tooltip = $"{contact.Summary}\nLast known {contact.LastKnownPosition}\nPossible area: {possibleHexes} hex{(possibleHexes == 1 ? string.Empty : "es")} within radius {radius} • Age or observed movement expands the estimate\n{(eligible ? "Eligible — click to commit" : "Not eligible for selected action")}";
+                if (contact.HasContradictoryPosition)
+                {
+                    Label contradictory = Marker(contact.ContradictoryPosition, "?", "map-marker", "contact");
+                    if (eligible) contradictory.AddToClassList("eligible");
+                    contradictory.tooltip = $"CONTRADICTORY REPORT\nSecond possible fix {contact.ContradictoryPosition}\nSelect either marker to inspect the shared possible area.";
+                }
             }
         }
 
@@ -351,15 +357,16 @@ namespace SeaOfUncertainty.Prototype
             contact = null;
             if (game?.Active == null || presentation == null) return false;
             contact = game.Contacts.Where(c => c.Owner == game.Active.Side && !c.IsLost)
-                .OrderBy(c => Vector2.Distance(presentation.Project(c.LastKnownPosition, contentRect), point)).FirstOrDefault();
-            if (contact == null || Vector2.Distance(presentation.Project(contact.LastKnownPosition, contentRect), point) > range) { contact = null; return false; }
+                .OrderBy(c => Math.Min(Vector2.Distance(presentation.Project(c.LastKnownPosition, contentRect), point), c.HasContradictoryPosition ? Vector2.Distance(presentation.Project(c.ContradictoryPosition, contentRect), point) : float.MaxValue)).FirstOrDefault();
+            float contactDistance = contact == null ? float.MaxValue : Math.Min(Vector2.Distance(presentation.Project(contact.LastKnownPosition, contentRect), point), contact.HasContradictoryPosition ? Vector2.Distance(presentation.Project(contact.ContradictoryPosition, contentRect), point) : float.MaxValue);
+            if (contact == null || contactDistance > range) { contact = null; return false; }
             return true;
         }
 
         private bool StrikeEligible(ContactState contact)
         {
-            if (game?.Active == null || contact == null || contact.Identity != IdentityQuality.Identified) return false;
-            if (HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) > Rules.StrikeRange(game.Active.Kind, salvo)) return false;
+            if (game?.Active == null || contact == null) return false;
+            if (!game.ContactPossibleHexes(contact).Any(hex => HexCoord.Distance(game.Active.Position, hex) <= Rules.StrikeRange(game.Active.Kind, salvo))) return false;
             return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
         }
 

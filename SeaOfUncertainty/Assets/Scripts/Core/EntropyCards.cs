@@ -5,6 +5,7 @@ using System.Linq;
 namespace SeaOfUncertainty.Core
 {
     public enum EntropySource { Friction, Disruption, Destruction }
+    public enum EntropyResponseWindow { None, BeforeNextOwnAction }
 
     [Serializable]
     public sealed class EntropyEffectDefinition
@@ -14,6 +15,8 @@ namespace SeaOfUncertainty.Core
         public string Title;
         public string Effect;
         public string Response;
+        public int ResponseCommandCost;
+        public EntropyResponseWindow ResponseWindow;
     }
 
     [Serializable]
@@ -31,23 +34,27 @@ namespace SeaOfUncertainty.Core
         public string FormationId;
     }
 
+    [Serializable]
+    public sealed class EntropyResponseWindowState
+    {
+        public string FormationId;
+        public string CardId;
+        public int ExpiresAfterCompletedActions;
+    }
+
     public static class EntropyEffectCatalog
     {
-        private static readonly HashSet<string> inactiveSystemCards = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "F-02", "F-05",
-            "D-03", "D-12"
-        };
+        private static readonly HashSet<string> inactiveSystemCards = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private static readonly List<EntropyEffectDefinition> cards = new List<EntropyEffectDefinition>
         {
-            Card("F-01", EntropySource.Friction, "Delayed Execution", "+1 additional Time before next Action.", "Spend 1 Command Slot to cancel."),
-            Card("F-02", EntropySource.Friction, "Staff Overload", "Cannot participate in Synchronization until completing another Action.", "Spend 1 Command Slot to restore immediately."),
+            Card("F-01", EntropySource.Friction, "Delayed Execution", "+1 additional Time before next Action.", "Spend 1 Command Slot to cancel.", 1, EntropyResponseWindow.BeforeNextOwnAction),
+            Card("F-02", EntropySource.Friction, "Staff Overload", "Cannot participate in Synchronization until completing another Action.", "Spend 1 Command Slot to restore immediately.", 1, EntropyResponseWindow.BeforeNextOwnAction),
             Card("F-03", EntropySource.Friction, "Confused Priorities", "Current Mission remains in force, but changing it costs +1 Command Slot."),
             Card("F-04", EntropySource.Friction, "Maintenance Backlog", "High Tempo Move or Strike degrades Endurance one step."),
             Card("F-05", EntropySource.Friction, "Coordination Drift", "If part of a Synchronized Strike, this Formation shifts +1 Time."),
             Card("F-06", EntropySource.Friction, "Overextended Watchbill", "Recover takes +1 Time unless in a logistics-supporting hex."),
-            Card("F-07", EntropySource.Friction, "Navigation Drift", "The first Move this Formation makes is reduced by 1 hex.", "Spend 1 Command Slot to restore full movement."),
+            Card("F-07", EntropySource.Friction, "Navigation Drift", "The first Move this Formation makes is reduced by 1 hex.", "Spend 1 Command Slot to restore full movement.", 1, EntropyResponseWindow.BeforeNextOwnAction),
             Card("F-08", EntropySource.Friction, "Fuel Priority Conflict", "After a High Tempo Move, this Formation may not Support until Recover."),
             Card("F-09", EntropySource.Friction, "Sortie Turnaround Lag", "Strike actions cost +1 Time until Recover."),
             Card("F-10", EntropySource.Friction, "Formation Spread", "The first Screen or Support bonus this Formation receives is ignored."),
@@ -86,7 +93,7 @@ namespace SeaOfUncertainty.Core
         public static bool AppliesTo(EntropyEffectDefinition card, FormationKind kind) => card != null &&
             ((card.Id != "X-01" && card.Id != "X-08") || kind == FormationKind.CarrierGroup || kind == FormationKind.AirGroup);
 
-        private static EntropyEffectDefinition Card(string id, EntropySource source, string title, string effect, string response = "")
-            => new EntropyEffectDefinition { Id = id, Source = source, Title = title, Effect = effect, Response = response };
+        private static EntropyEffectDefinition Card(string id, EntropySource source, string title, string effect, string response = "", int responseCommandCost = 0, EntropyResponseWindow responseWindow = EntropyResponseWindow.None)
+            => new EntropyEffectDefinition { Id = id, Source = source, Title = title, Effect = effect, Response = response, ResponseCommandCost = responseCommandCost, ResponseWindow = responseWindow };
     }
 }

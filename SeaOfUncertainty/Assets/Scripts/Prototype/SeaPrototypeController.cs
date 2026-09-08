@@ -32,6 +32,7 @@ namespace SeaOfUncertainty.Prototype
         public EntropyEffectDefinition ToolkitPendingEntropyEffect(Side side) => game?.PendingEntropyEffectFor(side);
         public FormationState ToolkitPendingEntropyFormation(Side side) => game?.PendingEntropyFormationFor(side);
         public IReadOnlyList<CommandResponseDefinition> ToolkitResponseHand(Side side) => game?.ResponseHand(side) ?? new List<CommandResponseDefinition>();
+        public bool ToolkitCanRespondToEntropy(FormationState formation, string cardId) => game != null && game.CanRespondToEntropy(formation, cardId);
 
         [Serializable]
         private sealed class OperationSave
@@ -78,7 +79,7 @@ namespace SeaOfUncertainty.Prototype
         private Overlay overlay;
         private FormationState inspected;
         private ContactState hoveredContact;
-        private FormationState confirmationTarget;
+        private ContactState confirmationContact;
         private string hoverTooltip;
         private Side handoffSide;
         private bool ageTwoTargetingPenalty = true;
@@ -287,6 +288,28 @@ namespace SeaOfUncertainty.Prototype
             pending = salvo == Salvo.Light ? PendingAction.StrikeLight : salvo == Salvo.Standard ? PendingAction.StrikeStandard : PendingAction.StrikeHeavy;
             ExecuteStrike(target, true, reaction, evadeDestination);
             return toast;
+        }
+
+        public string ToolkitStrikeContact(ContactState contact, HexCoord aim, Salvo salvo, Reaction reaction = Reaction.None, HexCoord? evadeDestination = null)
+        {
+            lastActionSucceeded = false;
+            pending = salvo == Salvo.Light ? PendingAction.StrikeLight : salvo == Salvo.Standard ? PendingAction.StrikeStandard : PendingAction.StrikeHeavy;
+            FormationState actor = game.Active;
+            PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
+            string alternatives = LegalAlternatives();
+            int range = HexCoord.Distance(actor.Position, aim);
+            int attack = actor.EffectiveStrike + Rules.SalvoModifier(salvo) + game.PendingSupportBonus(actor, SupportKind.Strike) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
+            string calculation = $"Contact-area aim {aim}; range {range}/{Rules.StrikeRange(actor.Kind, salvo)}; Attack {attack}; hidden occupancy and defense resolved after commitment; reaction {reaction}";
+            lastActionSucceeded = game.StrikeContact(actor, contact, aim, salvo, reaction, evadeDestination, out CombatResult result, out string message);
+            if (lastActionSucceeded)
+            {
+                string outcome = message + $" Roll {result.Roll}; result {result.Damage}; cumulative damage {result.ResultingDamage}.";
+                telemetry.RecordAction(game, before, actor, "Contact-area Strike", salvo.ToString(), aim.ToString(), alternatives, DecisionSeconds(), calculation, outcome);
+                pending = PendingAction.None; inspected = game.Active; AfterSuccessfulAction(actor.Side);
+            }
+            else telemetry.RecordRejected(game, actor, "Contact-area Strike", salvo.ToString(), aim.ToString(), message, DecisionSeconds());
+            Toast(message);
+            return message;
         }
 
         public string ToolkitHold() { lastActionSucceeded = false; ExecuteHold(); return toast; }
@@ -625,20 +648,20 @@ namespace SeaOfUncertainty.Prototype
             }
             else if (overlay == Overlay.ConfirmHeavy)
             {
-                if (confirmationTarget == null) { overlay = Overlay.None; return; }
-                CombatPreview preview = GetCombatPreview(game.Active, confirmationTarget, Salvo.Heavy, Reaction.Defend);
-                ContactState contact = game.ContactFor(game.Active.Side, confirmationTarget.Id);
+                if (confirmationContact == null) { overlay = Overlay.None; return; }
+                ContactState contact = confirmationContact;
+                int attack = game.Active.EffectiveStrike + Rules.SalvoModifier(Salvo.Heavy) + game.PendingSupportBonus(game.Active, SupportKind.Strike) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
                 GUI.Label(new Rect(rect.x + 44, rect.y + 104, 810, 70), "This commitment expends the formation's Heavy Salvo capability. It cannot be used again until Replenishment is implemented and available.", new GUIStyle(body) { fontSize = 18 });
                 GUI.Label(new Rect(rect.x + 44, rect.y + 204, 810, 36), $"TARGET  {contact.Summary}  •  LAST KNOWN {contact.LastKnownPosition}", panelTitle);
-                GUI.Label(new Rect(rect.x + 44, rect.y + 264, 810, 130), $"ATTACK {preview.Attack}  vs  DEFENSE {preview.Defense}\nDIFFERENCE {preview.Difference:+0;-0;0}  •  {preview.Band.ToString().ToUpperInvariant()} BAND\n\n{CombatOddsText(preview.Band)}", new GUIStyle(body) { alignment = TextAnchor.MiddleCenter, fontSize = 19 });
+                GUI.Label(new Rect(rect.x + 44, rect.y + 264, 810, 130), $"ATTACK {attack}\nDEFENSE AND OCCUPANCY UNRESOLVED\n\nThe defender's condition, Support, Reaction, combat band, and odds resolve only after commitment.", new GUIStyle(body) { alignment = TextAnchor.MiddleCenter, fontSize = 19 });
                 GUI.Label(new Rect(rect.x + 44, rect.y + 430, 810, 54), $"TIME 2 → NEXT READY T{game.Time + 2 + (game.Active.Friction ? 1 : 0):00}", new GUIStyle(panelTitle) { alignment = TextAnchor.MiddleCenter });
-                if (GUI.Button(new Rect(rect.center.x - 300, rect.y + 560, 280, 62), "CANCEL", button)) { confirmationTarget = null; overlay = Overlay.None; }
+                if (GUI.Button(new Rect(rect.center.x - 300, rect.y + 560, 280, 62), "CANCEL", button)) { confirmationContact = null; overlay = Overlay.None; }
                 if (GUI.Button(new Rect(rect.center.x + 20, rect.y + 560, 280, 62), "COMMIT HEAVY SALVO", buttonActive))
                 {
-                    FormationState target = confirmationTarget;
-                    confirmationTarget = null;
+                    ContactState committedContact = confirmationContact;
+                    confirmationContact = null;
                     overlay = Overlay.None;
-                    ExecuteStrike(target, true);
+                    ToolkitStrikeContact(committedContact, committedContact.LastKnownPosition, Salvo.Heavy, Reaction.Defend);
                 }
             }
             else if (overlay == Overlay.Feedback)
@@ -1041,21 +1064,13 @@ namespace SeaOfUncertainty.Prototype
                 GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Area center         {contact.LastKnownPosition}\nCenter range         {range} / {game.SearchRangeFor(game.Active, mode)}\nFootprint radius     {Rules.SearchAreaRadius}\nPriority             {searchPriority}\nSearch rating        {game.Active.EffectiveSearch:+0;-0;0}\nMode ({mode})      {modeModifier:+0;-0;0}", body);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 430, 326, 175), "Hidden Signature, Loud status, and exact position resolve privately. Success creates or improves Contacts. No detection still costs Time and advances the Ready queue.", small);
             }
-            else if (contact.Identity == IdentityQuality.Identified && target != null)
-            {
-                Salvo salvo = CurrentSalvo();
-                CombatPreview preview = GetCombatPreview(game.Active, target, salvo, Reaction.Defend);
-                GUI.Label(new Rect(rect.x + 18, rect.y + 210, 326, 28), "COMBAT CALCULATION", panelTitle);
-                GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Strike rating      {game.Active.EffectiveStrike:+0;-0;0}\nSalvo ({salvo})      {Rules.SalvoModifier(salvo):+0;-0;0}\nTargeting            {Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty):+0;-0;0}\nATTACK                {preview.Attack}\nDEFENSE + Defend      {preview.Defense}\n────────────────\nDIFFERENCE            {preview.Difference:+0;-0;0}", body);
-                GUI.Label(new Rect(rect.x + 18, rect.y + 420, 326, 38), preview.Band.ToString().ToUpperInvariant() + " BAND", new GUIStyle(title) { fontSize = 25, alignment = TextAnchor.MiddleCenter });
-                GUI.Label(new Rect(rect.x + 18, rect.y + 472, 326, 100), CombatOddsText(preview.Band), new GUIStyle(body) { alignment = TextAnchor.MiddleCenter });
-                GUI.Label(new Rect(rect.x + 18, rect.y + 590, 326, 70), salvo == Salvo.Heavy ? "Heavy Salvo expends the formation’s major offensive capability and requires confirmation." : "The defender chooses a legal Reaction after Strike commitment.", small);
-            }
             else
             {
-                int attack = game.Active.EffectiveStrike + Rules.SalvoModifier(CurrentSalvo()) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
+                Salvo salvo = CurrentSalvo();
+                int attack = game.Active.EffectiveStrike + Rules.SalvoModifier(salvo) + game.PendingSupportBonus(game.Active, SupportKind.Strike) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
+                int possible = game.ContactPossibleHexes(contact).Count;
                 GUI.Label(new Rect(rect.x + 18, rect.y + 210, 326, 28), "UNCERTAIN STRIKE PREVIEW", panelTitle);
-                GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Attack              {attack}\nDefense             UNRESOLVED\n\nIndividual Strike commitment requires an Identified Contact. Search this possible area to improve Identity; no preview tests hidden target state.", body);
+                GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 190), $"Attack              {attack}\nDefense             UNRESOLVED\nPossible area       {possible} hex{(possible == 1 ? string.Empty : "es")}\n\nA legacy-map Strike aims at the last-known hex. Hidden occupancy, target condition, defensive Support, and Reaction resolve only after commitment.", body);
             }
         }
 
@@ -1168,7 +1183,9 @@ namespace SeaOfUncertainty.Prototype
                     if (contact != null && Vector2.Distance(centers[contact.LastKnownPosition], local) <= 48)
                     {
                         FormationState target = game.Find(contact.TargetId);
-                        if (IsSearchPending()) ExecuteSearch(target); else ExecuteStrike(target);
+                        if (IsSearchPending()) ExecuteSearch(target);
+                        else if (CurrentSalvo() == Salvo.Heavy) { confirmationContact = contact; overlay = Overlay.ConfirmHeavy; }
+                        else ToolkitStrikeContact(contact, contact.LastKnownPosition, CurrentSalvo(), Reaction.Defend);
                     }
                 }
                 e.Use(); return;
@@ -1228,7 +1245,7 @@ namespace SeaOfUncertainty.Prototype
             Salvo salvo = pending == PendingAction.StrikeLight ? Salvo.Light : pending == PendingAction.StrikeHeavy ? Salvo.Heavy : Salvo.Standard;
             if (salvo == Salvo.Heavy && !confirmed)
             {
-                confirmationTarget = target;
+                confirmationContact = target == null ? null : game.ContactFor(game.Active.Side, target.Id);
                 overlay = Overlay.ConfirmHeavy;
                 return;
             }
@@ -1241,7 +1258,7 @@ namespace SeaOfUncertainty.Prototype
             if (game.Strike(actor, target, salvo, reaction, evadeDestination, out CombatResult result, out string message))
             {
                 lastActionSucceeded = true;
-                string outcome = message + $" Roll {result.Roll}; damage {result.Damage}.";
+                string outcome = message + $" Roll {result.Roll}; result {result.Damage}; cumulative damage {result.ResultingDamage}.";
                 telemetry.RecordAction(game, before, actor, "Strike", salvo.ToString(), target.Id, alternatives, DecisionSeconds(), calculation, outcome);
                 pending = PendingAction.None; inspected = game.Active; AfterSuccessfulAction(actor.Side);
             }

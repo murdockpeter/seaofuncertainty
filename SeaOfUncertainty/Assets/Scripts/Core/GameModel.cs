@@ -121,6 +121,8 @@ namespace SeaOfUncertainty.Core
         public bool MissionChangeLockedUntilAction;
         public bool PushThroughReady;
         public bool LastActionFollowedMission;
+        public int CompletedActions;
+        public int LightDamageExpiresAfterAction;
 
         public int EntropySources => (Friction ? 1 : 0) + (Disruption ? 1 : 0) + (Destruction ? 1 : 0);
         public string Cohesion => EntropySources >= 3 ? "Disorganized" : EntropySources >= 2 ? "Disrupted" : "Cohesive";
@@ -128,7 +130,7 @@ namespace SeaOfUncertainty.Core
         public int EffectiveMove => Math.Max(1, Ratings.Move - (Endurance == Endurance.Critical ? 1 : 0) - (Damage == DamageState.Crippled ? 1 : 0) - (HasEffect("X-03") ? 1 : 0));
         public int EffectiveStrike => Ratings.Strike - (Destruction && !IgnoreEntropyNextAction && !SuppressDestructionNextAction ? 1 : 0) - (HasEffect("X-01") && (Kind == FormationKind.CarrierGroup || Kind == FormationKind.AirGroup) ? 1 : 0);
         public int EffectiveSearch => Ratings.Search - (Disruption && !IgnoreEntropyNextAction ? 1 : 0) - (HasEffect("X-02") ? 1 : 0);
-        public int EffectiveDefense => Math.Max(0, Ratings.Defense - (HasEffect("X-06") ? 1 : 0) - (HasEffect("X-07") ? 1 : 0) + ReactionDefenseBonus);
+        public int EffectiveDefense => Math.Max(0, Ratings.Defense - (Damage == DamageState.Light ? 1 : 0) - (HasEffect("X-06") ? 1 : 0) - (HasEffect("X-07") ? 1 : 0) + ReactionDefenseBonus);
         public int EffectiveSignature => Ratings.Signature + (Loud ? 1 : 0) + SignatureBonus + MovementSignatureModifier;
         public int EffectiveCommand => Math.Max(0, Ratings.Command + CommandBonus - (HasEffect("X-05") ? 1 : 0) - (HasEffect("X-12") ? 1 : 0));
         public bool CanHeavySalvo => !WeaponExpended && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect("X-04") && !HasEffect("X-11");
@@ -153,8 +155,10 @@ namespace SeaOfUncertainty.Core
         public int MovementUncertainty;
         public bool IsFalse;
         public bool IsLost;
+        public bool HasContradictoryPosition;
+        public HexCoord ContradictoryPosition;
 
-        public string Summary => IsLost ? "LOST" : $"{Location} / {Identity} / AGE {Math.Min(Age, 3)}{(Age >= 3 ? "+" : string.Empty)} / AREA R{Rules.ContactUncertaintyRadius(this)}";
+        public string Summary => IsLost ? "LOST" : $"{Location} / {Identity} / AGE {Math.Min(Age, 3)}{(Age >= 3 ? "+" : string.Empty)} / AREA R{Rules.ContactUncertaintyRadius(this)}{(HasContradictoryPosition ? " / CONTRADICTORY" : string.Empty)}";
     }
 
     [Serializable]
@@ -193,16 +197,24 @@ namespace SeaOfUncertainty.Core
         public CombatBand Band;
         public int Roll;
         public DamageState Damage;
+        public DamageState ResultingDamage;
         public Reaction Reaction;
         public bool Withdrew;
         public HexCoord WithdrawalDestination;
         public bool Counterattacked;
         public int CounterattackRoll;
         public DamageState CounterattackDamage;
+        public DamageState CounterattackResultingDamage;
     }
 
     public static class Rules
     {
+        public static bool IsComplexAction(ActionKind action)
+            => action == ActionKind.Move || action == ActionKind.Search || action == ActionKind.Strike || action == ActionKind.Patrol || action == ActionKind.Support;
+
+        public static bool IsMajorAction(ActionKind action)
+            => action == ActionKind.Move || action == ActionKind.Search || action == ActionKind.Strike;
+
         public static int MoveDistance(MoveMode mode) => mode == MoveMode.Cautious ? 1 : mode == MoveMode.Normal ? 2 : 3;
         public static int MoveDistance(FormationKind kind, MoveMode mode)
         {
@@ -267,6 +279,13 @@ namespace SeaOfUncertainty.Core
                 case CombatBand.Favorable: return roll == 1 ? DamageState.Light : roll == 6 ? DamageState.Crippled : DamageState.Heavy;
                 default: return roll == 1 ? DamageState.Heavy : roll == 6 ? DamageState.Destroyed : DamageState.Crippled;
             }
+        }
+
+        public static DamageState CombineDamage(DamageState current, DamageState incoming)
+        {
+            if (incoming == DamageState.None || incoming < current) return current;
+            if (incoming > current) return incoming;
+            return current >= DamageState.Destroyed ? DamageState.Destroyed : (DamageState)((int)current + 1);
         }
 
         public static FormationState NextReady(IEnumerable<FormationState> formations, Side? lastActingSide = null)

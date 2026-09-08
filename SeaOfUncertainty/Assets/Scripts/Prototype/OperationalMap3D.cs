@@ -1159,6 +1159,13 @@ namespace SeaOfUncertainty.Prototype
             float scale = contact.Identity == IdentityQuality.Identified ? .36f : contact.Identity == IdentityQuality.General ? .31f : .26f;
             diamond.transform.localScale = Vector3.one * scale;
             diamond.transform.localRotation = Quaternion.Euler(35f, 45f, 35f);
+            if (contact.HasContradictoryPosition)
+            {
+                GameObject contradictory = Primitive(PrimitiveType.Cube, "Contradictory Contact Fix", marker.transform, contactMaterial);
+                contradictory.transform.localPosition = HexToWorld(contact.ContradictoryPosition) - HexToWorld(contact.LastKnownPosition);
+                contradictory.transform.localScale = Vector3.one * (scale * .82f);
+                contradictory.transform.localRotation = Quaternion.Euler(35f, 45f, 35f);
+            }
 
             IReadOnlyList<HexCoord> possibleHexes = game.ContactPossibleHexes(contact);
             for (int i = 0; i < possibleHexes.Count; i++)
@@ -1218,8 +1225,8 @@ namespace SeaOfUncertainty.Prototype
 
         private bool StrikeEligible(ContactState contact)
         {
-            if (contact == null || contact.Identity != IdentityQuality.Identified) return false;
-            if (HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) > Rules.StrikeRange(game.Active.Kind, salvo)) return false;
+            if (contact == null) return false;
+            if (!game.ContactPossibleHexes(contact).Any(hex => HexCoord.Distance(game.Active.Position, hex) <= Rules.StrikeRange(game.Active.Kind, salvo))) return false;
             return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
         }
 

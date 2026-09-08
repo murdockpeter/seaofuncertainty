@@ -125,21 +125,11 @@ The map now renders the discrete possible-hex area rather than a decorative unce
 
 ### Strike, reaction, and damage
 
-Defined: salvo commitment, targeting modifiers, four reactions, attack/defense arithmetic, bands, and outcomes.
+Implemented: formation/salvo ranges, expenditure, targeting modifiers, player-selected reactions, attack/defense arithmetic, bounded results, damage, Screen and Support modifiers, and uncertain-area commitment. See `STRIKE_COMBAT_DAMAGE_RULES.md`.
 
-Needs definition:
+Light damage applies −1 Defense and clears after the formation completes its next own Action. A higher incoming result replaces current damage, an equal nonzero result escalates one step, and a lower result is ignored. Crippled formations may Defend or Hold but cannot Evade or Counterattack.
 
-- Weapon ranges by formation/weapon.
-- Whether a stale Contact is attacked at last known position and can miss because the target moved.
-- Light damage’s exact impairment and duration.
-- How repeated damage combines.
-- Counterattack sequencing, targeting requirement, expenditure, and whether it consumes the reaction for this interval.
-- Evade movement timing and whether it changes the original attack.
-- Screen eligibility and support duration.
-
-Prototype assumption: range three; attack targets the formation behind a Contact; Age 2 gives the optional −1; defender automatically Defends; Heavy or worse marks Destruction; higher damage replaces lower damage.
-
-Recommendation: reaction choice is the next essential interaction to implement. It creates the inactive player’s most important decision and must be tested before AI or multiplayer work.
+A Strike chooses an owned Contact and then one hex in its possible area. Hidden occupancy is tested only after commitment. An empty, stale, or False Contact aim consumes the action and any committed Heavy weapon or Strike Support, then reports only “no confirmed effect.”
 
 ### Synchronization
 
@@ -158,19 +148,11 @@ Recommendation: implement only after individual Strike and Reaction are stable. 
 
 ### Entropy and effect cards
 
-Defined: three source flags, their universal effects, cohesion thresholds, 18 named effect cards, and Recover limits.
+Implemented: three universal sources, all 36 physical effect cards, stacking draws, source-aware recovery, private reveals, response windows, and save/load. See `ENTROPY_RECOVERY_RULES.md`.
 
-Needs definition:
+Complex Actions are Move, Search, Strike, Patrol, and Support. Major Actions are Move, Search, and Strike. Universal source penalties stack with individual card effects unless an explicit response suppresses or ignores one.
 
-- Whether a formation can hold multiple cards of the same source.
-- Whether clearing a source clears its attached card automatically.
-- Card duration where not printed.
-- What “complex Action” includes.
-- Whether newly marking an already-marked source draws another card.
-- Whether Light damage can create an effect without Destruction.
-- How “until repaired” differs from Replenish and Recover.
-
-Prototype assumption: one Boolean per source; repeated causes do not stack or draw; friction affects Move, Search, Strike, and Support; Recover clears Friction first, then Disruption; card-specific effects are not active in slice one.
+F-02 and D-12 gate Synchronization Support, F-05 shifts it +1 Time, and D-03 adds a second adjacent center to the Contact's possible-area geometry. The three printed Entropy responses each cost one Command Slot and remain playable from reveal until the affected formation completes its next own Action.
 
 ### Command Attention and responses
 
@@ -190,15 +172,7 @@ Recommendation: model each Slot as `Free`, `Occupied until Time`, or `Strained`,
 
 Defined: three states, some state effects, Replenish time/access requirement, and an initial “three major Actions” test.
 
-Needs definition:
-
-- The exhaustive major/complex Action lists.
-- Whether three actions reset the counter when Endurance degrades.
-- Scenario definitions of logistics access.
-- Exactly what one Replenish restores.
-- Repair limits for Destruction cards and Crippled formations.
-
-Prototype assumption: Move, Search, and Strike are major; the count resets after each degradation; one logistics layer will be added only after the core loop proves useful.
+Implemented: Move, Search, and Strike are major Actions. Every third major Action degrades Endurance one step and resets the counter. Scenario data defines typed logistics access, and Replenishment restores one Endurance step, reloads Heavy, repairs damage one step, resets the major-action track, and repairs one selected Destruction card.
 
 ### Victory and scenario
 

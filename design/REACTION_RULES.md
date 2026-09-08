@@ -26,7 +26,7 @@ C-18 Orderly Withdrawal is prepared before combat and extends one chosen Evade f
 
 - A formation whose Reaction is spent cannot react again until completing its own Action.
 - Disrupted or Disorganized formations cannot Counterattack.
-- Crippled formations cannot Counterattack.
+- Crippled formations may only Defend or Hold; they cannot Evade or Counterattack.
 - Fire Control Hit (X-09) prevents Counterattack.
 - A formation without a usable owned Contact on the attacker cannot Counterattack.
 - A replenishing formation cannot react.

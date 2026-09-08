@@ -82,6 +82,10 @@ namespace SeaOfUncertainty.Editor
         {
             Assert(EntropyEffectCatalog.All.Count == 36, "The Entropy catalog contains all 36 cards");
             foreach (EntropySource source in System.Enum.GetValues(typeof(EntropySource))) Assert(EntropyEffectCatalog.For(source).Count() == 12, source + " contains 12 cards");
+            Assert(EntropyEffectCatalog.All.All(EntropyEffectCatalog.IsFullyMechanicallySupported), "All 36 Entropy cards have an active mechanical path");
+            Assert(EntropyEffectCatalog.All.Count(card => !string.IsNullOrEmpty(card.Response)) == 3 && EntropyEffectCatalog.All.Where(card => !string.IsNullOrEmpty(card.Response)).All(card => card.ResponseCommandCost == 1 && card.ResponseWindow == EntropyResponseWindow.BeforeNextOwnAction), "All printed Entropy responses cost one Command Slot and close after the affected Formation's next own Action");
+            Assert(Rules.IsComplexAction(ActionKind.Move) && Rules.IsComplexAction(ActionKind.Search) && Rules.IsComplexAction(ActionKind.Strike) && Rules.IsComplexAction(ActionKind.Patrol) && Rules.IsComplexAction(ActionKind.Support) && !Rules.IsComplexAction(ActionKind.Recover) && !Rules.IsComplexAction(ActionKind.Replenish) && !Rules.IsComplexAction(ActionKind.Hold), "The exhaustive complex-Action list is Move, Search, Strike, Patrol, and Support");
+            Assert(Rules.IsMajorAction(ActionKind.Move) && Rules.IsMajorAction(ActionKind.Search) && Rules.IsMajorAction(ActionKind.Strike) && !Rules.IsMajorAction(ActionKind.Patrol) && !Rules.IsMajorAction(ActionKind.Support), "The exhaustive major-Action list is Move, Search, and Strike");
             Assert(CommandResponseCatalog.All.Count == 24 && CommandResponseCatalog.All.Select(card => card.Id).Distinct().Count() == 24, "The Command Response catalog contains 24 unique cards");
 
             var game = new PrototypeGame(1978);
@@ -107,6 +111,63 @@ namespace SeaOfUncertainty.Editor
             Assert(!game.SearchArea(actor, actor.Position, SearchMode.Focused, out string jammedMessage) && jammedMessage.Contains("Jammed Circuits"), "Jammed Circuits blocks Focused Search");
             actor.ActiveEffectCardIds.Add("X-11");
             Assert(!actor.CanHeavySalvo, "Launcher Damage blocks Heavy Salvo");
+
+            var contradictionGame = new PrototypeGame(1978);
+            FormationState contradictionActor = contradictionGame.Active;
+            ContactState contradictionContact = contradictionGame.Contacts.First(contact => contact.Owner == contradictionActor.Side && !contact.IsLost && !contact.IsFalse);
+            int originalPossibleHexes = contradictionGame.ContactPossibleHexes(contradictionContact).Count;
+            EntropyDeckState disruptionDeck = contradictionGame.EntropyDecks.First(deck => deck.Source == EntropySource.Disruption);
+            disruptionDeck.DrawPile.Remove("D-03"); disruptionDeck.DrawPile.Insert(0, "D-03");
+            Assert(contradictionGame.MarkEntropy(contradictionActor, EntropySource.Disruption)?.Id == "D-03" && contradictionContact.HasContradictoryPosition && HexCoord.Distance(contradictionContact.LastKnownPosition, contradictionContact.ContradictoryPosition) == 1, "D-03 places a second adjacent possible-position marker");
+            Assert(contradictionGame.ContactPossibleHexes(contradictionContact).Count > originalPossibleHexes, "D-03 expands authoritative Contact uncertainty geometry");
+
+            var synchronizationGame = new PrototypeGame(1978);
+            FormationState synchronizationActor = synchronizationGame.Active;
+            FormationState synchronizationRecipient = synchronizationGame.Formations.First(formation => formation.Side == synchronizationActor.Side && formation != synchronizationActor);
+            synchronizationRecipient.Position = synchronizationActor.Position;
+            synchronizationActor.Mission = ActionKind.Support;
+            synchronizationActor.Friction = true;
+            synchronizationActor.ActiveEffectCardIds.Add("F-05");
+            int synchronizationStart = synchronizationGame.Time;
+            Assert(synchronizationGame.Support(synchronizationActor, synchronizationRecipient, SupportKind.Synchronization, out string driftMessage) && synchronizationActor.ReadyTime == synchronizationStart + 3, "F-05 adds +1 Time to Synchronization Support while stacking with the universal Friction +1: " + driftMessage);
+
+            var blockedSynchronizationGame = new PrototypeGame(1978);
+            FormationState blockedSynchronizationActor = blockedSynchronizationGame.Active;
+            FormationState blockedSynchronizationRecipient = blockedSynchronizationGame.Formations.First(formation => formation.Side == blockedSynchronizationActor.Side && formation != blockedSynchronizationActor);
+            blockedSynchronizationRecipient.Position = blockedSynchronizationActor.Position;
+            blockedSynchronizationActor.Friction = true;
+            blockedSynchronizationActor.ActiveEffectCardIds.Add("F-02");
+            Assert(!blockedSynchronizationGame.Support(blockedSynchronizationActor, blockedSynchronizationRecipient, SupportKind.Synchronization, out string overloadMessage) && overloadMessage.Contains("Staff Overload"), "F-02 blocks Synchronization Support before its expiry or response");
+            blockedSynchronizationActor.ActiveEffectCardIds.Remove("F-02");
+            blockedSynchronizationActor.Disruption = true;
+            blockedSynchronizationActor.ActiveEffectCardIds.Add("D-12");
+            Assert(!blockedSynchronizationGame.Support(blockedSynchronizationActor, blockedSynchronizationRecipient, SupportKind.Synchronization, out string plotMessage) && plotMessage.Contains("Compromised Plot"), "D-12 blocks Synchronization Support until Recover");
+            Assert(blockedSynchronizationGame.Recover(blockedSynchronizationActor, EntropySource.Disruption, "D-12", out string plotRecovery) && !blockedSynchronizationActor.HasEffect("D-12") && blockedSynchronizationGame.CanParticipateInSynchronization(blockedSynchronizationActor), "Recover removes D-12 and restores Synchronization eligibility: " + plotRecovery);
+
+            var overloadExpiryGame = new PrototypeGame(1978);
+            FormationState overloadActor = overloadExpiryGame.Active;
+            EntropyDeckState overloadDeck = overloadExpiryGame.EntropyDecks.First(deck => deck.Source == EntropySource.Friction);
+            overloadDeck.DrawPile.Remove("F-02"); overloadDeck.DrawPile.Insert(0, "F-02");
+            Assert(overloadExpiryGame.MarkEntropy(overloadActor, EntropySource.Friction)?.Id == "F-02" && !overloadExpiryGame.CanParticipateInSynchronization(overloadActor), "F-02 immediately blocks Synchronization");
+            Assert(overloadExpiryGame.Hold(overloadActor, out _), "Advance the F-02 duration through its drawing Action");
+            int overloadGuard = 0;
+            while (overloadExpiryGame.Active != overloadActor && overloadGuard++ < 40) Assert(overloadExpiryGame.Hold(overloadExpiryGame.Active, out _), "Advance to the overloaded Formation's next Action");
+            Assert(overloadExpiryGame.Active == overloadActor && overloadActor.HasEffect("F-02") && overloadExpiryGame.Hold(overloadActor, out _) && !overloadActor.HasEffect("F-02") && overloadExpiryGame.CanParticipateInSynchronization(overloadActor), "F-02 clears after the Formation completes another own Action");
+
+            var entropyResponseGame = new PrototypeGame(1978);
+            FormationState responseActor = entropyResponseGame.Active;
+            EntropyDeckState responseFrictionDeck = entropyResponseGame.EntropyDecks.First(deck => deck.Source == EntropySource.Friction);
+            responseFrictionDeck.DrawPile.Remove("F-01"); responseFrictionDeck.DrawPile.Insert(0, "F-01");
+            Assert(entropyResponseGame.MarkEntropy(responseActor, EntropySource.Friction)?.Id == "F-01" && entropyResponseGame.CanRespondToEntropy(responseActor, "F-01"), "A printed Entropy response opens when its card is revealed");
+            string responseSave = JsonUtility.ToJson(entropyResponseGame.CaptureState());
+            var restoredResponseGame = new PrototypeGame(1978);
+            restoredResponseGame.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(responseSave));
+            FormationState restoredResponseActor = restoredResponseGame.Find(responseActor.Id);
+            int freeCommandBeforeResponse = restoredResponseGame.Sides[restoredResponseActor.Side].CommandSlots;
+            Assert(restoredResponseGame.CanRespondToEntropy(restoredResponseActor, "F-01"), "Entropy response windows survive save/load");
+            Assert(restoredResponseGame.RespondToEntropy(restoredResponseActor, "F-01", out string entropyResponseMessage), "A restored Entropy response may be exercised: " + entropyResponseMessage);
+            Assert(restoredResponseGame.Sides[restoredResponseActor.Side].CommandSlots == freeCommandBeforeResponse - 1 && !restoredResponseActor.HasEffect("F-01"), "The printed response occupies exactly one Command Slot and cancels the effect");
+            Assert(restoredResponseGame.Hold(restoredResponseActor, out _) && restoredResponseGame.Sides[restoredResponseActor.Side].CommandSlots == freeCommandBeforeResponse, "The Entropy-response Command Slot releases after the affected Formation completes its next own Action");
 
             CommandResponseDeckState hand = game.CommandResponseDecks.First(deck => deck.Side == actor.Side);
             hand.DrawPile.Remove("C-22");
@@ -412,9 +473,33 @@ namespace SeaOfUncertainty.Editor
             restrictedTarget.Friction = false;
             restrictedTarget.Disruption = false;
             restrictedTarget.Damage = DamageState.Crippled;
-            Assert(!restrictedGame.AvailableReactions(restrictedAttacker, restrictedTarget).Contains(Reaction.Counterattack), "Crippled formations cannot Counterattack");
+            Assert(restrictedGame.AvailableReactions(restrictedAttacker, restrictedTarget).SequenceEqual(new[] { Reaction.Defend, Reaction.Hold }), "Crippled formations are limited to Defend or Hold");
             restrictedTarget.Replenishing = true;
             Assert(restrictedGame.AvailableReactions(restrictedAttacker, restrictedTarget).SequenceEqual(new[] { Reaction.None }), "Replenishing formations cannot react");
+
+            var lightGame = new PrototypeGame(1978);
+            FormationState lightFormation = lightGame.Active;
+            int undamagedDefense = lightFormation.EffectiveDefense;
+            lightFormation.Damage = DamageState.Light;
+            lightFormation.LightDamageExpiresAfterAction = lightFormation.CompletedActions + 1;
+            Assert(lightFormation.EffectiveDefense == undamagedDefense - 1, "Light damage applies -1 Defense");
+            Assert(lightGame.Hold(lightFormation, out string lightMessage) && lightFormation.Damage == DamageState.None, "Light damage clears after the Formation completes its next own Action: " + lightMessage);
+            Assert(Rules.CombineDamage(DamageState.Light, DamageState.Light) == DamageState.Heavy && Rules.CombineDamage(DamageState.Heavy, DamageState.Heavy) == DamageState.Crippled && Rules.CombineDamage(DamageState.Crippled, DamageState.Crippled) == DamageState.Destroyed, "Equal repeated damage escalates one step");
+            Assert(Rules.CombineDamage(DamageState.Heavy, DamageState.Light) == DamageState.Heavy && Rules.CombineDamage(DamageState.Light, DamageState.Crippled) == DamageState.Crippled, "Lower repeated damage is ignored and higher incoming damage replaces current damage");
+
+            PrototypeGame staleGame = ReactionFixture(out FormationState staleAttacker, out FormationState staleTarget);
+            ContactState staleContact = staleGame.ContactFor(staleAttacker.Side, staleTarget.Id);
+            staleContact.Location = LocationQuality.Medium;
+            HexCoord wrongAim = staleGame.ContactPossibleHexes(staleContact).First(hex => !hex.Equals(staleTarget.Position) && HexCoord.Distance(staleAttacker.Position, hex) <= Rules.StrikeRange(staleAttacker.Kind, Salvo.Light));
+            DamageState damageBeforeMiss = staleTarget.Damage;
+            Assert(staleGame.StrikeContact(staleAttacker, staleContact, wrongAim, Salvo.Light, Reaction.None, null, out CombatResult missedResult, out string missedMessage), "A stale-location area Strike legally commits: " + missedMessage);
+            Assert(missedResult.Damage == DamageState.None && staleTarget.Damage == damageBeforeMiss && missedMessage.Contains("no confirmed effect") && !missedMessage.Contains(staleTarget.Name), "A wrong aim hex consumes the Strike without revealing target existence or identity");
+
+            PrototypeGame unresolvedHitGame = ReactionFixture(out FormationState unresolvedAttacker, out FormationState unresolvedTarget);
+            ContactState unresolvedContact = unresolvedHitGame.ContactFor(unresolvedAttacker.Side, unresolvedTarget.Id);
+            unresolvedContact.Identity = IdentityQuality.General;
+            Assert(unresolvedHitGame.StrikeContact(unresolvedAttacker, unresolvedContact, unresolvedTarget.Position, Salvo.Light, Reaction.Hold, null, out _, out string unresolvedHitMessage), "An uncertain Contact may be hit at its actual hidden hex: " + unresolvedHitMessage);
+            Assert(!unresolvedHitMessage.Contains(unresolvedTarget.Name) && unresolvedHitMessage.Contains("Contact area"), "A successful uncertain Strike log does not disclose an unidentified target name");
 
             PrototypeGame aiReactionGame = ReactionFixture(out FormationState aiAttacker, out FormationState aiTarget);
             aiTarget.OrderlyWithdrawalReady = true;
@@ -427,7 +512,7 @@ namespace SeaOfUncertainty.Editor
             blindReactionGame.Contacts.RemoveAll(contact => contact.Owner == blindTarget.Side && contact.TargetId == blindAttacker.Id);
             Assert(!blindReactionGame.AvailableReactions(blindAttacker, blindTarget).Contains(Reaction.Counterattack), "A defender cannot infer or Counterattack an attacker for which it has no usable Contact");
             Assert(blindReactionGame.LegalEvadeDestinations(blindAttacker, blindTarget, 1).Count > 0, "A defender without attacker location data can still Evade without receiving a hidden exact-position clue");
-            Debug.Log("Player-selected reaction tests passed: timing, refresh, Defend, Evade, Counterattack, Hold, restrictions, save/load, and AI choice.");
+            Debug.Log("Player-selected reaction and damage tests passed: timing, refresh, Defend, Evade, Counterattack, Hold, Crippled limits, Light impairment, repeated damage, uncertain-area misses, save/load, and AI choice.");
         }
 
         private static PrototypeGame ReactionFixture(out FormationState attacker, out FormationState defender)
@@ -758,7 +843,7 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.Active != null && restored.Active.Id == game.Active.Id, "Save restores active formation");
             Assert(restored.Formations.Count == game.Formations.Count, "Save restores formations");
             Assert(restored.Contacts.Count == game.Contacts.Count, "Save restores Contacts");
-            Assert(saveData.Version == 7 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 7 save preserves stable IDs, Entropy decks, Response hands, Command Slots, Standing Missions, uncertainty, and private logs");
+            Assert(saveData.Version == 9 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 9 save preserves stable IDs, Entropy decks, response windows, Response hands, Command Slots, Standing Missions, uncertainty, damage duration, and private logs");
             Assert(restored.LogEntries.Count == game.LogEntries.Count, "Save restores side-scoped operational log visibility");
             Assert(restored.EntropyDecks.Count == 3 && restored.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count) == game.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count), "Save restores Entropy deck state");
             Assert(restored.CommandResponseDecks.Count == 2 && restored.CommandResponseDecks.All(deck => deck.Hand.Count == 3), "Save restores both private Command Response hands");

@@ -10,14 +10,16 @@ An operational naval wargame prototype about acting effectively inside incomplet
 4. Choose **Begin Operation**, select **Meridian Veil**, review the briefing, and lock the fixed test deployment.
 5. Use the secure handoff screen whenever control passes between sides.
 6. The highlighted formation is Ready. Choose Move, Search, Strike, Recover, Hold, Patrol/Screen, Support, or Replenish.
-7. For Move, choose a commitment and destination hex. For Search, choose any highlighted area hex. For Strike, choose an eligible Contact.
+7. For Move, choose a commitment and destination hex. For Search, choose any highlighted area hex. For Strike, choose an eligible Contact and then one aim hex inside its possible area.
 8. Use **Menu** during play to save, load, restart, adjust settings, or return to the main menu. A saved operation adds **Continue** to the main menu.
 
 The scenario concludes at operational Time 16 with provisional scoring for objective control, carrier preservation, and enemy formations rendered Crippled or Destroyed.
 
-During action selection, the 3D command map highlights legal destinations, Search areas, and eligible Strike Contacts. Heavy Salvo requires a final confirmation. Hover ratings and status elements for contextual rules help, and use **Inspect** on the after-action feed for the full event history.
+During action selection, the 3D command map highlights legal destinations, Search areas, and eligible Strike Contacts. Strike previews never expose hidden occupancy or defense; an empty, stale, or false aim reports only “no confirmed effect.” Heavy Salvo requires a final confirmation. Hover ratings and status elements for contextual rules help, and use **Inspect** on the after-action feed for the full event history.
 
 The current baseline uses 20 nautical miles between adjacent hex centers and two hours per Ready-Time point. These physical-scale values are provisional until dedicated movement, sensor, and weapon-range playtests are complete.
+
+Entropy uses complete 12-card Friction, Disruption, and Destruction decks. Universal source penalties stack with attached card effects. Recover discards one selected Friction or Disruption card; Replenishment handles damage and Destruction repair. Printed Entropy responses cost one Command Slot and must be used before the affected formation completes its next own Action.
 
 ## Playtest data
 

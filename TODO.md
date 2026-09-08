@@ -138,12 +138,12 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Implement the current damage ladder through Light, Heavy, Crippled, and Destroyed.
 - [x] Reduce Crippled movement, prevent its Heavy Salvo, and exclude Destroyed formations from play.
 - [x] Apply supported Destruction-card effects to Move, Search, Strike, Defense, Command, and salvo availability.
-- [ ] **Decision:** Define Light damage's exact impairment and duration.
-- [ ] **Decision:** Define how repeated damage combines.
-- [ ] Implement limited Crippled reactions after the final reaction rules exist.
-- [ ] **Decision:** Define Strikes against uncertain areas and when the hidden target's actual position is tested.
-- [ ] Support misses caused by stale or incorrect Location information.
-- [ ] Prevent uncertain-Strike UI from revealing whether a Contact is real.
+- [x] **Decision:** Light damage applies −1 Defense through the formation's next completed own Action, then clears.
+- [x] **Decision:** Higher incoming damage replaces current damage; equal nonzero damage escalates one step; lower damage is ignored.
+- [x] Limit Crippled reactions to Defend and Hold.
+- [x] **Decision:** Strike an owned Contact by selecting one aim hex in its possible area; test hidden occupancy only after commitment.
+- [x] Consume Strikes that miss because Location is stale, incorrect, or false and report only “no confirmed effect.”
+- [x] Keep occupancy, real/false status, target condition, defensive Support, and Reaction out of uncertain pre-commitment UI.
 
 ### Entropy and recovery
 
@@ -153,12 +153,12 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Draw a physical card for every Entropy event, including repeated events from an already-marked source.
 - [x] Stack attached cards, queue private per-side reveals, and preserve unseen reveals through save/load.
 - [x] Let Recover select and discard one Friction or Disruption card while retaining the source if matching cards remain.
-- [x] Apply 22 of 36 effects whose parent systems exist.
-- [x] Implement immediate printed Command responses for F-01, F-02, and F-07.
-- [ ] **Decision:** Finalize the exhaustive complex-Action and major-Action lists.
-- [ ] **Decision:** Finalize whether universal source penalties stack with individual card effects after paired playtests.
-- [ ] Implement the remaining 4 effects after their Synchronization or uncertainty-geometry parent systems exist: F-02, F-05, D-03, D-12.
-- [ ] Implement every remaining printed entropy response and its exact play window/cost.
+- [x] Apply all 36 Entropy-card effects through current systems or the active Synchronization Support bridge.
+- [x] Implement every printed Entropy response: F-01, F-02, and F-07.
+- [x] **Decision:** Complex Actions are Move, Search, Strike, Patrol, and Support; major Actions are Move, Search, and Strike.
+- [x] **Decision:** Universal source penalties stack with individual card effects unless a card explicitly cancels or ignores one.
+- [x] Implement F-02, F-05, and D-12 through Synchronization Support, and D-03 through multi-center uncertainty geometry.
+- [x] Give every printed Entropy response a one-Command-Slot cost and a window ending after the affected Formation's next own Action.
 - [x] Define and implement Destruction-card repair and discard through Replenishment.
 
 ### Command Response deck
@@ -195,7 +195,7 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Track Ready, Extended, and Critical Endurance.
 - [x] Degrade after the current three-major-action prototype threshold and reset the counter.
 - [x] Apply current Critical movement and Heavy Salvo restrictions.
-- [ ] **Decision:** Finalize the major-Action list, degradation trigger, and reset behavior through paired testing.
+- [x] **Decision:** Major Actions are Move, Search, and Strike; every third major Action degrades Endurance one step and resets the counter.
 - [ ] Display progress toward the next Endurance degradation.
 - [ ] Apply the final Ready, Extended, and Critical rules.
 
