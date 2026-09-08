@@ -10,6 +10,7 @@ namespace SeaOfUncertainty.Core
     public enum ActionKind { Move, Search, Strike, Patrol, Support, Recover, Replenish, Hold }
     public enum MoveMode { Cautious, Normal, HighTempo }
     public enum SearchMode { Passive, Active, Focused }
+    public enum SearchPriority { Location, Identity }
     public enum Salvo { Light, Standard, Heavy }
     public enum Reaction { None, Defend, Evade, Counterattack, Hold }
     public enum ReactionControl { None, HumanDirect, HumanHandoff, Ai }
@@ -85,6 +86,7 @@ namespace SeaOfUncertainty.Core
         public int CommandBonus;
         public int MoveBonus;
         public int SignatureBonus;
+        public int MovementSignatureModifier;
         public int ReactionDefenseBonus;
         public int NextReadyTimeBonus;
         public bool FreeFocusedSearch;
@@ -127,7 +129,7 @@ namespace SeaOfUncertainty.Core
         public int EffectiveStrike => Ratings.Strike - (Destruction && !IgnoreEntropyNextAction && !SuppressDestructionNextAction ? 1 : 0) - (HasEffect("X-01") && (Kind == FormationKind.CarrierGroup || Kind == FormationKind.AirGroup) ? 1 : 0);
         public int EffectiveSearch => Ratings.Search - (Disruption && !IgnoreEntropyNextAction ? 1 : 0) - (HasEffect("X-02") ? 1 : 0);
         public int EffectiveDefense => Math.Max(0, Ratings.Defense - (HasEffect("X-06") ? 1 : 0) - (HasEffect("X-07") ? 1 : 0) + ReactionDefenseBonus);
-        public int EffectiveSignature => Ratings.Signature + (Loud ? 1 : 0) + SignatureBonus;
+        public int EffectiveSignature => Ratings.Signature + (Loud ? 1 : 0) + SignatureBonus + MovementSignatureModifier;
         public int EffectiveCommand => Math.Max(0, Ratings.Command + CommandBonus - (HasEffect("X-05") ? 1 : 0) - (HasEffect("X-12") ? 1 : 0));
         public bool CanHeavySalvo => !WeaponExpended && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect("X-04") && !HasEffect("X-11");
         public bool HasEffect(string id)
@@ -148,10 +150,11 @@ namespace SeaOfUncertainty.Core
         public LocationQuality Location;
         public IdentityQuality Identity;
         public int Age;
+        public int MovementUncertainty;
         public bool IsFalse;
         public bool IsLost;
 
-        public string Summary => IsLost ? "LOST" : $"{Location} / {Identity} / AGE {Math.Min(Age, 3)}{(Age >= 3 ? "+" : string.Empty)}";
+        public string Summary => IsLost ? "LOST" : $"{Location} / {Identity} / AGE {Math.Min(Age, 3)}{(Age >= 3 ? "+" : string.Empty)} / AREA R{Rules.ContactUncertaintyRadius(this)}";
     }
 
     [Serializable]
@@ -171,6 +174,14 @@ namespace SeaOfUncertainty.Core
         public int CommandSlots = 3;
         public int CommandStrain;
         public List<CommandSlotState> SlotStates = new List<CommandSlotState>();
+    }
+
+    [Serializable]
+    public sealed class OperationalLogEntry
+    {
+        public string Text;
+        public bool IsPrivate;
+        public Side Audience;
     }
 
     [Serializable]
@@ -208,6 +219,12 @@ namespace SeaOfUncertainty.Core
         public static int SearchModifier(SearchMode mode) => mode == SearchMode.Passive ? 0 : mode == SearchMode.Active ? 1 : 2;
         public static int SearchRange(SearchMode mode) => mode == SearchMode.Passive ? 8 : mode == SearchMode.Active ? 10 : 12;
         public const int SearchAreaRadius = 1;
+        public static int ContactUncertaintyRadius(ContactState contact)
+        {
+            if (contact == null) return 0;
+            int qualityRadius = contact.Location == LocationQuality.High ? 0 : contact.Location == LocationQuality.Medium ? 1 : 2;
+            return qualityRadius + Math.Min(2, Math.Max(contact.Age, contact.MovementUncertainty));
+        }
         public static int SalvoModifier(Salvo salvo) => salvo == Salvo.Light ? 0 : salvo == Salvo.Standard ? 1 : 2;
         public static int StrikeRange(FormationKind kind, Salvo salvo)
         {
@@ -269,6 +286,7 @@ namespace SeaOfUncertainty.Core
 
         public const int PatrolRadius = 1;
         public const int SupportRange = 2;
+        public const int ControlRadius = 1;
         public static int ActionTime(ActionKind action) => action == ActionKind.Patrol || action == ActionKind.Support || action == ActionKind.Hold ? 1 : action == ActionKind.Replenish ? 3 : 2;
     }
 }

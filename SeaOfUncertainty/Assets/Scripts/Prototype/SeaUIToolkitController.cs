@@ -22,6 +22,7 @@ namespace SeaOfUncertainty.Prototype
         private ToolkitActionMode actionMode;
         private MoveMode moveMode = MoveMode.Normal;
         private SearchMode searchMode = SearchMode.Passive;
+        private SearchPriority searchPriority = SearchPriority.Location;
         private Salvo salvo = Salvo.Standard;
         private Side previousSide;
         private bool aiRunning;
@@ -395,7 +396,10 @@ namespace SeaOfUncertainty.Prototype
             else if (actionMode == ToolkitActionMode.Search)
             {
                 int scale = backend.Game.Area.NauticalMilesPerHex;
-                modes.Add(ModeButton($"PASSIVE • +0 / {Rules.SearchRange(SearchMode.Passive) * scale} NM", SearchMode.Passive)); modes.Add(ModeButton($"ACTIVE • +1 / {Rules.SearchRange(SearchMode.Active) * scale} NM LOUD", SearchMode.Active)); modes.Add(ModeButton($"FOCUSED • +2 / {Rules.SearchRange(SearchMode.Focused) * scale} NM / 1◆", SearchMode.Focused));
+                FormationState active = backend.Game.Active;
+                modes.Add(ModeButton($"PASSIVE • +0 / {backend.Game.SearchRangeFor(active, SearchMode.Passive) * scale} NM", SearchMode.Passive)); modes.Add(ModeButton($"ACTIVE • +1 / {backend.Game.SearchRangeFor(active, SearchMode.Active) * scale} NM LOUD", SearchMode.Active)); modes.Add(ModeButton($"FOCUSED • +2 / {backend.Game.SearchRangeFor(active, SearchMode.Focused) * scale} NM / 1◆", SearchMode.Focused));
+                modes.Add(ModeButton("IMPROVE LOCATION", SearchPriority.Location));
+                modes.Add(ModeButton("IMPROVE IDENTITY", SearchPriority.Identity));
             }
             else if (actionMode == ToolkitActionMode.Strike)
             {
@@ -417,7 +421,7 @@ namespace SeaOfUncertainty.Prototype
             header.Add(El("spacer"));
             header.Add(ActionButton("INSPECT", ShowEventInspector));
             panel.Add(header);
-            foreach (string entry in backend.Game.Log.Take(4)) panel.Add(Text(entry, "muted"));
+            foreach (string entry in backend.Game.VisibleLog(backend.Game.Active.Side).Take(4)) panel.Add(Text(entry, "muted"));
             return panel;
         }
 
@@ -509,18 +513,18 @@ namespace SeaOfUncertainty.Prototype
             {
                 FormationState target = backend.Game.Find(contact.TargetId);
                 dossier.Add(Text("PRE-COMMITMENT PREVIEW", "eyebrow"));
-                dossier.Add(Text(contact.Identity == IdentityQuality.Identified ? target.Name.ToUpperInvariant() : "UNRESOLVED CONTACT", "heading"));
+                dossier.Add(Text(contact.Identity == IdentityQuality.Identified && target != null ? target.Name.ToUpperInvariant() : "UNRESOLVED CONTACT", "heading"));
                 dossier.Add(Text(contact.Summary + "\nLAST KNOWN " + contact.LastKnownPosition, "body-copy"));
                 if (actionMode == ToolkitActionMode.Search)
                 {
                     int centerRange = HexCoord.Distance(backend.Game.Active.Position, contact.LastKnownPosition);
-                    dossier.Add(Text($"AREA CENTER {contact.LastKnownPosition}\nCENTER RANGE {centerRange} / {Rules.SearchRange(searchMode)}\nFOOTPRINT RADIUS {Rules.SearchAreaRadius}\nSEARCH {backend.Game.Active.EffectiveSearch}\nMODE {backend.Game.SearchModifierFor(backend.Game.Active, searchMode):+0;-0;0}\n\nHidden Signature, Loud status, and exact position resolve privately.", "body-copy"));
+                    dossier.Add(Text($"AREA CENTER {contact.LastKnownPosition}\nCENTER RANGE {centerRange} / {backend.Game.SearchRangeFor(backend.Game.Active, searchMode)}\nFOOTPRINT RADIUS {Rules.SearchAreaRadius}\nIMPROVEMENT PRIORITY {searchPriority.ToString().ToUpperInvariant()}\nSEARCH {backend.Game.Active.EffectiveSearch}\nMODE {backend.Game.SearchModifierFor(backend.Game.Active, searchMode):+0;-0;0}\n\nHidden Signature, Loud status, and exact position resolve privately.", "body-copy"));
                 }
                 else if (actionMode == ToolkitActionMode.Strike)
                 {
-                    if (target == null)
+                    if (contact.Identity != IdentityQuality.Identified || target == null)
                     {
-                        dossier.Add(Text("This possible Contact has no confirmed target. Search its last-known area before committing a Strike.", "body-copy", "amber"));
+                        dossier.Add(Text($"ATTACK {backend.Game.Active.EffectiveStrike + Rules.SalvoModifier(salvo) + Rules.TargetingModifier(contact, backend.Game.AgeTwoTargetingPenalty)}\nDEFENSE UNRESOLVED\n\nIndividual Strike commitment requires an Identified Contact. Search this possible area to improve Identity; no preview tests hidden target state.", "body-copy", "amber"));
                         return;
                     }
                     int attack = backend.Game.Active.EffectiveStrike + Rules.SalvoModifier(salvo) + backend.Game.PendingSupportBonus(backend.Game.Active, SupportKind.Strike) + Rules.TargetingModifier(contact, backend.Game.AgeTwoTargetingPenalty);
@@ -782,12 +786,13 @@ namespace SeaOfUncertainty.Prototype
 
         private Button ModeButton(string text, MoveMode mode) => ActionButton(text, () => { moveMode = mode; backend.ToolkitRecordChoice("Move", mode.ToString()); ShowGame(); }, moveMode == mode ? "selected" : null);
         private Button ModeButton(string text, SearchMode mode) => ActionButton(text, () => { searchMode = mode; backend.ToolkitRecordChoice("Search", mode.ToString()); ShowGame(); }, searchMode == mode ? "selected" : null);
+        private Button ModeButton(string text, SearchPriority priority) => ActionButton(text, () => { searchPriority = priority; backend.ToolkitRecordChoice("Search priority", priority.ToString()); ShowGame(); }, searchPriority == priority ? "selected" : null);
         private Button ModeButton(string text, Salvo mode) => ActionButton(text, () => { salvo = mode; backend.ToolkitRecordChoice("Strike", mode.ToString()); ShowGame(); }, salvo == mode ? "selected" : null);
 
         private void OnHexChosen(HexCoord hex)
         {
             if (actionMode == ToolkitActionMode.Move) ResolveAction(() => backend.ToolkitMove(hex, moveMode));
-            else if (actionMode == ToolkitActionMode.Search) ResolveAction(() => backend.ToolkitSearchHex(hex, searchMode));
+            else if (actionMode == ToolkitActionMode.Search) ResolveAction(() => backend.ToolkitSearchHex(hex, searchMode, searchPriority));
         }
 
         private void OnContactChosen(ContactState contact)
@@ -795,12 +800,12 @@ namespace SeaOfUncertainty.Prototype
             FormationState target = backend.Game.Find(contact.TargetId);
             if (actionMode == ToolkitActionMode.Search)
             {
-                if (target == null) ResolveAction(() => backend.ToolkitSearchHex(contact.LastKnownPosition, searchMode));
-                else ResolveAction(() => backend.ToolkitSearch(target, searchMode));
+                if (target == null) ResolveAction(() => backend.ToolkitSearchHex(contact.LastKnownPosition, searchMode, searchPriority));
+                else ResolveAction(() => backend.ToolkitSearch(target, searchMode, searchPriority));
             }
             else if (actionMode == ToolkitActionMode.Strike)
             {
-                if (target == null) { UpdateDossier(contact); return; }
+                if (target == null || contact.Identity != IdentityQuality.Identified) { UpdateDossier(contact); return; }
                 if (salvo == Salvo.Heavy) ConfirmHeavy(target); else BeginStrikeReaction(target, salvo);
             }
         }
@@ -945,6 +950,7 @@ namespace SeaOfUncertainty.Prototype
             FormationState active = backend.Game.Active;
             int friction = active.Friction || actionMode == ToolkitActionMode.Move && moveMode == MoveMode.HighTempo ? 1 : 0;
             string consequence = actionMode == ToolkitActionMode.Move ? (moveMode == MoveMode.Cautious ? "Signature −1" : moveMode == MoveMode.HighTempo ? "Signature +1 • mark Friction" : "balanced movement") : actionMode == ToolkitActionMode.Search ? (searchMode == SearchMode.Active ? "become Loud" : searchMode == SearchMode.Focused ? "temporarily occupy 1 Command" : "remain quiet") : salvo == Salvo.Heavy ? "expend Heavy capability" : $"Attack {Rules.SalvoModifier(salvo):+0;-0;0}";
+            if (actionMode == ToolkitActionMode.Search) consequence += $"; improve {searchPriority} first; one step maximum";
             ActionKind previewAction = actionMode == ToolkitActionMode.Move ? ActionKind.Move : actionMode == ToolkitActionMode.Search ? ActionKind.Search : ActionKind.Strike;
             ActionKind? triggeredTask = backend.Game.TriggeredMissionFor(active);
             consequence += backend.Game.ActionFollowsMission(active, previewAction) ? " • follows Standing Mission • no Command Attention" : triggeredTask == previewAction ? " • Trigger authorized • no Command Attention" : " • immediate retask • occupy 1 Command Slot through resolution";
@@ -1001,7 +1007,8 @@ namespace SeaOfUncertainty.Prototype
         private void ShowRules()
         {
             VisualElement modal = Modal("FIELD MANUAL");
-            modal.Add(Text("COMMAND MODES\nSolo vs AI assigns Blue to the player and Red to the deterministic OPFOR commander. Local Hotseat uses secure handoffs between two players. Both modes use identical rules and Ready-Time sequencing.\n\nSCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nMAP CAMERA\nWASD moves with smooth acceleration; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. C focuses the active formation, O focuses the objective, V toggles optional edge scrolling, and F9/F10 save/recall a command view. Middle-drag pans, right-drag freely orbits, and the wheel zooms.\n\nMAP GRID\nUse HEXES OFF / HEXES ON in the command bar, or press G, to toggle the persistent hex overlay. The preference is saved between sessions.\n\nREADY TIME\nThere are no player turns. The earliest formation acts. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable formation order. If only one side is Ready, it continues.\n\nSTANDING MISSIONS\nEach Formation tracks a current Mission task. Rapid Replan changes that task without occupying Command and adds +1 Time when the Formation next schedules Ready.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Littoral adds one Ready-Time.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE AND REACTION\nAfter a Strike is committed and before the roll, an eligible defender chooses one Reaction. Defend adds +1 Defense. Evade adds +1 Defense and moves one valid hex away after combat. Counterattack makes one Light return Strike if the defender has a usable Contact and is capable. Hold preserves position with no modifier. A Reaction does not change Ready Time, is spent once used, and refreshes after that Formation completes its own Action. Disrupted and Crippled formations cannot Counterattack; replenishing formations cannot react. Local Hotseat uses a secure defender handoff. Solo pauses for a human defender and lets the AI choose for its own formation. Orderly Withdrawal extends one Evade to two hexes.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY AND CARD HAND\nEvery Entropy event draws a physical card, even if that source is already marked. Attached effects stack and appear with Command Responses in the active side's Card Hand at the bottom of the interface. Recover selects and discards one Friction or Disruption card; a source remains marked while another matching card remains. Destruction cards await repair or reorganization.", "body-copy"));
+            modal.Add(Text("COMMAND MODES\nSolo vs AI assigns Blue to the player and Red to the deterministic OPFOR commander. Local Hotseat uses secure handoffs between two players. Both modes use identical rules and Ready-Time sequencing.\n\nSCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nMAP CAMERA\nWASD moves with smooth acceleration; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. C focuses the active formation, O focuses the objective, V toggles optional edge scrolling, and F9/F10 save/recall a command view. Middle-drag pans, right-drag freely orbits, and the wheel zooms.\n\nMAP GRID\nUse HEXES OFF / HEXES ON in the command bar, or press G, to toggle the persistent hex overlay. The preference is saved between sessions.\n\nREADY TIME\nThere are no player turns. The earliest formation acts. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable formation order. If only one side is Ready, it continues.\n\nSTANDING MISSIONS\nEach Formation tracks a current Mission task. Rapid Replan changes that task without occupying Command and adds +1 Time when the Formation next schedules Ready.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Cautious gives Signature -1; High Tempo makes the Formation Loud; either lasts until that Formation completes its next Action. Routes cannot cross Land or restricted areas, and a naval Formation entering a Strait must stop. Littoral anywhere on the route adds one Ready-Time. One friendly Formation may end in a hex; opposing Formations may coexist without revealing hidden positions.\n\nCONTROL\nA combat-capable non-air Formation controls an objective within one hex unless the opponent has a qualifying Formation there too. Control is adjudicated from actual positions only for final scoring; the live map does not reveal hidden enemy presence.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE AND REACTION\nAfter a Strike is committed and before the roll, an eligible defender chooses one Reaction. Defend adds +1 Defense. Evade adds +1 Defense and moves one valid hex away after combat. Counterattack makes one Light return Strike if the defender has a usable Contact and is capable. Hold preserves position with no modifier. A Reaction does not change Ready Time, is spent once used, and refreshes after that Formation completes its own Action. Disrupted and Crippled formations cannot Counterattack; replenishing formations cannot react. Local Hotseat uses a secure defender handoff. Solo pauses for a human defender and lets the AI choose for its own formation. Orderly Withdrawal extends one Evade to two hexes.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY AND CARD HAND\nEvery Entropy event draws a physical card, even if that source is already marked. Attached effects stack and appear with Command Responses in the active side's Card Hand at the bottom of the interface. Recover selects and discards one Friction or Disruption card; a source remains marked while another matching card remains. Destruction cards await repair or reorganization.", "body-copy"));
+            modal.Add(Text("SEARCH SPATIAL UPDATE\nThe distances above are the carrier baseline; the live commitment buttons show the active formation's scenario-defined sensor envelope. Declare Location or Identity priority before Search. At Age 0, High/Medium/Low Location covers radius 0/1/2; Age or tracked movement adds up to two rings. Search can privately disprove False Contacts. Individual Strikes currently require Identified Identity.", "body-copy", "amber"));
             modal.Add(ActionButton("CLOSE", CloseOverlay, "primary"));
         }
 
@@ -1010,7 +1017,7 @@ namespace SeaOfUncertainty.Prototype
             VisualElement modal = Modal("EVENT INSPECTOR");
             ScrollView scroll = new ScrollView();
             scroll.AddToClassList("scroll");
-            foreach (string entry in backend.Game.Log) scroll.Add(Text(entry, "body-copy"));
+            foreach (string entry in backend.Game.VisibleLog(backend.Game.Active.Side)) scroll.Add(Text(entry, "body-copy"));
             modal.Add(scroll);
             modal.Add(ActionButton("CLOSE", CloseOverlay, "primary"));
         }

@@ -117,8 +117,9 @@ namespace SeaOfUncertainty.Prototype
                 FormationState target = game.Find(contact.TargetId);
                 Label marker = Marker(contact.LastKnownPosition, contact.Identity == IdentityQuality.Identified && target != null ? Code(target.Kind) : "?", "map-marker", "contact");
                 if (eligible) marker.AddToClassList("eligible");
-                int rings = contact.Location == LocationQuality.High ? 1 : contact.Location == LocationQuality.Medium ? 2 : 3;
-                marker.tooltip = $"{contact.Summary}\nLast known {contact.LastKnownPosition}\n{rings} uncertainty ring{(rings == 1 ? string.Empty : "s")} • Age expands the estimate\n{(eligible ? "Eligible — click to commit" : "Not eligible for selected action")}";
+                int radius = Rules.ContactUncertaintyRadius(contact);
+                int possibleHexes = game.ContactPossibleHexes(contact).Count;
+                marker.tooltip = $"{contact.Summary}\nLast known {contact.LastKnownPosition}\nPossible area: {possibleHexes} hex{(possibleHexes == 1 ? string.Empty : "es")} within radius {radius} • Age or observed movement expands the estimate\n{(eligible ? "Eligible — click to commit" : "Not eligible for selected action")}";
             }
         }
 
@@ -357,12 +358,12 @@ namespace SeaOfUncertainty.Prototype
 
         private bool StrikeEligible(ContactState contact)
         {
-            if (game?.Active == null || contact == null) return false;
+            if (game?.Active == null || contact == null || contact.Identity != IdentityQuality.Identified) return false;
             if (HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) > Rules.StrikeRange(game.Active.Kind, salvo)) return false;
             return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
         }
 
-        private bool SearchEligible(ContactState contact) => game?.Active != null && contact != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= Rules.SearchRange(searchMode);
+        private bool SearchEligible(ContactState contact) => game?.Active != null && contact != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= game.SearchRangeFor(game.Active, searchMode);
 
         private static string Code(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SG" : kind == FormationKind.Submarine ? "SS" : "AG";
     }

@@ -1,6 +1,6 @@
 # Sea of Uncertainty - Definitive TODO
 
-Last audited against the repository: **2026-09-02**
+Last audited against the repository: **2026-09-08**
 Unity baseline: **6000.2.12f1**
 
 This is the single authoritative project backlog. Design notes explain intent, but work is planned and tracked here.
@@ -107,9 +107,9 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Reject non-air movement ending on Land and add the current Littoral Ready-Time cost.
 - [x] Make High Tempo Loud, mark Friction, and apply supported Endurance/card consequences.
 - [x] Highlight legal destinations and preview path, distance, and time cost in 3D.
-- [ ] **Decision:** Finalize Cautious and High Tempo Signature duration.
-- [ ] **Decision:** Define straits, restricted movement, stacking, friendly occupancy, and enemy occupancy.
-- [ ] Implement route legality rather than validating only the destination hex.
+- [x] **Decision:** Cautious Signature -1 and High Tempo Loud persist until the formation completes its next Action.
+- [x] **Decision:** Straits stop non-air movement on entry; restricted areas are impassable; one friendly formation may end per hex; hidden enemies may coexist without blocking movement; combat-capable non-air formations control within one hex unless contested.
+- [x] Implement deterministic route legality, route previews, Littoral route cost, Strait stopping, restricted areas, friendly stacking, fog-safe enemy co-occupancy, and objective control.
 - [ ] Implement weather and sea-state movement effects after playtesting earns them.
 
 ### Search and spatial uncertainty
@@ -121,13 +121,13 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Apply the optional Age-2 targeting penalty.
 - [x] Display Search calculation, legal area, range, and success threshold before commitment.
 - [x] Prevent enemy identities and exact positions from leaking through failed Search or previews covered by automated tests.
-- [ ] **Decision:** Define High, Medium, and Low Location geometrically.
-- [ ] **Decision:** Decide who chooses a successful Search improvement and whether excess success grants multiple steps.
-- [ ] **Decision:** Finalize Contact aging/degradation timing.
-- [ ] Implement Medium and Low uncertainty geometry and expansion as targets move or Contacts age.
-- [ ] Add sensor- and scenario-specific maximum ranges.
-- [ ] Define and implement False Contact disproof.
-- [ ] Complete an information-leak audit for every action and card path.
+- [x] **Decision:** At Age 0, High is one exact hex, Medium is radius one, and Low is radius two; Age or observed movement adds up to two anonymous rings.
+- [x] **Decision:** The searching player declares Location or Identity priority before resolution; success improves one step per Contact and excess success grants no extra steps.
+- [x] **Decision:** Age advances only with elapsed operational Time; Location degrades on reaching Age 3 and once per further elapsed Time, with Low becoming Lost.
+- [x] Implement discrete possible-hex geometry, boundary clipping, and anonymous expansion as targets move or Contacts age.
+- [x] Add data-driven formation-sensor and scenario-specific maximum ranges.
+- [x] Define and implement private Search-based False Contact disproof with indistinguishable undisproved presentation.
+- [x] Complete and test the information-discipline audit for maps, previews, actions, cards, AI, operational logs, and save/load.
 
 ### Strike, combat, and damage
 

@@ -138,6 +138,7 @@ namespace SeaOfUncertainty.Editor
             }
             withdrawalContact.LastKnownPosition = withdrawalTarget.Position;
             withdrawalContact.Location = LocationQuality.High;
+            withdrawalContact.Identity = IdentityQuality.Identified;
             ContactState withdrawalThreatContact = withdrawalGame.ContactFor(withdrawalTarget.Side, withdrawalAttacker.Id);
             if (withdrawalThreatContact == null)
             {
@@ -626,6 +627,7 @@ namespace SeaOfUncertainty.Editor
                 Assert(!operationalMap.PermanentGridVisible, "Optional permanent hex grid can be disabled");
                 game.Contacts.Add(new ContactState { Owner = game.Active.Side, TargetId = "FALSE-TEST", LastKnownPosition = new HexCoord(4, 4), Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 3, IsFalse = true });
                 operationalMap.SetState(game, ToolkitActionMode.Search, MoveMode.Normal, SearchMode.Focused, Salvo.Standard);
+                Assert(!operationalMap.ContainsRenderedName("False Contact"), "Undisproved False Contacts use the same map presentation as real Contacts");
                 game.Contacts.RemoveAll(contact => contact.TargetId == "FALSE-TEST");
                 if (game.Contacts.Count > baselineContactCount) game.Contacts.RemoveRange(baselineContactCount, game.Contacts.Count - baselineContactCount);
                 operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
@@ -669,6 +671,8 @@ namespace SeaOfUncertainty.Editor
             Assert(emptySearchGame.SearchArea(emptySearcher, emptySearcher.Position, SearchMode.Passive, out string emptySearchMessage), "An empty area is a legal Search: " + emptySearchMessage);
             Assert(emptySearchMessage.Contains("no detections"), "Empty Search reports no detections without exposing hidden formations");
             Assert(!emptySearchMessage.Contains("Tempest") && !emptySearchMessage.Contains("Ember") && !emptySearchMessage.Contains("Hunter"), "Failed Search does not leak enemy identities");
+            Side emptyEnemySide = emptySearcher.Side == Side.Blue ? Side.Red : Side.Blue;
+            Assert(emptySearchGame.VisibleLog(emptySearcher.Side).Any(entry => entry.Contains("searched area")) && !emptySearchGame.VisibleLog(emptyEnemySide).Any(entry => entry.Contains(emptySearcher.Name) || entry.Contains("searched area")), "Search outcomes and exact areas remain private to the searching side");
             Assert(emptySearcher.ReadyTime > emptySearchReadyBefore && emptySearchGame.Active != emptySearcher, "Empty Search consumes time and advances to the next Ready formation");
 
             var discoveryGame = new PrototypeGame();
@@ -693,6 +697,59 @@ namespace SeaOfUncertainty.Editor
             Assert(focusedSearchGame.SearchArea(focusedSearcher, focusedSearcher.Position, SearchMode.Focused, out string focusedMessage), "Focused area Search resolves: " + focusedMessage);
             Assert(focusedSearchGame.Sides[focusedSearcher.Side].CommandSlots == commandBefore, "Focused Search releases its temporary Command Slot after resolution");
 
+            var prioritySearchGame = new PrototypeGame();
+            prioritySearchGame.Contacts.Clear();
+            FormationState prioritySearcher = prioritySearchGame.Active;
+            FormationState priorityTarget = prioritySearchGame.Formations.First(formation => formation.Side != prioritySearcher.Side);
+            priorityTarget.Position = new HexCoord(prioritySearcher.Position.Q + 1, prioritySearcher.Position.R);
+            priorityTarget.Ratings.Signature = 20;
+            var priorityContact = new ContactState { Owner = prioritySearcher.Side, TargetId = priorityTarget.Id, LastKnownPosition = priorityTarget.Position, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown };
+            prioritySearchGame.Contacts.Add(priorityContact);
+            Assert(prioritySearchGame.SearchArea(prioritySearcher, priorityTarget.Position, SearchMode.Passive, SearchPriority.Identity, out string priorityMessage), "Search resolves with a declared improvement priority: " + priorityMessage);
+            Assert(priorityContact.Location == LocationQuality.Low && priorityContact.Identity == IdentityQuality.General, "A successful Search improves the chosen axis by exactly one step even with excess success");
+
+            var falseSearchGame = new PrototypeGame();
+            falseSearchGame.Contacts.Clear();
+            FormationState falseSearcher = falseSearchGame.Active;
+            falseSearcher.Ratings.Search = 20;
+            var falseContact = new ContactState { Owner = falseSearcher.Side, TargetId = "FALSE-TEST", LastKnownPosition = falseSearcher.Position, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, IsFalse = true };
+            falseSearchGame.Contacts.Add(falseContact);
+            Assert(falseSearchGame.SearchArea(falseSearcher, falseSearcher.Position, SearchMode.Passive, SearchPriority.Location, out string falseSearchMessage) && falseContact.IsLost && falseSearchMessage.Contains("disproved"), "A successful Search of a False Contact's area disproves it");
+
+            var geometryGame = new PrototypeGame();
+            var highContact = new ContactState { Owner = Side.Blue, TargetId = "GEOMETRY", LastKnownPosition = geometryGame.Area.Objective, Location = LocationQuality.High, Identity = IdentityQuality.Unknown };
+            Assert(Rules.ContactUncertaintyRadius(highContact) == 0 && geometryGame.ContactPossibleHexes(highContact).Count == 1, "High Location at Age 0 is one exact hex");
+            highContact.Location = LocationQuality.Medium;
+            Assert(Rules.ContactUncertaintyRadius(highContact) == 1 && geometryGame.ContactPossibleHexes(highContact).Count == 7, "Medium Location at Age 0 is a radius-one seven-hex area");
+            highContact.Location = LocationQuality.Low;
+            Assert(Rules.ContactUncertaintyRadius(highContact) == 2 && geometryGame.ContactPossibleHexes(highContact).Count == 19, "Low Location at Age 0 is a radius-two nineteen-hex area");
+            highContact.Location = LocationQuality.High;
+            highContact.Age = 1;
+            Assert(Rules.ContactUncertaintyRadius(highContact) == 1, "Elapsed Contact Age expands uncertainty by one ring");
+            highContact.Age = 0;
+            highContact.MovementUncertainty = 1;
+            Assert(Rules.ContactUncertaintyRadius(highContact) == 1, "Observed target movement expands uncertainty without exposing direction or distance");
+
+            var movementContactGame = new PrototypeGame();
+            FormationState trackedMover = movementContactGame.Active;
+            var trackingContact = new ContactState { Owner = trackedMover.Side == Side.Blue ? Side.Red : Side.Blue, TargetId = trackedMover.Id, LastKnownPosition = trackedMover.Position, Location = LocationQuality.High };
+            movementContactGame.Contacts.Add(trackingContact);
+            Assert(movementContactGame.Move(trackedMover, movementContactGame.LegalMoveDestinations(trackedMover, MoveMode.Cautious).First(), MoveMode.Cautious, out _) && trackingContact.MovementUncertainty == 1, "A tracked Formation's Move expands the opposing Contact by one anonymous ring");
+
+            var agingGame = new PrototypeGame();
+            agingGame.Contacts.Clear();
+            FormationState agingActor = agingGame.Active;
+            foreach (FormationState formation in agingGame.Formations) formation.ReadyTime = formation == agingActor ? 0 : 10;
+            var agingContact = new ContactState { Owner = agingActor.Side, TargetId = "AGING", LastKnownPosition = agingGame.Area.Objective, Location = LocationQuality.Medium, Identity = IdentityQuality.Unknown, Age = 2 };
+            agingGame.Contacts.Add(agingContact);
+            Assert(agingGame.Hold(agingActor, out _) && agingContact.Age == 3 && agingContact.Location == LocationQuality.Low, "Contact Age advances only with operational Time and degrades once on reaching Age 3");
+            Assert(agingGame.Hold(agingActor, out _) && agingContact.Age == 4 && agingContact.IsLost, "Each further elapsed Time degrades again and Low Location becomes Lost");
+
+            FormationState surfaceSensor = prioritySearchGame.Formations.First(formation => formation.Side == prioritySearcher.Side && formation.Kind == FormationKind.SurfaceGroup);
+            Assert(prioritySearchGame.SearchRangeFor(surfaceSensor, SearchMode.Passive) == 7 && prioritySearchGame.SearchRangeFor(surfaceSensor, SearchMode.Focused) == 11, "Surface sensor profile supplies scenario-specific Search ranges");
+            FormationState airSensor = prioritySearchGame.Formations.First(formation => formation.Side == prioritySearcher.Side && formation.Kind == FormationKind.AirGroup);
+            Assert(prioritySearchGame.SearchRangeFor(airSensor, SearchMode.Focused) == 14, "Air sensor profile has a distinct scenario-specific maximum range");
+
             string saveJson = JsonUtility.ToJson(game.CaptureState());
             var saveData = JsonUtility.FromJson<PrototypeGame.SaveData>(saveJson);
             var restored = new PrototypeGame();
@@ -701,7 +758,8 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.Active != null && restored.Active.Id == game.Active.Id, "Save restores active formation");
             Assert(restored.Formations.Count == game.Formations.Count, "Save restores formations");
             Assert(restored.Contacts.Count == game.Contacts.Count, "Save restores Contacts");
-            Assert(saveData.Version == 6 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 6 save preserves stable IDs, Entropy decks, Response hands, Command Slots, and Standing Missions");
+            Assert(saveData.Version == 7 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 7 save preserves stable IDs, Entropy decks, Response hands, Command Slots, Standing Missions, uncertainty, and private logs");
+            Assert(restored.LogEntries.Count == game.LogEntries.Count, "Save restores side-scoped operational log visibility");
             Assert(restored.EntropyDecks.Count == 3 && restored.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count) == game.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count), "Save restores Entropy deck state");
             Assert(restored.CommandResponseDecks.Count == 2 && restored.CommandResponseDecks.All(deck => deck.Hand.Count == 3), "Save restores both private Command Response hands");
             Assert(saveData.HasLastActingSide && restored.LastActingSide == saveData.LastActingSide, "Save restores continuous-activation tie priority");
@@ -751,6 +809,73 @@ namespace SeaOfUncertainty.Editor
             FormationState surface = terrainGame.Active;
             surface.Position = new HexCoord(0, 5);
             Assert(!terrainGame.Move(surface, new HexCoord(0, 3), MoveMode.HighTempo, out string landMessage) && landMessage.Contains("Land"), "Non-air movement cannot end on land");
+
+            var routeGame = new PrototypeGame();
+            FormationState routeMover = routeGame.Active;
+            routeMover.Position = new HexCoord(3, 3);
+            routeGame.Area.RestrictedAreas.Add(new OperationalRegionDefinition
+            {
+                Id = "route-test-barrier",
+                Name = "Route Test Barrier",
+                Hexes = Enumerable.Range(0, routeGame.Area.Height).Select(r => new HexCoord(4, r)).ToList()
+            });
+            Assert(!routeGame.Move(routeMover, new HexCoord(5, 3), MoveMode.HighTempo, out string routeMessage) && routeMessage.Contains("No legal route"), "Movement validates the complete route rather than only its destination");
+
+            var straitGame = new PrototypeGame();
+            FormationState straitMover = straitGame.Active;
+            straitMover.Position = new HexCoord(3, 3);
+            HexCoord straitDestination = new HexCoord(5, 3);
+            List<HexCoord> straitGate = Enumerable.Range(0, straitGame.Area.Width)
+                .SelectMany(q => Enumerable.Range(0, straitGame.Area.Height).Select(r => new HexCoord(q, r)))
+                .Where(hex => HexCoord.Distance(straitMover.Position, hex) == 1)
+                .ToList();
+            foreach (HexCoord hex in straitGate)
+            {
+                straitGame.Area.Terrain.RemoveAll(item => item.Hex.Equals(hex));
+                straitGame.Area.Terrain.Add(new TerrainHexDefinition { Q = hex.Q, R = hex.R, Terrain = OperationalTerrain.Strait, Name = "Test Strait" });
+            }
+            Assert(straitGate.Count > 0 && !straitGame.Move(straitMover, straitDestination, MoveMode.HighTempo, out string straitMessage) && straitMessage.Contains("intervening Straits"), "A naval Formation entering a Strait must end its Move there");
+
+            var occupancyGame = new PrototypeGame();
+            FormationState occupancyMover = occupancyGame.Active;
+            HexCoord occupiedHex = Enumerable.Range(0, occupancyGame.Area.Width)
+                .SelectMany(q => Enumerable.Range(0, occupancyGame.Area.Height).Select(r => new HexCoord(q, r)))
+                .First(hex => occupancyGame.Area.Contains(hex) && occupancyGame.Area.TerrainAt(hex) != OperationalTerrain.Land && HexCoord.Distance(occupancyMover.Position, hex) == 1);
+            FormationState friendlyOccupant = occupancyGame.Formations.First(candidate => candidate.Side == occupancyMover.Side && candidate != occupancyMover);
+            friendlyOccupant.Position = occupiedHex;
+            Assert(!occupancyGame.Move(occupancyMover, occupiedHex, MoveMode.Cautious, out string stackingMessage) && stackingMessage.Contains("one friendly Formation"), "Friendly Formations may pass through but may not end stacked in one hex");
+            friendlyOccupant.Position = new HexCoord(0, 9);
+            FormationState hiddenEnemyOccupant = occupancyGame.Formations.First(candidate => candidate.Side != occupancyMover.Side);
+            hiddenEnemyOccupant.Position = occupiedHex;
+            int baseSignature = occupancyMover.Ratings.Signature;
+            Assert(occupancyGame.Move(occupancyMover, occupiedHex, MoveMode.Cautious, out string coexistMessage) && occupancyMover.Position.Equals(occupiedHex), "Opposing Formations may coexist in a 20 nm hex without hidden occupancy blocking movement: " + coexistMessage);
+            Assert(occupancyMover.EffectiveSignature == baseSignature - 1 && occupancyMover.MovementSignatureModifier == -1, "Cautious Signature -1 persists after movement");
+            int signatureGuard = 0;
+            while (occupancyGame.Active != occupancyMover && signatureGuard++ < 20) Assert(occupancyGame.Hold(occupancyGame.Active, out _), "Advance to the cautious mover's next Action");
+            Assert(occupancyGame.Active == occupancyMover && occupancyGame.Hold(occupancyMover, out _) && occupancyMover.MovementSignatureModifier == 0, "Cautious Signature expires when the Formation completes its next Action");
+
+            var loudGame = new PrototypeGame();
+            FormationState loudMover = loudGame.Active;
+            HexCoord loudDestination = loudGame.LegalMoveDestinations(loudMover, MoveMode.HighTempo).First();
+            Assert(loudGame.Move(loudMover, loudDestination, MoveMode.HighTempo, out _) && loudMover.Loud, "High Tempo remains Loud after movement");
+            int loudGuard = 0;
+            while (loudGame.Active != loudMover && loudGuard++ < 60) Assert(loudGame.Hold(loudGame.Active, out _), "Advance to the High Tempo mover's next Action");
+            Assert(loudGame.Active == loudMover, $"High Tempo mover becomes Ready again (guard {loudGuard}, Time {loudGame.Time})");
+            Assert(loudGame.Hold(loudMover, out string loudHoldMessage), "High Tempo mover may complete its next Action: " + loudHoldMessage);
+            Assert(!loudMover.Loud, "High Tempo Loud expires when the Formation completes its next Action");
+
+            var controlGame = new PrototypeGame();
+            foreach (FormationState formation in controlGame.Formations) formation.Position = formation.Side == Side.Blue ? new HexCoord(0, 8) : new HexCoord(11, 1);
+            FormationState blueController = controlGame.Formations.First(formation => formation.Side == Side.Blue && formation.Kind == FormationKind.SurfaceGroup);
+            FormationState redController = controlGame.Formations.First(formation => formation.Side == Side.Red && formation.Kind == FormationKind.SurfaceGroup);
+            FormationState redAir = controlGame.Formations.First(formation => formation.Side == Side.Red && formation.Kind == FormationKind.AirGroup);
+            blueController.Position = controlGame.Area.Objective;
+            redAir.Position = controlGame.Area.Objective;
+            Assert(controlGame.Controls(Side.Blue, controlGame.Area.Objective), "Air Groups do not establish or contest operational objective control");
+            redController.Position = controlGame.Area.Objective;
+            Assert(!controlGame.Controls(Side.Blue, controlGame.Area.Objective) && !controlGame.Controls(Side.Red, controlGame.Area.Objective), "Opposing combat-capable naval presence contests control");
+            redController.Damage = DamageState.Crippled;
+            Assert(controlGame.Controls(Side.Blue, controlGame.Area.Objective), "Crippled Formations do not establish or contest control");
 
             var recorder = new PlaytestRecorder();
             recorder.StartNew(restored);

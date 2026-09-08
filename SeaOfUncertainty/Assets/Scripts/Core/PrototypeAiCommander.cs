@@ -63,7 +63,7 @@ namespace SeaOfUncertainty.Core
             if (!actor.SupportActive && !actor.SupportBlockedUntilRecover && supportRecipient != null && actor.Kind == FormationKind.AirGroup && !actor.HasEffect("X-08"))
                 return new AiDecision { Action = ActionKind.Support, TargetId = supportRecipient.Id, SupportKind = SupportKind.Strike, Rationale = "Assign available air Support to the strongest nearby friendly striking formation." };
 
-            ContactState searchContact = contacts.FirstOrDefault(contact => HexCoord.Distance(actor.Position, contact.LastKnownPosition) <= Rules.SearchRange(actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active));
+            ContactState searchContact = contacts.FirstOrDefault(contact => HexCoord.Distance(actor.Position, contact.LastKnownPosition) <= game.SearchRangeFor(actor, actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active));
             if (searchContact != null && (actor.Kind == FormationKind.Submarine || actor.EffectiveSearch >= 3 || searchContact.Age > 0 || searchContact.Location < LocationQuality.High))
             {
                 bool needsFocused = actor.Kind != FormationKind.Submarine && game.Sides[actor.Side].CommandSlots > 0 && (searchContact.Age >= 2 || searchContact.Location == LocationQuality.Low);
@@ -78,7 +78,7 @@ namespace SeaOfUncertainty.Core
                 return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = PatrolPosture.Balanced, Rationale = "Screen the objective area with a persistent interception." };
 
             SearchMode fallbackMode = actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active;
-            HexCoord searchCenter = HexCoord.Distance(actor.Position, game.Area.Objective) <= Rules.SearchRange(fallbackMode) ? game.Area.Objective : actor.Position;
+            HexCoord searchCenter = HexCoord.Distance(actor.Position, game.Area.Objective) <= game.SearchRangeFor(actor, fallbackMode) ? game.Area.Objective : actor.Position;
             return new AiDecision { Action = ActionKind.Search, Hex = searchCenter, SearchMode = fallbackMode, Rationale = "Search the operational objective when no stronger Contact or movement opportunity exists." };
         }
 
@@ -130,21 +130,7 @@ namespace SeaOfUncertainty.Core
             int currentDistance = HexCoord.Distance(actor.Position, game.Area.Objective);
             if (currentDistance <= 1) return null;
             MoveMode mode = MoveMode.Normal;
-            int allowance = Rules.MoveAllowance(actor, mode);
-            var candidates = new List<HexCoord>();
-            for (int q = 0; q < game.Area.Width; q++)
-            {
-                for (int r = 0; r < game.Area.Height; r++)
-                {
-                    var candidate = new HexCoord(q, r);
-                    int movement = HexCoord.Distance(actor.Position, candidate);
-                    if (movement < 1 || movement > allowance) continue;
-                    OperationalTerrain terrain = game.Area.TerrainAt(candidate);
-                    if (terrain == OperationalTerrain.Land && actor.Kind != FormationKind.AirGroup) continue;
-                    if (game.Area.RestrictedAreas != null && game.Area.RestrictedAreas.Any(region => region.Hexes.Contains(candidate))) continue;
-                    candidates.Add(candidate);
-                }
-            }
+            List<HexCoord> candidates = game.LegalMoveDestinations(actor, mode).ToList();
             HexCoord destination = candidates
                 .OrderBy(candidate => HexCoord.Distance(candidate, game.Area.Objective))
                 .ThenBy(candidate => game.Area.TerrainAt(candidate) == OperationalTerrain.Littoral ? 1 : 0)
@@ -162,7 +148,7 @@ namespace SeaOfUncertainty.Core
                 case ActionKind.Move: return ChooseObjectiveMove(game, actor);
                 case ActionKind.Search:
                     SearchMode searchMode = actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active;
-                    HexCoord center = HexCoord.Distance(actor.Position, actor.MissionObjectiveHex) <= Rules.SearchRange(searchMode) ? actor.MissionObjectiveHex : actor.Position;
+                    HexCoord center = HexCoord.Distance(actor.Position, actor.MissionObjectiveHex) <= game.SearchRangeFor(actor, searchMode) ? actor.MissionObjectiveHex : actor.Position;
                     return new AiDecision { Action = ActionKind.Search, Hex = center, SearchMode = searchMode, Rationale = "No Command Attention is free; continue the assigned Standing Mission." };
                 case ActionKind.Strike:
                     ContactState target = contacts.FirstOrDefault(contact => game.Find(contact.TargetId) != null && SelectSalvo(actor, contact).HasValue);
@@ -180,6 +166,7 @@ namespace SeaOfUncertainty.Core
 
         private static Salvo? SelectSalvo(FormationState actor, ContactState contact)
         {
+            if (contact == null || contact.Identity != IdentityQuality.Identified) return null;
             int distance = HexCoord.Distance(actor.Position, contact.LastKnownPosition);
             bool heavyAvailable = contact.Identity == IdentityQuality.Identified && contact.Location == LocationQuality.High && actor.CanHeavySalvo;
             if (heavyAvailable && distance <= Rules.StrikeRange(actor.Kind, Salvo.Heavy)) return Salvo.Heavy;

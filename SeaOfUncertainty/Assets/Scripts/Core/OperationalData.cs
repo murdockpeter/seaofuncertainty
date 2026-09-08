@@ -73,7 +73,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class OperationalAreaDefinition
     {
-        public int SchemaVersion = 2;
+        public int SchemaVersion = 3;
         public string Id;
         public string DisplayName;
         public string Version;
@@ -125,9 +125,20 @@ namespace SeaOfUncertainty.Core
     }
 
     [Serializable]
+    public sealed class SensorRangeDefinition
+    {
+        public FormationKind Kind;
+        public int Passive;
+        public int Active;
+        public int Focused;
+
+        public int Range(SearchMode mode) => mode == SearchMode.Passive ? Passive : mode == SearchMode.Active ? Active : Focused;
+    }
+
+    [Serializable]
     public sealed class ScenarioDefinition
     {
-        public int SchemaVersion = 2;
+        public int SchemaVersion = 3;
         public string Id;
         public string DisplayName;
         public string Summary;
@@ -139,6 +150,7 @@ namespace SeaOfUncertainty.Core
         public OperationalAreaDefinition Area;
         public List<FormationDefinition> Formations = new List<FormationDefinition>();
         public List<ContactDefinition> Contacts = new List<ContactDefinition>();
+        public List<SensorRangeDefinition> SensorRanges = new List<SensorRangeDefinition>();
         public List<OperationalRegionDefinition> DeploymentRegions = new List<OperationalRegionDefinition>();
         public List<OperationalRegionDefinition> ReinforcementRegions = new List<OperationalRegionDefinition>();
         public List<OperationalRegionDefinition> ExitRegions = new List<OperationalRegionDefinition>();
@@ -199,6 +211,7 @@ namespace SeaOfUncertainty.Core
             AddFormation(scenario, "R-AG", "Air Group Ember", Side.Red, FormationKind.AirGroup, 8, 8, 1, 3, 3, 2, 3, 2, 2);
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Blue, TargetId = "R-SG", Q = 8, R = 3, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 2 });
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Red, TargetId = "B-CV", Q = 2, R = 4, Location = LocationQuality.Medium, Identity = IdentityQuality.General, Age = 1 });
+            AddPrototypeSensorRanges(scenario);
             return scenario;
         }
 
@@ -277,6 +290,7 @@ namespace SeaOfUncertainty.Core
             AddFormation(scenario, "R-AG-L", "Air Group Squall", Side.Red, FormationKind.AirGroup, 19, 10, 1, 3, 3, 2, 3, 2, 2);
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Blue, TargetId = "R-SG-L", Q = 17, R = 11, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 2 });
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Red, TargetId = "B-CV-L", Q = 6, R = 10, Location = LocationQuality.Low, Identity = IdentityQuality.General, Age = 2 });
+            AddPrototypeSensorRanges(scenario);
             return scenario;
         }
 
@@ -309,6 +323,16 @@ namespace SeaOfUncertainty.Core
                 Id = id, Name = name, Side = side, Kind = kind, Q = q, R = r, ReadyTime = ready,
                 Ratings = new Ratings { Move = move, Search = search, Signature = signature, Strike = strike, Defense = defense, Asw = 2, Command = command }
             });
+        }
+
+        public static void AddPrototypeSensorRanges(ScenarioDefinition scenario)
+        {
+            if (scenario.SensorRanges == null) scenario.SensorRanges = new List<SensorRangeDefinition>();
+            if (scenario.SensorRanges.Count > 0) return;
+            scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.CarrierGroup, Passive = 8, Active = 10, Focused = 12 });
+            scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.SurfaceGroup, Passive = 7, Active = 9, Focused = 11 });
+            scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.Submarine, Passive = 6, Active = 8, Focused = 10 });
+            scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.AirGroup, Passive = 10, Active = 12, Focused = 14 });
         }
     }
 
@@ -356,6 +380,13 @@ namespace SeaOfUncertainty.Core
                 if (!scenario.Formations.Any(f => f.Id == contact.TargetId)) errors.Add("Contact target does not exist: " + contact.TargetId);
                 if (!scenario.Area.Contains(new HexCoord(contact.Q, contact.R))) errors.Add("Contact is outside the operational area: " + contact.TargetId);
             }
+            if (scenario.SensorRanges == null || scenario.SensorRanges.Count != Enum.GetValues(typeof(FormationKind)).Length) errors.Add("One sensor-range profile is required for every Formation kind.");
+            else
+            {
+                foreach (FormationKind kind in Enum.GetValues(typeof(FormationKind)))
+                    if (scenario.SensorRanges.Count(range => range.Kind == kind) != 1) errors.Add("Sensor-range profile is missing or duplicated: " + kind);
+                foreach (SensorRangeDefinition range in scenario.SensorRanges.Where(range => range.Passive < 1 || range.Active < range.Passive || range.Focused < range.Active)) errors.Add("Sensor ranges must be positive and ordered Passive <= Active <= Focused: " + range.Kind);
+            }
             return errors;
         }
 
@@ -385,7 +416,7 @@ namespace SeaOfUncertainty.Core
 
     public static class OperationalDataMigration
     {
-        public const int CurrentSchemaVersion = 2;
+        public const int CurrentSchemaVersion = 3;
 
         public static ScenarioDefinition Migrate(ScenarioDefinition scenario)
         {
@@ -397,6 +428,8 @@ namespace SeaOfUncertainty.Core
             if (scenario.ReinforcementRegions == null) scenario.ReinforcementRegions = new List<OperationalRegionDefinition>();
             if (scenario.ExitRegions == null) scenario.ExitRegions = new List<OperationalRegionDefinition>();
             if (scenario.LogisticsRegions == null) scenario.LogisticsRegions = new List<OperationalRegionDefinition>();
+            if (scenario.SensorRanges == null) scenario.SensorRanges = new List<SensorRangeDefinition>();
+            ScenarioCatalog.AddPrototypeSensorRanges(scenario);
             if (scenario.Area.RestrictedAreas == null) scenario.Area.RestrictedAreas = new List<OperationalRegionDefinition>();
             scenario.SchemaVersion = CurrentSchemaVersion;
             scenario.Area.SchemaVersion = CurrentSchemaVersion;

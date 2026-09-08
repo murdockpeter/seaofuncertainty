@@ -96,32 +96,32 @@ Defined: one/two/three hex commitments; Cautious changes Signature; High Tempo r
 
 Needs definition:
 
-- Terrain, coast, strait, stacking, and friendly/enemy occupancy.
-- Whether Move rating caps mode distance or modifies it.
-- Duration of Cautious and High Tempo Signature changes.
+- Terrain, strait, stacking, occupancy, route, and control rules are now resolved in `MOVEMENT_TERRAIN_CONTROL_RULES.md`.
+- Move rating caps mode distance.
+- Cautious Signature -1 and High Tempo Loud persist until the formation completes its next Action.
 - Patrol/Screen area size, intercept procedure, and “+1 interception Reaction” resolution.
 - Evade destination legality.
 
-Prototype assumption: Move rating caps mode distance; High Tempo is Loud until the next action; no stacking or terrain restrictions yet.
+Implemented ruling: movement validates deterministic routes; Land and restricted areas block transit; Littoral adds +1 Ready-Time per route; entering a Strait stops non-air movement; friendly formations cannot end stacked; hidden enemies do not block movement; combat-capable non-air formations control objectives within one hex unless contested. Weather and sea-state movement effects remain deferred.
 
 ### Search and contacts
 
 Defined: calculation, success thresholds, contact axes, age descriptions, and degradation at Age 3+.
 
-Needs definition:
+Previously unresolved questions (resolved in `SEARCH_SPATIAL_UNCERTAINTY_RULES.md`):
 
-- Whether Search selects a Contact, a hex, an area, or a formation type.
-- Sensor maximum ranges and the exact 3+ range rule.
-- Who chooses the successful improvement.
-- Whether excess success improves more than one step.
+- Search selects a radius-one area centered on any legal in-range hex.
+- Sensor maximum ranges are scenario data keyed by formation role and Search mode.
+- The searching player declares Location or Identity priority before resolution.
+- Success improves one step per Contact; excess margin grants no additional step.
 - When Contacts age: every integer Time, only when time advances, or at the owning side’s activations.
 - Whether movement updates a Contact’s possible location area.
-- How a false Contact is disproven.
-- Whether Low Location represents one hex, multiple possible hexes, or an uncertainty radius.
+- Successful Search verification privately disproves a False Contact.
+- At Age 0, High, Medium, and Low are radius-zero, radius-one, and radius-two possible areas.
 
-Prototype assumption: Search selects an existing Contact; range subtracts one per hex; one success improves Location first, then Identity; all Contacts age by elapsed Time; Age 3 degrades one Location step and Low becomes Lost.
+Implemented ruling: Contacts age by elapsed operational Time, degrade on reaching Age 3 and each further Time, and expand anonymously after tracked movement. Search resets successful Contacts to Age 0. See `SEARCH_SPATIAL_UNCERTAINTY_RULES.md`.
 
-Recommendation: represent Low/Medium Location spatially, not only as a label. A broad uncertainty ring or several possible-position markers will make information tangible.
+The map now renders the discrete possible-hex area rather than a decorative uncertainty label.
 
 ### Strike, reaction, and damage
 

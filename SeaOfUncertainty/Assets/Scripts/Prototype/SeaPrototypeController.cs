@@ -73,6 +73,7 @@ namespace SeaOfUncertainty.Prototype
         private GUIStyle center;
         private Font font;
         private PendingAction pending;
+        private SearchPriority searchPriority = SearchPriority.Location;
         private AppScreen screen = AppScreen.MainMenu;
         private Overlay overlay;
         private FormationState inspected;
@@ -262,18 +263,20 @@ namespace SeaOfUncertainty.Prototype
             return toast;
         }
 
-        public string ToolkitSearch(FormationState target, SearchMode mode)
+        public string ToolkitSearch(FormationState target, SearchMode mode, SearchPriority priority = SearchPriority.Location)
         {
             lastActionSucceeded = false;
             pending = mode == SearchMode.Passive ? PendingAction.SearchPassive : mode == SearchMode.Active ? PendingAction.SearchActive : PendingAction.SearchFocused;
+            searchPriority = priority;
             ExecuteSearch(target);
             return toast;
         }
 
-        public string ToolkitSearchHex(HexCoord center, SearchMode mode)
+        public string ToolkitSearchHex(HexCoord center, SearchMode mode, SearchPriority priority = SearchPriority.Location)
         {
             lastActionSucceeded = false;
             pending = mode == SearchMode.Passive ? PendingAction.SearchPassive : mode == SearchMode.Active ? PendingAction.SearchActive : PendingAction.SearchFocused;
+            searchPriority = priority;
             ExecuteSearchArea(center);
             return toast;
         }
@@ -613,7 +616,7 @@ namespace SeaOfUncertainty.Prototype
             {
                 GUI.Label(new Rect(rect.x + 44, rect.y + 96, 810, 52), "Every entry records the operational Time, calculation or consequence, and scheduled return.", body);
                 float eventY = rect.y + 165;
-                foreach (string entry in game.Log.Take(8))
+                foreach (string entry in game.VisibleLog(game.Active.Side).Take(8))
                 {
                     Fill(new Rect(rect.x + 44, eventY, 810, 55), new Color(.028f, .12f, .15f, .9f));
                     GUI.Label(new Rect(rect.x + 56, eventY + 6, 786, 44), entry, small);
@@ -813,9 +816,7 @@ namespace SeaOfUncertainty.Prototype
         {
             List<FormationState> friendly = game.Formations.Where(f => f.Side == side && !f.IsDestroyed).ToList();
             List<FormationState> enemy = game.Formations.Where(f => f.Side != side).ToList();
-            int friendlyRange = friendly.Count == 0 ? 99 : friendly.Min(f => HexCoord.Distance(f.Position, objective));
-            int enemyRange = game.Formations.Where(f => f.Side != side && !f.IsDestroyed).Select(f => HexCoord.Distance(f.Position, objective)).DefaultIfEmpty(99).Min();
-            int score = friendlyRange <= 1 && enemyRange > 1 ? 5 : 0;
+            int score = game.Controls(side, objective) ? 5 : 0;
             FormationState carrier = game.Formations.FirstOrDefault(f => f.Side == side && f.Kind == FormationKind.CarrierGroup);
             if (carrier != null && !carrier.IsDestroyed && carrier.Damage < DamageState.Crippled) score += 3;
             score += enemy.Count(f => f.Damage == DamageState.Destroyed) * 2;
@@ -912,13 +913,11 @@ namespace SeaOfUncertainty.Prototype
                 float radius = 35f;
                 if (IsMovePending() && game.Active != null)
                 {
-                    int distance = HexCoord.Distance(game.Active.Position, pair.Key);
                     MoveMode mode = pending == PendingAction.MoveCautious ? MoveMode.Cautious : pending == PendingAction.MoveHigh ? MoveMode.HighTempo : MoveMode.Normal;
-                    int allowance = Rules.MoveAllowance(game.Active, mode);
-                    if (distance > 0 && distance <= allowance)
+                    if (game.TryGetMovePath(game.Active, pair.Key, mode, out List<HexCoord> path, out _))
                     {
                         DrawRing(c, 30, new Color(.25f, .95f, .72f, .82f), 3);
-                        GUI.Label(new Rect(c.x - 14, c.y - 13, 28, 26), distance.ToString(), new GUIStyle(tiny) { normal = { textColor = new Color(.65f, 1f, .85f) } });
+                        GUI.Label(new Rect(c.x - 14, c.y - 13, 28, 26), (path.Count - 1).ToString(), new GUIStyle(tiny) { normal = { textColor = new Color(.65f, 1f, .85f) } });
                     }
                 }
                 Vector2 last = c + new Vector2(0, -radius);
@@ -966,14 +965,15 @@ namespace SeaOfUncertainty.Prototype
         {
             Vector2 c = centers[contact.LastKnownPosition];
             Color certainty = contact.Location == LocationQuality.High ? new Color(.96f, .31f, .28f) : contact.Location == LocationQuality.Medium ? new Color(.81f, .38f, .28f) : new Color(.65f, .48f, .32f);
-            float radius = contact.Location == LocationQuality.High ? 23 : contact.Location == LocationQuality.Medium ? 30 : 38;
-            bool eligible = IsSearchPending() && game.Active != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= Rules.SearchRange(CurrentSearchMode()) || IsStrikePending() && StrikeEligible(contact);
+            float radius = 23 + Rules.ContactUncertaintyRadius(contact) * 7;
+            bool eligible = IsSearchPending() && game.Active != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= game.SearchRangeFor(game.Active, CurrentSearchMode()) || IsStrikePending() && StrikeEligible(contact);
             if (eligible) DrawRing(c, radius + 8, new Color(.35f, 1f, .7f, .92f), 3);
             else if (IsStrikePending()) DrawRing(c, radius + 8, new Color(.55f, .2f, .2f, .72f), 2);
             DrawRing(c, radius, certainty, 2);
             Line(c + new Vector2(-radius, 0), c + new Vector2(radius, 0), certainty, 1);
             Line(c + new Vector2(0, -radius), c + new Vector2(0, radius), certainty, 1);
-            string id = contact.Identity == IdentityQuality.Identified ? KindCode(game.Find(contact.TargetId).Kind) : "?";
+            FormationState identifiedTarget = game.Find(contact.TargetId);
+            string id = contact.Identity == IdentityQuality.Identified && identifiedTarget != null ? KindCode(identifiedTarget.Kind) : "?";
             GUI.Label(new Rect(c.x - 17, c.y - 16, 34, 32), id, center);
             GUI.Label(new Rect(c.x - 75, c.y + radius + 2, 150, 18), $"CONTACT • A{contact.Age}", tiny);
             Rect hoverRect = new Rect(c.x - radius - 12, c.y - radius - 12, (radius + 12) * 2, (radius + 12) * 2);
@@ -1032,18 +1032,16 @@ namespace SeaOfUncertainty.Prototype
             string targetName = contact.Identity == IdentityQuality.Identified && target != null ? target.Name.ToUpperInvariant() : "UNRESOLVED CONTACT";
             GUI.Label(new Rect(rect.x + 18, rect.y + 42, 326, 70), targetName, new GUIStyle(title) { fontSize = 27, wordWrap = true });
             GUI.Label(new Rect(rect.x + 18, rect.y + 114, 326, 72), $"{contact.Summary}\nLAST KNOWN  {contact.LastKnownPosition}", body);
-            if (target == null) return;
-
             if (IsSearchPending())
             {
                 SearchMode mode = CurrentSearchMode();
                 int range = HexCoord.Distance(game.Active.Position, contact.LastKnownPosition);
                 int modeModifier = game.SearchModifierFor(game.Active, mode);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 210, 326, 28), "AREA SEARCH PREVIEW", panelTitle);
-                GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Area center         {contact.LastKnownPosition}\nCenter range         {range} / {Rules.SearchRange(mode)}\nFootprint radius     {Rules.SearchAreaRadius}\nSearch rating        {game.Active.EffectiveSearch:+0;-0;0}\nMode ({mode})      {modeModifier:+0;-0;0}", body);
+                GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Area center         {contact.LastKnownPosition}\nCenter range         {range} / {game.SearchRangeFor(game.Active, mode)}\nFootprint radius     {Rules.SearchAreaRadius}\nPriority             {searchPriority}\nSearch rating        {game.Active.EffectiveSearch:+0;-0;0}\nMode ({mode})      {modeModifier:+0;-0;0}", body);
                 GUI.Label(new Rect(rect.x + 18, rect.y + 430, 326, 175), "Hidden Signature, Loud status, and exact position resolve privately. Success creates or improves Contacts. No detection still costs Time and advances the Ready queue.", small);
             }
-            else
+            else if (contact.Identity == IdentityQuality.Identified && target != null)
             {
                 Salvo salvo = CurrentSalvo();
                 CombatPreview preview = GetCombatPreview(game.Active, target, salvo, Reaction.Defend);
@@ -1052,6 +1050,12 @@ namespace SeaOfUncertainty.Prototype
                 GUI.Label(new Rect(rect.x + 18, rect.y + 420, 326, 38), preview.Band.ToString().ToUpperInvariant() + " BAND", new GUIStyle(title) { fontSize = 25, alignment = TextAnchor.MiddleCenter });
                 GUI.Label(new Rect(rect.x + 18, rect.y + 472, 326, 100), CombatOddsText(preview.Band), new GUIStyle(body) { alignment = TextAnchor.MiddleCenter });
                 GUI.Label(new Rect(rect.x + 18, rect.y + 590, 326, 70), salvo == Salvo.Heavy ? "Heavy Salvo expends the formation’s major offensive capability and requires confirmation." : "The defender chooses a legal Reaction after Strike commitment.", small);
+            }
+            else
+            {
+                int attack = game.Active.EffectiveStrike + Rules.SalvoModifier(CurrentSalvo()) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
+                GUI.Label(new Rect(rect.x + 18, rect.y + 210, 326, 28), "UNCERTAIN STRIKE PREVIEW", panelTitle);
+                GUI.Label(new Rect(rect.x + 18, rect.y + 250, 326, 150), $"Attack              {attack}\nDefense             UNRESOLVED\n\nIndividual Strike commitment requires an Identified Contact. Search this possible area to improve Identity; no preview tests hidden target state.", body);
             }
         }
 
@@ -1110,7 +1114,7 @@ namespace SeaOfUncertainty.Prototype
             GUI.Label(new Rect(log.x + 18, log.y + 11, 260, 24), "AFTER-ACTION FEED", panelTitle);
             if (GUI.Button(new Rect(log.xMax - 138, log.y + 9, 120, 30), "INSPECT", button)) overlay = Overlay.EventLog;
             float ly = log.y + 45;
-            foreach (string entry in game.Log.Take(5)) { GUI.Label(new Rect(log.x + 18, ly, log.width - 36, 34), entry, small); ly += 36; }
+            foreach (string entry in game.VisibleLog(game.Active.Side).Take(5)) { GUI.Label(new Rect(log.x + 18, ly, log.width - 36, 34), entry, small); ly += 36; }
         }
 
         private string ActionPreviewText()
@@ -1180,7 +1184,9 @@ namespace SeaOfUncertainty.Prototype
             FormationState actor = game.Active;
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
             string alternatives = LegalAlternatives();
-            string calculation = $"Distance {HexCoord.Distance(actor.Position, destination)}; allowance {Rules.MoveAllowance(actor, mode)}; base Time 2; Friction {(actor.Friction || mode == MoveMode.HighTempo ? "+1" : "+0")}";
+            game.TryGetMovePath(actor, destination, mode, out List<HexCoord> route, out _);
+            bool littoral = actor.Kind != FormationKind.AirGroup && route.Skip(1).Any(hex => game.Area.TerrainAt(hex) == OperationalTerrain.Littoral);
+            string calculation = $"Route {string.Join("-", route)}; distance {Math.Max(0, route.Count - 1)}; allowance {Rules.MoveAllowance(actor, mode)}; base Time 2; Littoral {(littoral ? "+1" : "+0")}; Friction {(actor.Friction || mode == MoveMode.HighTempo ? "+1" : "+0")}";
             if (game.Move(actor, destination, mode, out string message))
             {
                 lastActionSucceeded = true;
@@ -1206,8 +1212,8 @@ namespace SeaOfUncertainty.Prototype
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
             string alternatives = LegalAlternatives();
             int range = HexCoord.Distance(actor.Position, center);
-            string calculation = $"Area {center}; center range {range}/{Rules.SearchRange(mode)} hexes; footprint radius {Rules.SearchAreaRadius}; Search {actor.EffectiveSearch}; Mode {game.SearchModifierFor(actor, mode):+0;-0;0}; hidden Signature and Loud modifiers resolved privately; base Time 2; Friction {(actor.Friction ? "+1" : "+0")}{(mode == SearchMode.Focused ? $"; Command temporarily occupied {game.Sides[actor.Side].CommandSlots}->{game.Sides[actor.Side].CommandSlots - 1}->{game.Sides[actor.Side].CommandSlots}" : string.Empty)}";
-            if (game.SearchArea(actor, center, mode, out string message))
+            string calculation = $"Area {center}; center range {range}/{game.SearchRangeFor(actor, mode)} hexes; footprint radius {Rules.SearchAreaRadius}; priority {searchPriority}; one improvement maximum; Search {actor.EffectiveSearch}; Mode {game.SearchModifierFor(actor, mode):+0;-0;0}; hidden Signature and Loud modifiers resolved privately; base Time 2; Friction {(actor.Friction ? "+1" : "+0")}{(mode == SearchMode.Focused ? $"; Command temporarily occupied {game.Sides[actor.Side].CommandSlots}->{game.Sides[actor.Side].CommandSlots - 1}->{game.Sides[actor.Side].CommandSlots}" : string.Empty)}";
+            if (game.SearchArea(actor, center, mode, searchPriority, out string message))
             {
                 lastActionSucceeded = true;
                 telemetry.RecordAction(game, before, actor, "Area Search", mode.ToString(), center.ToString(), alternatives, DecisionSeconds(), calculation, message);
@@ -1329,7 +1335,7 @@ namespace SeaOfUncertainty.Prototype
             if (game.Active == null) return string.Empty;
             IEnumerable<HexCoord> mapHexes = centers.Count > 0 ? centers.Keys : Enumerable.Range(0, game.Area.Width).SelectMany(q => Enumerable.Range(0, game.Area.Height).Select(r => new HexCoord(q, r))).Where(game.Area.Contains);
             int legalMoveHexes = mapHexes.Count(hex => { int distance = HexCoord.Distance(game.Active.Position, hex); return distance > 0 && distance <= game.Active.EffectiveMove; });
-            int searchable = mapHexes.Count(hex => HexCoord.Distance(game.Active.Position, hex) <= Rules.SearchRange(CurrentSearchMode()));
+            int searchable = mapHexes.Count(hex => HexCoord.Distance(game.Active.Position, hex) <= game.SearchRangeFor(game.Active, CurrentSearchMode()));
             int strikeable = game.Contacts.Count(c => c.Owner == game.Active.Side && !c.IsLost && HexCoord.Distance(game.Active.Position, c.LastKnownPosition) <= Rules.StrikeRange(game.Active.Kind, CurrentSalvo()));
             bool recover = game.Active.Friction || game.Active.Disruption;
             int supportable = game.Formations.Count(candidate => candidate.Side == game.Active.Side && candidate != game.Active && !candidate.IsDestroyed && HexCoord.Distance(game.Active.Position, candidate.Position) <= Rules.SupportRange);
@@ -1338,7 +1344,7 @@ namespace SeaOfUncertainty.Prototype
 
         private bool StrikeEligible(ContactState contact)
         {
-            if (game.Active == null || contact == null || contact.IsLost) return false;
+            if (game.Active == null || contact == null || contact.IsLost || contact.Identity != IdentityQuality.Identified) return false;
             FormationState target = game.Find(contact.TargetId);
             if (target == null || target.IsDestroyed || HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) > Rules.StrikeRange(game.Active.Kind, pending == PendingAction.StrikeLight ? Salvo.Light : pending == PendingAction.StrikeHeavy ? Salvo.Heavy : Salvo.Standard)) return false;
             return CurrentSalvo() != Salvo.Heavy || game.Active.CanHeavySalvo;

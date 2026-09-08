@@ -389,17 +389,17 @@ namespace SeaOfUncertainty.Prototype
             if (!visible) return;
 
             SetRingPositions(hoverRing, hex.Value, .82f, .13f);
-            bool legalMove = actionMode == ToolkitActionMode.Move && game?.Active != null && HexCoord.Distance(game.Active.Position, hex.Value) > 0 && HexCoord.Distance(game.Active.Position, hex.Value) <= Rules.MoveAllowance(game.Active, moveMode);
-            bool legalSearch = actionMode == ToolkitActionMode.Search && game?.Active != null && HexCoord.Distance(game.Active.Position, hex.Value) <= Rules.SearchRange(searchMode);
+            bool legalMove = actionMode == ToolkitActionMode.Move && game?.Active != null && game.IsLegalMoveDestination(game.Active, hex.Value, moveMode);
+            bool legalSearch = actionMode == ToolkitActionMode.Search && game?.Active != null && HexCoord.Distance(game.Active.Position, hex.Value) <= game.SearchRangeFor(game.Active, searchMode);
             Color hoverColor = legalMove ? new Color(.18f, 1f, .58f, 1f) : legalSearch ? new Color(.16f, .82f, 1f, 1f) : new Color(.88f, .95f, 1f, .82f);
             hoverRing.startColor = hoverRing.endColor = hoverColor;
             hoverRing.widthMultiplier = legalMove || legalSearch ? .085f : .05f;
             if (legalMove)
             {
                 previewLine.gameObject.SetActive(true);
-                previewLine.positionCount = 2;
-                previewLine.SetPosition(0, HexToWorld(game.Active.Position) + Vector3.up * .2f);
-                previewLine.SetPosition(1, HexToWorld(hex.Value) + Vector3.up * .2f);
+                game.TryGetMovePath(game.Active, hex.Value, moveMode, out List<HexCoord> path, out _);
+                previewLine.positionCount = path.Count;
+                for (int i = 0; i < path.Count; i++) previewLine.SetPosition(i, HexToWorld(path[i]) + Vector3.up * .2f);
                 previewLine.startColor = new Color(.2f, 1f, .62f, .9f);
                 previewLine.endColor = new Color(.2f, 1f, .62f, .35f);
             }
@@ -846,12 +846,12 @@ namespace SeaOfUncertainty.Prototype
                     int distanceToHex = HexCoord.Distance(game.Active.Position, pair.Key);
                     if (actionMode == ToolkitActionMode.Move)
                     {
-                        bool legal = distanceToHex > 0 && distanceToHex <= Rules.MoveAllowance(game.Active, moveMode);
+                        bool legal = game.IsLegalMoveDestination(game.Active, pair.Key, moveMode);
                         if (legal) { color = new Color(.18f, 1f, .58f, 1f); width = .07f; }
                     }
                     else if (actionMode == ToolkitActionMode.Search)
                     {
-                        int range = Rules.SearchRange(searchMode);
+                        int range = game.SearchRangeFor(game.Active, searchMode);
                         float strength = Mathf.Clamp01(1f - distanceToHex / (float)range);
                         color = distanceToHex <= range ? new Color(.16f, .82f, 1f, .3f + strength * .55f) : new Color(.25f, .32f, .38f, .16f);
                         width = distanceToHex <= Math.Max(1, game.Active.EffectiveSearch) ? .06f : distanceToHex <= range ? .035f : .018f;
@@ -1152,40 +1152,24 @@ namespace SeaOfUncertainty.Prototype
         {
             GameObject marker = AcquireMarker("Contact Marker");
             marker.transform.position = HexToWorld(contact.LastKnownPosition) + Vector3.up * .62f;
-            bool eligible = actionMode == ToolkitActionMode.Search && game?.Active != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= Rules.SearchRange(searchMode) || actionMode == ToolkitActionMode.Strike && StrikeEligible(contact);
+            bool eligible = actionMode == ToolkitActionMode.Search && game?.Active != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= game.SearchRangeFor(game.Active, searchMode) || actionMode == ToolkitActionMode.Strike && StrikeEligible(contact);
             Color stateColor = eligible ? new Color(.2f, 1f, .62f, 1f) : contact.Age >= 3 ? new Color(.62f, .49f, .38f, .72f) : contactMaterial.color;
 
-            if (contact.IsFalse)
-            {
-                AddFalseContactCross(marker, stateColor);
-            }
-            else
-            {
-                GameObject diamond = Primitive(PrimitiveType.Cube, contact.Identity == IdentityQuality.Identified ? "Identified Contact" : "Unknown Contact", marker.transform, contactMaterial);
-                float scale = contact.Identity == IdentityQuality.Identified ? .36f : contact.Identity == IdentityQuality.General ? .31f : .26f;
-                diamond.transform.localScale = Vector3.one * scale;
-                diamond.transform.localRotation = Quaternion.Euler(35f, 45f, 35f);
-            }
+            GameObject diamond = Primitive(PrimitiveType.Cube, contact.Identity == IdentityQuality.Identified ? "Identified Contact" : "Unknown Contact", marker.transform, contactMaterial);
+            float scale = contact.Identity == IdentityQuality.Identified ? .36f : contact.Identity == IdentityQuality.General ? .31f : .26f;
+            diamond.transform.localScale = Vector3.one * scale;
+            diamond.transform.localRotation = Quaternion.Euler(35f, 45f, 35f);
 
-            int uncertaintyRings = contact.Location == LocationQuality.High ? 1 : contact.Location == LocationQuality.Medium ? 2 : 3;
-            float ageExpansion = Mathf.Min(contact.Age, 3) * .09f;
-            for (int i = 0; i < uncertaintyRings; i++)
+            IReadOnlyList<HexCoord> possibleHexes = game.ContactPossibleHexes(contact);
+            for (int i = 0; i < possibleHexes.Count; i++)
             {
-                float radius = .52f + ageExpansion + i * .17f;
-                Color ringColor = new Color(stateColor.r, stateColor.g, stateColor.b, Mathf.Clamp01(stateColor.a - i * .18f));
-                LineRenderer ring = Ring(i == 0 ? "Contact Fix" : "Uncertainty Ring " + i, contact.LastKnownPosition, radius, ringColor, eligible && i == 0 ? .09f : .045f);
+                HexCoord possible = possibleHexes[i];
+                int distanceFromFix = HexCoord.Distance(contact.LastKnownPosition, possible);
+                Color ringColor = new Color(stateColor.r, stateColor.g, stateColor.b, Mathf.Clamp01(stateColor.a - distanceFromFix * .14f));
+                LineRenderer ring = Ring(i == 0 ? "Contact Fix" : "Possible Contact Hex " + i, possible, .46f, ringColor, eligible && i == 0 ? .09f : .032f);
                 ring.transform.SetParent(marker.transform, true);
             }
             return marker;
-        }
-
-        private void AddFalseContactCross(GameObject marker, Color color)
-        {
-            Vector3 center = marker.transform.position;
-            LineRenderer first = Segment("False Contact Slash", center + new Vector3(-.35f, 0f, -.35f), center + new Vector3(.35f, 0f, .35f), color, .08f);
-            LineRenderer second = Segment("False Contact Backslash", center + new Vector3(-.35f, 0f, .35f), center + new Vector3(.35f, 0f, -.35f), color, .08f);
-            first.transform.SetParent(marker.transform, true);
-            second.transform.SetParent(marker.transform, true);
         }
 
         private LineRenderer Segment(string name, Vector3 start, Vector3 end, Color color, float width)
@@ -1205,8 +1189,9 @@ namespace SeaOfUncertainty.Prototype
         private void UpdateObjectiveControl()
         {
             if (objectiveRing == null || game == null) return;
-            bool blue = game.Formations.Any(f => f.Side == Side.Blue && !f.IsDestroyed && HexCoord.Distance(f.Position, area.Objective) <= 1);
-            bool red = game.Formations.Any(f => f.Side == Side.Red && !f.IsDestroyed && HexCoord.Distance(f.Position, area.Objective) <= 1);
+            Side viewingSide = game.Active?.Side ?? Side.Blue;
+            bool blue = viewingSide == Side.Blue && game.HasControlPresence(Side.Blue, area.Objective);
+            bool red = viewingSide == Side.Red && game.HasControlPresence(Side.Red, area.Objective);
             Color color = blue && !red ? blueMaterial.color : red && !blue ? redMaterial.color : blue && red ? new Color(1f, .72f, .14f, 1f) : new Color(.82f, .9f, .94f, .75f);
             objectiveRing.startColor = objectiveRing.endColor = color;
             objectiveRing.widthMultiplier = blue || red ? .12f : .075f;
@@ -1233,6 +1218,7 @@ namespace SeaOfUncertainty.Prototype
 
         private bool StrikeEligible(ContactState contact)
         {
+            if (contact == null || contact.Identity != IdentityQuality.Identified) return false;
             if (HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) > Rules.StrikeRange(game.Active.Kind, salvo)) return false;
             return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
         }

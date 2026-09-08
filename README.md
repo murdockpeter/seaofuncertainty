@@ -114,5 +114,7 @@ The generated Unity resource is `Assets/Resources/Geography/luzon-strait-coastli
 - Patrol/Screen and Support rulings: `design/PATROL_SUPPORT_RULES.md`
 - Replenishment and logistics rulings: `design/REPLENISHMENT_RULES.md`
 - Command Attention and Standing Mission rulings: `design/COMMAND_MISSIONS_RULES.md`
+- Movement, terrain, stacking, and control rulings: `design/MOVEMENT_TERRAIN_CONTROL_RULES.md`
+- Search and spatial uncertainty rulings and information audit: `design/SEARCH_SPATIAL_UNCERTAINTY_RULES.md`
 - Playtest protocol: `design/PLAYTEST_PROTOCOL.md`
 - 3D implementation constitution: `design/3D_DESIGN_CONSTITUTION.md`

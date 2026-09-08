@@ -9,7 +9,7 @@ namespace SeaOfUncertainty.Core
         [Serializable]
         public sealed class SaveData
         {
-            public int Version = 6;
+            public int Version = 7;
             public string ScenarioId;
             public string OperationalAreaId;
             public int Time;
@@ -24,6 +24,7 @@ namespace SeaOfUncertainty.Core
             public List<EntropyDrawNotice> PendingEntropyReveals = new List<EntropyDrawNotice>();
             public List<CommandResponseDeckState> CommandResponseDecks = new List<CommandResponseDeckState>();
             public List<string> Log = new List<string>();
+            public List<OperationalLogEntry> LogEntries = new List<OperationalLogEntry>();
         }
 
         private readonly Random random;
@@ -34,6 +35,7 @@ namespace SeaOfUncertainty.Core
         public readonly List<EntropyDrawNotice> PendingEntropyReveals = new List<EntropyDrawNotice>();
         public readonly List<CommandResponseDeckState> CommandResponseDecks = new List<CommandResponseDeckState>();
         public readonly List<string> Log = new List<string>();
+        public readonly List<OperationalLogEntry> LogEntries = new List<OperationalLogEntry>();
         public event Action<FormationState, ActionKind> ActionCompleted;
         public event Action<FormationState, string, string> CommandEvent;
         public ScenarioDefinition Scenario { get; }
@@ -62,6 +64,29 @@ namespace SeaOfUncertainty.Core
         public FormationState Find(string id) => Formations.FirstOrDefault(f => f.Id == id);
         public ContactState ContactFor(Side owner, string targetId) => Contacts.FirstOrDefault(c => c.Owner == owner && c.TargetId == targetId && !c.IsLost);
         public int SearchModifierFor(FormationState formation, SearchMode mode) => mode == SearchMode.Active && formation != null && formation.HasEffect("D-05") ? 0 : Rules.SearchModifier(mode);
+        public int SearchRangeFor(FormationState formation, SearchMode mode)
+        {
+            if (formation == null) return Rules.SearchRange(mode);
+            SensorRangeDefinition profile = Scenario.SensorRanges?.FirstOrDefault(range => range.Kind == formation.Kind);
+            return profile?.Range(mode) ?? Rules.SearchRange(mode);
+        }
+
+        public IReadOnlyList<HexCoord> ContactPossibleHexes(ContactState contact)
+        {
+            if (contact == null || contact.IsLost) return new List<HexCoord>();
+            int radius = Rules.ContactUncertaintyRadius(contact);
+            return Enumerable.Range(0, Area.Width)
+                .SelectMany(q => Enumerable.Range(0, Area.Height).Select(r => new HexCoord(q, r)))
+                .Where(Area.Contains)
+                .Where(hex => HexCoord.Distance(contact.LastKnownPosition, hex) <= radius)
+                .OrderBy(hex => HexCoord.Distance(contact.LastKnownPosition, hex))
+                .ThenBy(hex => hex.Q)
+                .ThenBy(hex => hex.R)
+                .ToList();
+        }
+
+        public IReadOnlyList<string> VisibleLog(Side side)
+            => LogEntries.Where(entry => !entry.IsPrivate || entry.Audience == side).Select(entry => entry.Text).ToList();
 
         public bool Patrol(FormationState formation, HexCoord center, PatrolPosture posture, FormationState protectedFormation, out string message)
         {
@@ -75,8 +100,7 @@ namespace SeaOfUncertainty.Core
             formation.PatrolProtectedFormationId = protectedFormation?.Id;
             formation.PatrolPosture = posture;
             formation.PatrolInterceptionAvailable = true;
-            formation.Loud = posture == PatrolPosture.Aggressive;
-            CompleteAction(formation, ActionKind.Patrol, false, $"{formation.Name} established a {posture} Screen at {center} (radius {Rules.PatrolRadius}){(protectedFormation == null ? string.Empty : " protecting " + protectedFormation.Name)}.");
+            CompleteAction(formation, ActionKind.Patrol, false, $"{formation.Name} established a {posture} Screen at {center} (radius {Rules.PatrolRadius}){(protectedFormation == null ? string.Empty : " protecting " + protectedFormation.Name)}.", loudAfterAction: posture == PatrolPosture.Aggressive);
             message = Log[0];
             return true;
         }
@@ -126,7 +150,7 @@ namespace SeaOfUncertainty.Core
             switch (formation.MissionTrigger)
             {
                 case MissionTrigger.ContactLocated:
-                    return Contacts.Any(contact => contact.Owner == formation.Side && !contact.IsLost && !contact.IsFalse) ? ActionKind.Strike : (ActionKind?)null;
+                    return Contacts.Any(contact => contact.Owner == formation.Side && !contact.IsLost && contact.Identity == IdentityQuality.Identified) ? ActionKind.Strike : (ActionKind?)null;
                 case MissionTrigger.EntropyMarked:
                     return formation.Friction || formation.Disruption ? ActionKind.Recover : (ActionKind?)null;
                 case MissionTrigger.LogisticsRequired:
@@ -158,13 +182,13 @@ namespace SeaOfUncertainty.Core
                 formation.PendingMissionPosture = posture;
                 formation.PendingMissionTrigger = trigger;
                 formation.MissionDeliveryTime = Time + 1;
-                AddLog($"T{Time:00}  COMMAND OCCUPIED — {formation.Name}'s Mission order will arrive at T{formation.MissionDeliveryTime:00}; existing Mission continues.");
+                AddLog($"T{Time:00}  COMMAND OCCUPIED — {formation.Name}'s Mission order will arrive at T{formation.MissionDeliveryTime:00}; existing Mission continues.", formation.Side);
                 message = $"Mission change scheduled for T{formation.MissionDeliveryTime:00}. {slots} Command Slot{(slots == 1 ? string.Empty : "s")} occupied until delivery.";
                 return true;
             }
             ApplyStandingMission(formation, task, objective, objectiveId, objectiveHex, posture, trigger);
             if (formation.HasEffect("F-12")) formation.NextReadyTimeBonus++;
-            AddLog($"T{Time:00}  MISSION ASSIGNED — {formation.Name}: {task}, {objective}, {posture}, trigger {trigger}. {slots} Command Slot{(slots == 1 ? string.Empty : "s")} occupied until its next Action.");
+            AddLog($"T{Time:00}  MISSION ASSIGNED — {formation.Name}: {task}, {objective}, {posture}, trigger {trigger}. {slots} Command Slot{(slots == 1 ? string.Empty : "s")} occupied until its next Action.", formation.Side);
             CommandEvent?.Invoke(formation, "MissionChanged", $"{task}; {objective}; {posture}; {trigger}");
             message = Log[0];
             return true;
@@ -176,7 +200,7 @@ namespace SeaOfUncertainty.Core
             if (formation.PushThroughReady) { message = "Push Through is already prepared."; return false; }
             MarkCommandStrain(formation.Side, 1, "Push Through");
             formation.PushThroughReady = true;
-            AddLog($"T{Time:00}  PUSH THROUGH — {formation.Name} may perform one complex Action; {formation.Side} marked 1 Command Strain.");
+            AddLog($"T{Time:00}  PUSH THROUGH — {formation.Name} may perform one complex Action; {formation.Side} marked 1 Command Strain.", formation.Side);
             CommandEvent?.Invoke(formation, "PushThrough", $"Command Strain {Sides[formation.Side].CommandStrain}");
             message = Log[0];
             return true;
@@ -267,13 +291,14 @@ namespace SeaOfUncertainty.Core
                 EntropyDecks = EntropyDecks.Select(CloneDeck).ToList(),
                 PendingEntropyReveals = PendingEntropyReveals.Select(notice => new EntropyDrawNotice { CardId = notice.CardId, FormationId = notice.FormationId }).ToList(),
                 CommandResponseDecks = CommandResponseDecks.Select(CloneResponseDeck).ToList(),
-                Log = new List<string>(Log)
+                Log = new List<string>(Log),
+                LogEntries = LogEntries.Select(entry => new OperationalLogEntry { Text = entry.Text, IsPrivate = entry.IsPrivate, Audience = entry.Audience }).ToList()
             };
         }
 
         public void RestoreState(SaveData data)
         {
-            if (data == null || data.Version < 1 || data.Version > 6) throw new ArgumentException("Unsupported or empty save data.");
+            if (data == null || data.Version < 1 || data.Version > 7) throw new ArgumentException("Unsupported or empty save data.");
             if (data.Version >= 2 && !string.IsNullOrEmpty(data.ScenarioId) && !string.Equals(data.ScenarioId, Scenario.Id, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException($"Save scenario {data.ScenarioId} does not match loaded scenario {Scenario.Id}.");
             Formations.Clear();
             Formations.AddRange(data.Formations ?? new List<FormationState>());
@@ -302,6 +327,8 @@ namespace SeaOfUncertainty.Core
             else InitializeCommandResponseDecks(seed);
             Log.Clear();
             Log.AddRange(data.Log ?? new List<string>());
+            LogEntries.Clear();
+            if (data.Version >= 7 && data.LogEntries != null) LogEntries.AddRange(data.LogEntries.Select(entry => new OperationalLogEntry { Text = entry.Text, IsPrivate = entry.IsPrivate, Audience = entry.Audience }));
             Time = data.Time;
             AgeTwoTargetingPenalty = data.AgeTwoTargetingPenalty;
             lastActingSide = data.Version >= 3 && data.HasLastActingSide ? data.LastActingSide : (Side?)null;
@@ -335,7 +362,7 @@ namespace SeaOfUncertainty.Core
             if (cardId != "F-01" && cardId != "F-02" && cardId != "F-07") { message = "This effect has no immediate printed Command response."; return false; }
             if (!TryOccupyCommand(formation.Side, 1, "Entropy Response", formation.Id, -1, out message)) return false;
             ResolveAttachedEffect(formation, cardId);
-            AddLog($"T{Time:00}  COMMAND RESPONSE — {formation.Name} cancelled {cardId} {EntropyEffectCatalog.Find(cardId)?.Title}.");
+            AddLog($"T{Time:00}  COMMAND RESPONSE — {formation.Name} cancelled {cardId} {EntropyEffectCatalog.Find(cardId)?.Title}.", formation.Side);
             message = Log[0];
             return true;
         }
@@ -354,7 +381,7 @@ namespace SeaOfUncertainty.Core
             deck.Hand.Remove(cardId);
             deck.DiscardPile.Add(cardId);
             string targetDetail = card.Id == "C-04" || card.Id == "C-17" ? $" {formation.Name} is now assigned to {mission}." : card.Id == "C-18" ? $" {formation.Name} prepared an Evade and two-hex withdrawal." : string.Empty;
-            AddLog($"T{Time:00}  RESPONSE PLAYED — {side}: {card.Id} {card.Title}.{targetDetail} {card.Play}{(string.IsNullOrEmpty(card.Cost) ? string.Empty : " Cost: " + card.Cost)}");
+            AddLog($"T{Time:00}  RESPONSE PLAYED — {side}: {card.Id} {card.Title}.{targetDetail} {card.Play}{(string.IsNullOrEmpty(card.Cost) ? string.Empty : " Cost: " + card.Cost)}", side);
             message = Log[0];
             return true;
         }
@@ -370,7 +397,7 @@ namespace SeaOfUncertainty.Core
             formation.ActiveEffectCardIds.Add(card.Id);
             PendingEntropyReveals.Add(new EntropyDrawNotice { CardId = card.Id, FormationId = formation.Id });
             ApplyImmediateCardEffect(formation, card);
-            AddLog($"T{Time:00}  CARD PULL â€” {formation.Name}: {card.Id} {card.Title}. {card.Effect}");
+            AddLog($"T{Time:00}  CARD PULL â€” {formation.Name}: {card.Id} {card.Title}. {card.Effect}", formation.Side);
             return card;
         }
 
@@ -392,41 +419,132 @@ namespace SeaOfUncertainty.Core
 
         public bool Move(FormationState formation, HexCoord destination, MoveMode mode, out string message)
         {
-            int distance = HexCoord.Distance(formation.Position, destination);
-            int allowed = Rules.MoveAllowance(formation, mode);
             if (formation != Active) { message = "Only the highlighted Ready formation may act."; return false; }
             if (mode == MoveMode.HighTempo && formation.HasEffect("F-11")) { message = "Checklist Churn prevents High Tempo until this Formation Holds or Recovers."; return false; }
-            if (!Area.Contains(destination)) { message = "That hex is outside the active operational area."; return false; }
-            OperationalTerrain terrain = Area.TerrainAt(destination);
-            if (terrain == OperationalTerrain.Land && formation.Kind != FormationKind.AirGroup && !HasFacility(destination, LocationKind.Port) && !HasFacility(destination, LocationKind.Anchorage)) { message = "Naval formations may enter Land hexes only at a Port or Anchorage."; return false; }
-            if (distance < 1 || distance > allowed) { message = $"{mode} Move allows {allowed} hex{(allowed == 1 ? string.Empty : "es")}."; return false; }
+            if (!TryGetMovePath(formation, destination, mode, out List<HexCoord> path, out message)) return false;
             if (!AuthorizeAction(formation, ActionKind.Move, out message)) return false;
+            foreach (ContactState contact in Contacts.Where(contact => contact.Owner != formation.Side && contact.TargetId == formation.Id && !contact.IsLost))
+                contact.MovementUncertainty = Math.Min(2, contact.MovementUncertainty + 1);
             formation.Position = destination;
             if (formation.HasEffect("F-07")) ResolveAttachedEffect(formation, "F-07");
-            formation.Loud = mode == MoveMode.HighTempo;
             if (mode == MoveMode.HighTempo) MarkEntropy(formation, EntropySource.Friction);
             if (mode == MoveMode.HighTempo && formation.HasEffect("F-08")) formation.SupportBlockedUntilRecover = true;
             if (mode == MoveMode.HighTempo && formation.HasEffect("F-04")) DegradeEndurance(formation);
-            int terrainTime = terrain == OperationalTerrain.Littoral && formation.Kind != FormationKind.AirGroup ? 1 : 0;
+            int distance = path.Count - 1;
+            bool crossedLittoral = formation.Kind != FormationKind.AirGroup && path.Skip(1).Any(hex => Area.TerrainAt(hex) == OperationalTerrain.Littoral);
+            int terrainTime = crossedLittoral ? 1 : 0;
             string interception = ResolvePatrolInterception(formation);
             ExpireOutOfRangeSupport(formation);
-            CompleteAction(formation, ActionKind.Move, mode == MoveMode.HighTempo, $"{formation.Name} moved {distance} hexes ({mode}){(terrainTime > 0 ? " through littoral waters" : string.Empty)}.{interception}", terrainTime);
+            CompleteAction(formation, ActionKind.Move, mode == MoveMode.HighTempo, $"{formation.Name} moved {distance} hexes ({mode}) via {string.Join("-", path)}{(terrainTime > 0 ? " through littoral waters" : string.Empty)}.{interception}", terrainTime, mode == MoveMode.Cautious ? -1 : 0, mode == MoveMode.HighTempo);
             message = Log[0];
             return true;
+        }
+
+        public bool IsLegalMoveDestination(FormationState formation, HexCoord destination, MoveMode mode)
+            => TryGetMovePath(formation, destination, mode, out _, out _);
+
+        public IReadOnlyList<HexCoord> LegalMoveDestinations(FormationState formation, MoveMode mode)
+        {
+            if (formation == null) return new List<HexCoord>();
+            return Enumerable.Range(0, Area.Width)
+                .SelectMany(q => Enumerable.Range(0, Area.Height).Select(r => new HexCoord(q, r)))
+                .Where(Area.Contains)
+                .Where(destination => IsLegalMoveDestination(formation, destination, mode))
+                .OrderBy(destination => destination.Q)
+                .ThenBy(destination => destination.R)
+                .ToList();
+        }
+
+        public bool TryGetMovePath(FormationState formation, HexCoord destination, MoveMode mode, out List<HexCoord> path, out string message)
+        {
+            path = new List<HexCoord>();
+            if (formation == null) { message = "Choose a Formation to move."; return false; }
+            int allowed = Rules.MoveAllowance(formation, mode);
+            if (!Area.Contains(destination)) { message = "That hex is outside the active operational area."; return false; }
+            if (destination.Equals(formation.Position)) { message = "Choose a different destination hex."; return false; }
+            if (IsRestricted(destination)) { message = "That destination is inside a restricted area."; return false; }
+            if (Formations.Any(other => other != formation && !other.IsDestroyed && other.Side == formation.Side && other.Position.Equals(destination))) { message = "Only one friendly Formation may end in a hex."; return false; }
+            if (!CanEnterMovementHex(formation, destination, true)) { message = "Naval formations may enter Land hexes only at a Port or Anchorage."; return false; }
+
+            var frontier = new Queue<HexCoord>();
+            var parents = new Dictionary<HexCoord, HexCoord>();
+            var steps = new Dictionary<HexCoord, int> { [formation.Position] = 0 };
+            frontier.Enqueue(formation.Position);
+            while (frontier.Count > 0)
+            {
+                HexCoord current = frontier.Dequeue();
+                int currentSteps = steps[current];
+                if (current.Equals(destination)) break;
+                if (currentSteps >= allowed) continue;
+                if (!current.Equals(formation.Position) && formation.Kind != FormationKind.AirGroup && Area.TerrainAt(current) == OperationalTerrain.Strait) continue;
+                foreach (HexCoord next in Neighbors(current).Where(Area.Contains).OrderBy(hex => MovementTerrainPriority(formation, hex)).ThenBy(hex => hex.Q).ThenBy(hex => hex.R))
+                {
+                    if (steps.ContainsKey(next) || IsRestricted(next) || !CanEnterMovementHex(formation, next, next.Equals(destination))) continue;
+                    steps[next] = currentSteps + 1;
+                    parents[next] = current;
+                    frontier.Enqueue(next);
+                }
+            }
+
+            if (!steps.ContainsKey(destination))
+            {
+                message = $"No legal route reaches that hex within the {allowed}-hex {mode} allowance; Land, restricted areas, and intervening Straits block routes.";
+                return false;
+            }
+            HexCoord cursor = destination;
+            path.Add(cursor);
+            while (!cursor.Equals(formation.Position)) { cursor = parents[cursor]; path.Add(cursor); }
+            path.Reverse();
+            message = $"Legal {path.Count - 1}-hex route.";
+            return true;
+        }
+
+        public bool HasControlPresence(Side side, HexCoord objective)
+            => Formations.Any(formation => formation.Side == side && formation.Kind != FormationKind.AirGroup && !formation.IsDestroyed && formation.Damage < DamageState.Crippled && HexCoord.Distance(formation.Position, objective) <= Rules.ControlRadius);
+
+        public bool Controls(Side side, HexCoord objective)
+            => HasControlPresence(side, objective) && !HasControlPresence(side == Side.Blue ? Side.Red : Side.Blue, objective);
+
+        private bool IsRestricted(HexCoord hex) => Area.RestrictedAreas != null && Area.RestrictedAreas.Any(region => region.Hexes != null && region.Hexes.Contains(hex));
+
+        private bool CanEnterMovementHex(FormationState formation, HexCoord hex, bool isDestination)
+        {
+            if (formation.Kind == FormationKind.AirGroup || Area.TerrainAt(hex) != OperationalTerrain.Land) return true;
+            return isDestination && (HasFacility(hex, LocationKind.Port) || HasFacility(hex, LocationKind.Anchorage));
+        }
+
+        private int MovementTerrainPriority(FormationState formation, HexCoord hex)
+        {
+            if (formation.Kind == FormationKind.AirGroup) return 0;
+            OperationalTerrain terrain = Area.TerrainAt(hex);
+            return terrain == OperationalTerrain.DeepWater ? 0 : terrain == OperationalTerrain.Littoral ? 1 : terrain == OperationalTerrain.Strait ? 2 : 3;
+        }
+
+        private static IEnumerable<HexCoord> Neighbors(HexCoord hex)
+        {
+            int[,] even = { { 1, 0 }, { 1, -1 }, { 0, -1 }, { -1, -1 }, { -1, 0 }, { 0, 1 } };
+            int[,] odd = { { 1, 1 }, { 1, 0 }, { 0, -1 }, { -1, 0 }, { -1, 1 }, { 0, 1 } };
+            int[,] offsets = (hex.Q & 1) == 0 ? even : odd;
+            for (int i = 0; i < 6; i++) yield return new HexCoord(hex.Q + offsets[i, 0], hex.R + offsets[i, 1]);
         }
 
         public bool Search(FormationState searcher, FormationState target, SearchMode mode, out string message)
         {
             if (target == null) { message = "Search needs a Contact or an area hex."; return false; }
-            return SearchArea(searcher, target.Position, mode, out message);
+            ContactState contact = ContactFor(searcher.Side, target.Id);
+            if (contact == null) { message = "Search must select one of your Contacts or an area hex."; return false; }
+            return SearchArea(searcher, contact.LastKnownPosition, mode, SearchPriority.Location, out message);
         }
 
         public bool SearchArea(FormationState searcher, HexCoord center, SearchMode mode, out string message)
+            => SearchArea(searcher, center, mode, SearchPriority.Location, out message);
+
+        public bool SearchArea(FormationState searcher, HexCoord center, SearchMode mode, SearchPriority priority, out string message)
         {
             if (searcher != Active) { message = "Only the highlighted Ready formation may act."; return false; }
             if (!Area.Contains(center)) { message = "That Search area is outside the operational area."; return false; }
             int centerRange = HexCoord.Distance(searcher.Position, center);
-            int maximumRange = Rules.SearchRange(mode);
+            int maximumRange = SearchRangeFor(searcher, mode);
             if (centerRange > maximumRange) { message = $"{mode} Search range is {maximumRange} hexes ({maximumRange * Area.NauticalMilesPerHex} nm)."; return false; }
             SideState side = Sides[searcher.Side];
             if (mode == SearchMode.Focused && searcher.HasEffect("D-08")) { message = "Jammed Circuits prevents Focused Search until Recover."; return false; }
@@ -435,7 +553,6 @@ namespace SeaOfUncertainty.Core
             if (mode == SearchMode.Focused && !freeFocused && side.CommandSlots < 1 + attentionEstimate) { message = $"Focused Search needs {1 + attentionEstimate} free Command Slot{(attentionEstimate == 0 ? string.Empty : "s")} including immediate retasking."; return false; }
             if (!AuthorizeAction(searcher, ActionKind.Search, out message)) return false;
             if (mode == SearchMode.Focused && !freeFocused && !TryOccupyCommand(searcher.Side, 1, "Focused Search", searcher.Id, -1, out message)) return false;
-            searcher.Loud = mode == SearchMode.Active;
             int searchSupport = ConsumeSupportBonus(searcher, SupportKind.Search);
             int aswSupport = ConsumeSupportBonus(searcher, SupportKind.AswSearch);
 
@@ -454,18 +571,30 @@ namespace SeaOfUncertainty.Core
                     contact = new ContactState { Owner = searcher.Side, TargetId = target.Id, LastKnownPosition = target.Position, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown };
                     Contacts.Add(contact);
                 }
+                else if (priority == SearchPriority.Location && contact.Location < LocationQuality.High) contact.Location++;
+                else if (priority == SearchPriority.Identity && contact.Identity < IdentityQuality.Identified) contact.Identity++;
                 else if (contact.Location < LocationQuality.High) contact.Location++;
                 else if (contact.Identity < IdentityQuality.Identified) contact.Identity++;
                 contact.LastKnownPosition = target.Position;
                 contact.Age = 0;
+                contact.MovementUncertainty = 0;
                 contact.IsFalse = false;
                 contact.IsLost = false;
                 string label = contact.Identity == IdentityQuality.Identified ? target.Name : "Contact at " + contact.LastKnownPosition;
                 detected.Add($"{label}: {contact.Summary}");
             }
 
+            foreach (ContactState falseContact in Contacts.Where(candidate => candidate.Owner == searcher.Side && candidate.IsFalse && !candidate.IsLost && HexCoord.Distance(center, candidate.LastKnownPosition) <= Rules.SearchAreaRadius && HexCoord.Distance(searcher.Position, candidate.LastKnownPosition) <= maximumRange).ToList())
+            {
+                int range = HexCoord.Distance(searcher.Position, falseContact.LastKnownPosition);
+                int finalValue = searcher.EffectiveSearch + SearchModifierFor(searcher, mode) + searchSupport - range;
+                if (Roll() < Rules.SearchTarget(finalValue)) continue;
+                falseContact.IsLost = true;
+                detected.Add($"False Contact at {falseContact.LastKnownPosition} disproved");
+            }
+
             string outcome = detected.Count == 0 ? "no detections" : string.Join("; ", detected);
-            CompleteAction(searcher, ActionKind.Search, false, $"{searcher.Name} searched area {center} (radius {Rules.SearchAreaRadius}, {mode}) — {outcome}.");
+            CompleteAction(searcher, ActionKind.Search, false, $"{searcher.Name} searched area {center} (radius {Rules.SearchAreaRadius}, {mode}, {priority} priority) — {outcome}.", loudAfterAction: mode == SearchMode.Active);
             message = Log[0];
             return true;
         }
@@ -479,6 +608,7 @@ namespace SeaOfUncertainty.Core
             if (attacker != Active) { message = "Only the highlighted Ready formation may act."; return false; }
             ContactState contact = ContactFor(attacker.Side, target.Id);
             if (contact == null) { message = "A usable Contact is required to Strike."; return false; }
+            if (contact.Identity != IdentityQuality.Identified) { message = "Individual Strikes require an Identified Contact; Search the uncertainty area first."; return false; }
             int strikeRange = Rules.StrikeRange(attacker.Kind, salvo);
             if (HexCoord.Distance(attacker.Position, contact.LastKnownPosition) > strikeRange) { message = $"{attacker.Kind} {salvo} Strike range is {strikeRange} hexes ({strikeRange * Area.NauticalMilesPerHex} nm)."; return false; }
             if (salvo == Salvo.Heavy && !attacker.CanHeavySalvo)
@@ -576,8 +706,7 @@ namespace SeaOfUncertainty.Core
                 .SelectMany(q => Enumerable.Range(0, Area.Height).Select(r => new HexCoord(q, r)))
                 .Where(Area.Contains)
                 .Where(candidate => HexCoord.Distance(target.Position, candidate) >= 1 && HexCoord.Distance(target.Position, candidate) <= allowance)
-                .Where(candidate => target.Kind == FormationKind.AirGroup || Area.TerrainAt(candidate) != OperationalTerrain.Land)
-                .Where(candidate => !Formations.Any(formation => formation != target && !formation.IsDestroyed && formation.Position.Equals(candidate)))
+                .Where(candidate => TryGetMovePath(target, candidate, allowance == 1 ? MoveMode.Cautious : MoveMode.Normal, out _, out _))
                 .Where(candidate => threatContact == null || HexCoord.Distance(threatPosition, candidate) > currentRange)
                 .OrderByDescending(candidate => threatContact == null ? 0 : HexCoord.Distance(threatPosition, candidate))
                 .ThenByDescending(candidate => HexCoord.Distance(target.Position, candidate))
@@ -590,7 +719,6 @@ namespace SeaOfUncertainty.Core
         {
             if (formation != Active) { message = "Only the highlighted Ready formation may act."; return false; }
             if (!AuthorizeAction(formation, ActionKind.Hold, out message)) return false;
-            formation.Loud = false;
             if (formation.HasEffect("F-11")) ResolveAttachedEffect(formation, "F-11");
             CompleteAction(formation, ActionKind.Hold, false, $"{formation.Name} held position and went quiet.");
             message = Log[0];
@@ -641,7 +769,7 @@ namespace SeaOfUncertainty.Core
                 if (consumePushThrough) formation.PushThroughReady = false;
                 formation.Mission = action;
                 formation.LastActionFollowedMission = true;
-                AddLog($"T{Time:00}  MISSION TRIGGER — {formation.Name} automatically changed Task to {action} under {formation.MissionTrigger}.");
+                AddLog($"T{Time:00}  MISSION TRIGGER — {formation.Name} automatically changed Task to {action} under {formation.MissionTrigger}.", formation.Side);
                 CommandEvent?.Invoke(formation, "MissionTrigger", $"{formation.MissionTrigger}; {action}");
                 message = "Standing Mission Trigger authorized the action without Command Attention.";
                 return true;
@@ -650,7 +778,7 @@ namespace SeaOfUncertainty.Core
             if (!TryOccupyCommand(formation.Side, 1, "Immediate Retask", formation.Id, -1, out message)) return false;
             if (consumePushThrough) formation.PushThroughReady = false;
             formation.LastActionFollowedMission = false;
-            AddLog($"T{Time:00}  COMMAND OCCUPIED — {formation.Name} received an immediate out-of-Mission {action} order until action resolution.");
+            AddLog($"T{Time:00}  COMMAND OCCUPIED — {formation.Name} received an immediate out-of-Mission {action} order until action resolution.", formation.Side);
             CommandEvent?.Invoke(formation, "OutOfMissionAction", action.ToString());
             return true;
         }
@@ -681,7 +809,7 @@ namespace SeaOfUncertainty.Core
                 slot.ReleaseTime = releaseTime;
             }
             SyncCommandCount(side);
-            AddLog($"T{Time:00}  SLOT OCCUPIED — {sideValue} assigned {count} Command Slot{(count == 1 ? string.Empty : "s")} to {purpose}{(string.IsNullOrEmpty(formationId) ? string.Empty : " for " + formationId)}.");
+            AddLog($"T{Time:00}  SLOT OCCUPIED — {sideValue} assigned {count} Command Slot{(count == 1 ? string.Empty : "s")} to {purpose}{(string.IsNullOrEmpty(formationId) ? string.Empty : " for " + formationId)}.", sideValue);
             CommandEvent?.Invoke(Find(formationId), "SlotOccupied", $"{count}; {purpose}; release {(releaseTime < 0 ? "after Action" : "T" + releaseTime.ToString("00"))}");
             message = $"Occupied {count} Command Slot{(count == 1 ? string.Empty : "s")} for {purpose}.";
             return true;
@@ -695,7 +823,7 @@ namespace SeaOfUncertainty.Core
             foreach (CommandSlotState slot in releasing) FreeSlot(slot);
             ReconcileStrainedSlots(side);
             SyncCommandCount(side);
-            if (releasing.Count > 0) AddLog($"T{Time:00}  SLOT RELEASED — {formation.Side} freed {releasing.Count} Command Slot{(releasing.Count == 1 ? string.Empty : "s")} after {formation.Name}'s Action.");
+            if (releasing.Count > 0) AddLog($"T{Time:00}  SLOT RELEASED — {formation.Side} freed {releasing.Count} Command Slot{(releasing.Count == 1 ? string.Empty : "s")} after {formation.Name}'s Action.", formation.Side);
             if (releasing.Count > 0) CommandEvent?.Invoke(formation, "SlotReleased", $"{releasing.Count}; after Action");
         }
 
@@ -706,7 +834,7 @@ namespace SeaOfUncertainty.Core
                 ApplyStandingMission(formation, formation.PendingMissionTask, formation.PendingMissionObjective, formation.PendingMissionObjectiveId, formation.PendingMissionObjectiveHex, formation.PendingMissionPosture, formation.PendingMissionTrigger);
                 formation.PendingMissionChange = false;
                 if (formation.HasEffect("F-12")) formation.NextReadyTimeBonus++;
-                AddLog($"T{Time:00}  MISSION DELIVERED — {formation.Name}'s delayed order is now active.");
+                AddLog($"T{Time:00}  MISSION DELIVERED — {formation.Name}'s delayed order is now active.", formation.Side);
                 CommandEvent?.Invoke(formation, "MissionDelivered", formation.Mission.ToString());
             }
             foreach (SideState side in Sides.Values)
@@ -715,7 +843,7 @@ namespace SeaOfUncertainty.Core
                 foreach (CommandSlotState slot in releasing) FreeSlot(slot);
                 ReconcileStrainedSlots(side);
                 SyncCommandCount(side);
-                if (releasing.Count > 0) AddLog($"T{Time:00}  SLOT RELEASED — {side.Side} freed {releasing.Count} timed Command Slot{(releasing.Count == 1 ? string.Empty : "s")}.");
+                if (releasing.Count > 0) AddLog($"T{Time:00}  SLOT RELEASED — {side.Side} freed {releasing.Count} timed Command Slot{(releasing.Count == 1 ? string.Empty : "s")}.", side.Side);
                 if (releasing.Count > 0) CommandEvent?.Invoke(null, "SlotReleased", $"{side.Side}; {releasing.Count}; timed");
             }
         }
@@ -726,7 +854,7 @@ namespace SeaOfUncertainty.Core
             side.CommandStrain = Math.Min(6, side.CommandStrain + Math.Max(0, amount));
             ReconcileStrainedSlots(side);
             SyncCommandCount(side);
-            AddLog($"T{Time:00}  COMMAND STRAIN — {sideValue} marked {amount} for {reason}; total {side.CommandStrain}, free Slots {side.CommandSlots}/3.");
+            AddLog($"T{Time:00}  COMMAND STRAIN — {sideValue} marked {amount} for {reason}; total {side.CommandStrain}, free Slots {side.CommandSlots}/3.", sideValue);
             CommandEvent?.Invoke(null, "CommandStrain", $"{sideValue}; +{amount}; {reason}; total {side.CommandStrain}");
         }
 
@@ -765,7 +893,7 @@ namespace SeaOfUncertainty.Core
 
         private static void SyncCommandCount(SideState side) => side.CommandSlots = side.SlotStates.Count(slot => slot.Status == CommandSlotStatus.Free);
 
-        private void CompleteAction(FormationState formation, ActionKind action, bool generatedFriction, string entry, int additionalTime = 0)
+        private void CompleteAction(FormationState formation, ActionKind action, bool generatedFriction, string entry, int additionalTime = 0, int movementSignatureAfter = 0, bool loudAfterAction = false)
         {
             if (action != ActionKind.Patrol) ClearPatrol(formation);
             if (action != ActionKind.Support) ClearSupport(formation);
@@ -791,6 +919,8 @@ namespace SeaOfUncertainty.Core
             formation.CommandBonus = 0;
             formation.MoveBonus = 0;
             formation.SignatureBonus = 0;
+            formation.MovementSignatureModifier = movementSignatureAfter;
+            formation.Loud = loudAfterAction;
             formation.FreeFocusedSearch = false;
             formation.SuppressDestructionNextAction = false;
             formation.IgnoreEntropyNextAction = false;
@@ -798,7 +928,7 @@ namespace SeaOfUncertainty.Core
             formation.MissionChangeLockedUntilAction = false;
             ReleaseCommandForFormation(formation);
             if (acceptedRisk) MarkEntropy(formation, EntropySource.Friction);
-            AddLog($"T{Time:00}  {entry} Next Ready T{formation.ReadyTime:00}.");
+            AddLog($"T{Time:00}  {entry} Next Ready T{formation.ReadyTime:00}.", action == ActionKind.Strike ? (Side?)null : formation.Side);
             lastActingSide = formation.Side;
             ActionCompleted?.Invoke(formation, action);
             AdvanceToNextFormation();
@@ -814,8 +944,10 @@ namespace SeaOfUncertainty.Core
                 Time = next.ReadyTime;
                 foreach (ContactState contact in Contacts.Where(c => !c.IsLost))
                 {
+                    int previousAge = contact.Age;
                     contact.Age += delta;
-                    if (contact.Age >= 3)
+                    int degradationSteps = Math.Max(0, contact.Age - 2) - Math.Max(0, previousAge - 2);
+                    for (int step = 0; step < degradationSteps && !contact.IsLost; step++)
                     {
                         if (contact.Location == LocationQuality.Low) contact.IsLost = true;
                         else contact.Location--;
@@ -894,6 +1026,7 @@ namespace SeaOfUncertainty.Core
             }
             contact.LastKnownPosition = movingEnemy.Position;
             contact.Age = 0;
+            contact.MovementUncertainty = 0;
             contact.IsLost = false;
             int attack = screener.EffectiveStrike + (screener.PatrolPosture == PatrolPosture.Aggressive ? 1 : 0);
             int defense = movingEnemy.EffectiveDefense - (movingEnemy.Destruction ? 1 : 0);
@@ -1266,7 +1399,13 @@ namespace SeaOfUncertainty.Core
         private EntropyDrawNotice PendingNoticeFor(Side side) => PendingEntropyReveals.FirstOrDefault(notice => Find(notice.FormationId)?.Side == side);
 
         private int Roll() => random.Next(1, 7);
-        private void AddLog(string text) { Log.Insert(0, text); if (Log.Count > 8) Log.RemoveAt(Log.Count - 1); }
+        private void AddLog(string text, Side? audience = null)
+        {
+            Log.Insert(0, text);
+            LogEntries.Insert(0, new OperationalLogEntry { Text = text, IsPrivate = audience.HasValue, Audience = audience.GetValueOrDefault() });
+            if (Log.Count > 8) Log.RemoveAt(Log.Count - 1);
+            if (LogEntries.Count > 8) LogEntries.RemoveAt(LogEntries.Count - 1);
+        }
 
         private void CreateScenario()
         {
