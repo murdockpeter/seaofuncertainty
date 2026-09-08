@@ -116,7 +116,8 @@ namespace SeaOfUncertainty.Core
             if (HexCoord.Distance(supporter.Position, recipient.Position) > Rules.SupportRange) { message = $"Support range is {Rules.SupportRange} hexes."; return false; }
             if (supporter.SupportBlockedUntilRecover) { message = "Fuel Priority Conflict prevents Support until this Formation Recovers."; return false; }
             if ((supporter.Kind == FormationKind.AirGroup || supporter.Kind == FormationKind.CarrierGroup) && supporter.HasEffect("X-08")) { message = "Hangar Damage makes this Formation's air Support unavailable."; return false; }
-            if (kind == SupportKind.Synchronization && !CanParticipateInSynchronization(supporter)) { message = supporter.HasEffect("D-12") ? "Compromised Plot prevents Synchronization until Recover." : "Staff Overload prevents Synchronization until this Formation completes another Action or spends its printed response."; return false; }
+            FormationState blockedParticipant = kind != SupportKind.Synchronization ? null : !CanParticipateInSynchronization(supporter) ? supporter : !CanParticipateInSynchronization(recipient) ? recipient : null;
+            if (blockedParticipant != null) { message = blockedParticipant.HasEffect("D-12") ? $"Compromised Plot prevents {blockedParticipant.Name} from Synchronization until Recover." : $"Staff Overload prevents {blockedParticipant.Name} from Synchronization until it completes another Action or spends its printed response."; return false; }
             if (!AuthorizeAction(supporter, ActionKind.Support, out message)) return false;
             bool lost = supporter.HasEffect("D-11");
             int coordinationDelay = kind == SupportKind.Synchronization && supporter.HasEffect("F-05") ? 1 : 0;
@@ -128,10 +129,11 @@ namespace SeaOfUncertainty.Core
                 supporter.SupportActive = true;
                 supporter.SupportRecipientId = recipient.Id;
                 supporter.SupportKind = kind;
+                if (kind == SupportKind.Synchronization && recipient.HasEffect("F-05")) recipient.NextReadyTimeBonus++;
             }
             CompleteAction(supporter, ActionKind.Support, false, lost
                 ? $"{supporter.Name}'s {kind} Support for {recipient.Name} was lost to misrouted orders."
-                : $"{supporter.Name} assigned {kind} Support (+1) to {recipient.Name} within range {Rules.SupportRange}.{(coordinationDelay > 0 ? " Coordination Drift added +1 Time." : string.Empty)}", coordinationDelay);
+                : $"{supporter.Name} assigned {kind} Support (+1) to {recipient.Name} within range {Rules.SupportRange}.{(coordinationDelay > 0 ? " Supporter Coordination Drift added +1 Time." : string.Empty)}{(kind == SupportKind.Synchronization && recipient.HasEffect("F-05") ? " Recipient Coordination Drift shifts its next Action +1 Time." : string.Empty)}", coordinationDelay);
             message = Log[0];
             return true;
         }

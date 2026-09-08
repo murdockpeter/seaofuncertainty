@@ -665,8 +665,8 @@ namespace SeaOfUncertainty.Prototype
                 Button choice = ActionButton(selected.ToString().ToUpperInvariant(), () => { CloseOverlay(); ResolveAction(() => backend.ToolkitSupport(recipient, selected)); });
                 if (selected == SupportKind.Synchronization)
                 {
-                    choice.SetEnabled(backend.Game.CanParticipateInSynchronization(backend.Game.Active));
-                    if (backend.Game.Active.HasEffect("F-05")) choice.text += "  •  +1 TIME";
+                    choice.SetEnabled(backend.Game.CanParticipateInSynchronization(backend.Game.Active) && backend.Game.CanParticipateInSynchronization(recipient));
+                    if (backend.Game.Active.HasEffect("F-05") || recipient.HasEffect("F-05")) choice.text += "  •  COORDINATION DRIFT";
                 }
                 modal.Add(choice);
             }
