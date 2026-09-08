@@ -58,7 +58,7 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Display active Support relationships on the map, dossiers, and timeline.
 - [x] Connect F-08, F-10, D-06, D-11, X-08, and C-24 to the finished Support rules.
 - [x] Add Support AI use, telemetry, save/load, and deterministic tests.
-- [ ] Consume stored synchronization Support when the synchronized-action parent system is implemented.
+- [x] Consume stored synchronization Support when the synchronized-action parent system is implemented.
 
 ### 4. Replenishment and logistics
 
@@ -168,27 +168,27 @@ Work these sections approximately in order. Do not expand simulation detail unti
 - [x] Display Response cards as physical cards in the bottom hand and in a readable modal.
 - [x] Select Formation, Contact, Reaction, Hex, and Mission targets for supported cards.
 - [x] Move successfully played cards from hand to discard and preserve decks/hands through save/load.
-- [x] Implement and enable 19 of 24 Command Responses, including Rapid Replan and prepared Orderly Withdrawal.
-- [x] Keep unsupported cards visible but disabled with an explicit parent-system message.
-- [ ] **Decision:** Finalize deck construction, hand limit, discard reshuffle, draw triggers, and exact play windows.
-- [ ] Implement C-02 and C-10 after Synchronized Strikes exist.
+- [x] Implement and enable all 24 Command Responses, including Rapid Replan, prepared Orderly Withdrawal, Prior Planning, and Deconfliction Cell.
+- [x] Keep parent-system cards visible and route C-02/C-10 into Synchronized Strike declaration rather than permitting out-of-window play.
+- [x] **Decision:** Finalize deck construction, hand limit, discard reshuffle, draw triggers, and exact play windows.
+- [x] Implement C-02 and C-10 after Synchronized Strikes exist.
 - [x] Implement C-03 Mission Command and C-17 Flash Order against Standing Mission triggers and Command Strain.
 - [x] Implement C-24 Task Group Reshuffle against active Screen/Support assignments.
-- [ ] Add gameplay draw/replacement triggers beyond the starting hand.
-- [ ] Teach the AI to evaluate and play supported Response cards without hidden information.
+- [x] Add gameplay draw/replacement triggers beyond the starting hand.
+- [x] Teach the AI to evaluate and play supported Response cards without hidden information.
 
 ### Synchronized Strikes
 
-- [ ] **Decision:** Define participant reservation, pre-Strike actions, Strike Time, and Ready scheduling.
-- [ ] **Decision:** Define the number/timing of defender reactions and abort/stale-target/retask costs.
-- [ ] Declare participants and a future Strike Time.
-- [ ] Occupy and release the required Command Slot.
-- [ ] Reserve and validate participants at resolution.
-- [ ] Resolve sequential Defense penalties.
-- [ ] Mark Friction for three or more independent participants.
-- [ ] Handle lost/degraded Contact information.
-- [ ] Display the synchronized event on the operational timeline.
-- [ ] Add AI, telemetry, save/load, and deterministic tests.
+- [x] **Decision:** Define participant reservation, pre-Strike actions, Strike Time, and Ready scheduling.
+- [x] **Decision:** Define the number/timing of defender reactions and abort/stale-target/retask costs.
+- [x] Declare participants and a future Strike Time.
+- [x] Occupy and release the required Command Slot.
+- [x] Reserve and validate participants at resolution.
+- [x] Resolve sequential Defense penalties.
+- [x] Mark Friction for three or more independent participants.
+- [x] Handle lost/degraded Contact information.
+- [x] Display the synchronized event on the operational timeline.
+- [x] Add AI, telemetry, save/load, and deterministic tests.
 
 ### Endurance
 

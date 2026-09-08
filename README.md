@@ -9,7 +9,7 @@ An operational naval wargame prototype about acting effectively inside incomplet
 3. Press Play.
 4. Choose **Begin Operation**, select **Meridian Veil**, review the briefing, and lock the fixed test deployment.
 5. Use the secure handoff screen whenever control passes between sides.
-6. The highlighted formation is Ready. Choose Move, Search, Strike, Recover, Hold, Patrol/Screen, Support, or Replenish.
+6. The highlighted formation is Ready. Choose Move, Search, Strike, Recover, Hold, Patrol/Screen, Support, Replenish, or declare a Synchronized Strike.
 7. For Move, choose a commitment and destination hex. For Search, choose any highlighted area hex. For Strike, choose an eligible Contact and then one aim hex inside its possible area.
 8. Use **Menu** during play to save, load, restart, adjust settings, or return to the main menu. A saved operation adds **Continue** to the main menu.
 
@@ -20,6 +20,8 @@ During action selection, the 3D command map highlights legal destinations, Searc
 The current baseline uses 20 nautical miles between adjacent hex centers and two hours per Ready-Time point. These physical-scale values are provisional until dedicated movement, sensor, and weapon-range playtests are complete.
 
 Entropy uses complete 12-card Friction, Disruption, and Destruction decks. Universal source penalties stack with attached card effects. Recover discards one selected Friction or Disruption card; Replenishment handles damage and Destruction repair. Printed Entropy responses cost one Command Slot and must be used before the affected formation completes its next own Action.
+
+Each side's 24-card Command Response deck starts with three cards, has a five-card hand limit, and draws after every three completed Major Actions. Synchronized Strikes reserve two to four formations at a future Strike Time, hold one Command Slot, and resolve a single defender Reaction followed by sequential Defense erosion.
 
 ## Playtest data
 
@@ -116,6 +118,7 @@ The generated Unity resource is `Assets/Resources/Geography/luzon-strait-coastli
 - Patrol/Screen and Support rulings: `design/PATROL_SUPPORT_RULES.md`
 - Replenishment and logistics rulings: `design/REPLENISHMENT_RULES.md`
 - Command Attention and Standing Mission rulings: `design/COMMAND_MISSIONS_RULES.md`
+- Command Response and Synchronized Strike rulings: `design/COMMAND_RESPONSE_AND_SYNCHRONIZED_STRIKE_RULES.md`
 - Movement, terrain, stacking, and control rulings: `design/MOVEMENT_TERRAIN_CONTROL_RULES.md`
 - Search and spatial uncertainty rulings and information audit: `design/SEARCH_SPATIAL_UNCERTAINTY_RULES.md`
 - Playtest protocol: `design/PLAYTEST_PROTOCOL.md`

@@ -123,6 +123,8 @@ namespace SeaOfUncertainty.Core
         public bool LastActionFollowedMission;
         public int CompletedActions;
         public int LightDamageExpiresAfterAction;
+        public string SynchronizedStrikeId;
+        public bool IsSynchronizedStrikeLeader;
 
         public int EntropySources => (Friction ? 1 : 0) + (Disruption ? 1 : 0) + (Destruction ? 1 : 0);
         public string Cohesion => EntropySources >= 3 ? "Disorganized" : EntropySources >= 2 ? "Disrupted" : "Cohesive";
@@ -290,7 +292,8 @@ namespace SeaOfUncertainty.Core
 
         public static FormationState NextReady(IEnumerable<FormationState> formations, Side? lastActingSide = null)
         {
-            List<FormationState> available = formations.Where(f => !f.IsDestroyed).ToList();
+            List<FormationState> available = formations.Where(f => !f.IsDestroyed &&
+                (string.IsNullOrEmpty(f.SynchronizedStrikeId) || f.IsSynchronizedStrikeLeader)).ToList();
             if (available.Count == 0) return null;
             int earliestTime = available.Min(f => f.ReadyTime);
             List<FormationState> tied = available.Where(f => f.ReadyTime == earliestTime).ToList();

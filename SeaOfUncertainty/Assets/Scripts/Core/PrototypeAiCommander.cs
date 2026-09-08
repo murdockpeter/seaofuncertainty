@@ -14,9 +14,14 @@ namespace SeaOfUncertainty.Core
         public string TargetId;
         public PatrolPosture PatrolPosture;
         public SupportKind SupportKind;
+        public bool DeclareSynchronizedStrike;
+        public string SynchronizedStrikeId;
+        public List<string> ParticipantIds = new List<string>();
+        public bool UsePriorPlanning;
+        public string DeconflictedFormationId;
         public string Rationale;
 
-        public string ModeName => Action == ActionKind.Move ? MoveMode.ToString() : Action == ActionKind.Search ? SearchMode.ToString() : Action == ActionKind.Strike ? Salvo.ToString() : Action == ActionKind.Patrol ? PatrolPosture.ToString() : Action == ActionKind.Support ? SupportKind.ToString() : "Default";
+        public string ModeName => DeclareSynchronizedStrike ? "Synchronized Declaration" : !string.IsNullOrEmpty(SynchronizedStrikeId) ? "Synchronized Resolution" : Action == ActionKind.Move ? MoveMode.ToString() : Action == ActionKind.Search ? SearchMode.ToString() : Action == ActionKind.Strike ? Salvo.ToString() : Action == ActionKind.Patrol ? PatrolPosture.ToString() : Action == ActionKind.Support ? SupportKind.ToString() : "Default";
     }
 
     public static class PrototypeAiCommander
@@ -25,6 +30,9 @@ namespace SeaOfUncertainty.Core
         {
             if (game?.Active == null) return null;
             FormationState actor = game.Active;
+            SynchronizedStrikeState readySynchronized = game.ReadySynchronizedStrikeFor(actor);
+            if (readySynchronized != null)
+                return new AiDecision { Action = ActionKind.Strike, SynchronizedStrikeId = readySynchronized.Id, TargetId = readySynchronized.ContactTargetId, Hex = readySynchronized.Aim, Salvo = readySynchronized.Participants.First().Salvo, Rationale = "Resolve the reserved synchronized event at its scheduled Strike Time." };
             List<ContactState> contacts = game.Contacts
                 .Where(contact => contact.Owner == actor.Side && !contact.IsLost)
                 .OrderByDescending(contact => contact.Location)
@@ -46,6 +54,23 @@ namespace SeaOfUncertainty.Core
                 .ThenBy(contact => contact.Age)
                 .ThenBy(contact => HexCoord.Distance(actor.Position, contact.LastKnownPosition))
                 .FirstOrDefault();
+            if (strikeContact != null && strikeContact.Location == LocationQuality.High && strikeContact.Identity == IdentityQuality.Identified &&
+                !game.SynchronizedStrikes.Any(item => item.Side == actor.Side) && game.Sides[actor.Side].CommandSlots > 0)
+            {
+                List<FormationState> synchronized = game.EligibleSynchronizedStrikeParticipants(actor.Side, strikeContact, strikeContact.LastKnownPosition, Salvo.Standard)
+                    .Where(item => item == actor || item.ReadyTime <= actor.ReadyTime + 2).OrderBy(item => item == actor ? 0 : 1).ThenByDescending(item => item.EffectiveStrike).ThenBy(item => item.Id).Take(3).ToList();
+                if (synchronized.Contains(actor) && synchronized.Count >= 2)
+                {
+                    IReadOnlyList<CommandResponseDefinition> hand = game.ResponseHand(actor.Side);
+                    return new AiDecision
+                    {
+                        Action = ActionKind.Strike, DeclareSynchronizedStrike = true, TargetId = strikeContact.TargetId, Hex = strikeContact.LastKnownPosition, Salvo = Salvo.Standard,
+                        ParticipantIds = synchronized.Select(item => item.Id).ToList(), UsePriorPlanning = hand.Any(card => card.Id == "C-02"),
+                        DeconflictedFormationId = hand.Any(card => card.Id == "C-10") ? synchronized.Last().Id : null,
+                        Rationale = "Reserve nearby available formations against a high-location identified Contact using only owned Contact information."
+                    };
+                }
+            }
             if (strikeContact != null)
             {
                 Salvo selectedSalvo = SelectSalvo(actor, strikeContact).Value;
@@ -107,6 +132,22 @@ namespace SeaOfUncertainty.Core
             message = "AI has no legal decision.";
             if (game?.Active == null || decision == null) return false;
             FormationState actor = game.Active;
+            if (decision.DeclareSynchronizedStrike)
+            {
+                ContactState declarationContact = game.Contacts.FirstOrDefault(item => item.Owner == actor.Side && !item.IsLost && item.TargetId == decision.TargetId);
+                return game.DeclareSynchronizedStrike(actor, decision.ParticipantIds.Select(game.Find), declarationContact, decision.Hex, decision.Salvo, decision.UsePriorPlanning, decision.DeconflictedFormationId, out _, out message);
+            }
+            if (!string.IsNullOrEmpty(decision.SynchronizedStrikeId))
+            {
+                SynchronizedStrikeState synchronized = game.SynchronizedStrikes.FirstOrDefault(item => item.Id == decision.SynchronizedStrikeId);
+                if (synchronized == null) { message = "The synchronized event is no longer active."; return false; }
+                ContactState synchronizedContact = game.Contacts.FirstOrDefault(item => item.Owner == actor.Side && item.TargetId == synchronized.ContactTargetId);
+                FormationState synchronizedTarget = synchronizedContact == null || synchronizedContact.IsFalse ? null : game.Find(synchronizedContact.TargetId);
+                bool hit = synchronizedTarget != null && !synchronizedTarget.IsDestroyed && synchronizedTarget.Position.Equals(synchronized.Aim);
+                Reaction synchronizedReaction = hit ? selectedReaction ?? ChooseReaction(game, actor, synchronizedTarget) : Reaction.None;
+                HexCoord? synchronizedEvade = hit && synchronizedReaction == Reaction.Evade ? evadeDestination ?? ChooseEvadeDestination(game, actor, synchronizedTarget) : null;
+                return game.ResolveSynchronizedStrike(synchronized, synchronizedReaction, synchronizedEvade, synchronizedContact == null || synchronizedContact.IsLost, out _, out message);
+            }
             switch (decision.Action)
             {
                 case ActionKind.Move: return game.Move(actor, decision.Hex, decision.MoveMode, out message);
@@ -125,6 +166,37 @@ namespace SeaOfUncertainty.Core
                 case ActionKind.Replenish: return game.Replenish(actor, null, out message);
                 default: return game.Hold(actor, out message);
             }
+        }
+
+        public static bool TryPlayUsefulResponse(PrototypeGame game, out string message)
+        {
+            message = string.Empty;
+            if (game?.Active == null) return false;
+            FormationState actor = game.Active;
+            HashSet<string> hand = new HashSet<string>(game.ResponseHand(actor.Side).Select(card => card.Id));
+            ContactState contact = game.Contacts.Where(item => item.Owner == actor.Side && !item.IsLost).OrderByDescending(item => item.Age).ThenBy(item => item.Location).ThenBy(item => item.TargetId).FirstOrDefault();
+            if (hand.Contains("C-01") && actor.Friction) return game.PlayCommandResponse(actor.Side, "C-01", actor, null, null, out message);
+            if (hand.Contains("C-19") && actor.Endurance != Endurance.Ready) return game.PlayCommandResponse(actor.Side, "C-19", actor, null, null, out message);
+            if (hand.Contains("C-06") && actor.Destruction) return game.PlayCommandResponse(actor.Side, "C-06", actor, null, null, out message);
+            if (hand.Contains("C-12") && contact != null && contact.Age > 0) return game.PlayCommandResponse(actor.Side, "C-12", null, contact, null, out message);
+            if (hand.Contains("C-23") && contact != null && contact.Location < LocationQuality.High) return game.PlayCommandResponse(actor.Side, "C-23", null, contact, null, out message);
+            if (hand.Contains("C-05") && actor.EffectiveSearch >= actor.EffectiveStrike) return game.PlayCommandResponse(actor.Side, "C-05", actor, null, null, out message);
+            if (hand.Contains("C-16") && actor.Damage >= DamageState.Heavy) return game.PlayCommandResponse(actor.Side, "C-16", actor, null, null, out message);
+            if (hand.Contains("C-18") && actor.Damage >= DamageState.Heavy && !actor.OrderlyWithdrawalReady) return game.PlayCommandResponse(actor.Side, "C-18", actor, null, null, out message);
+            if (hand.Contains("C-14") && HexCoord.Distance(actor.Position, game.Area.Objective) > 1) return game.PlayCommandResponse(actor.Side, "C-14", actor, null, null, out message);
+            return false;
+        }
+
+        public static bool TryPrepareReactionResponse(PrototypeGame game, FormationState defender, out string message)
+        {
+            message = string.Empty;
+            if (game == null || defender == null) return false;
+            HashSet<string> hand = new HashSet<string>(game.ResponseHand(defender.Side).Select(card => card.Id));
+            if (hand.Contains("C-16") && defender.ReactionDefenseBonus == 0)
+                return game.PlayCommandResponse(defender.Side, "C-16", defender, null, null, out message);
+            if (hand.Contains("C-18") && defender.Damage >= DamageState.Heavy && !defender.OrderlyWithdrawalReady)
+                return game.PlayCommandResponse(defender.Side, "C-18", defender, null, null, out message);
+            return false;
         }
 
         private static AiDecision ChooseObjectiveMove(PrototypeGame game, FormationState actor)

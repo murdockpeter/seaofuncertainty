@@ -193,7 +193,14 @@ namespace SeaOfUncertainty.Prototype
             humanSide = playerSide;
         }
 
-        public AiDecision ToolkitChooseAiDecision() => IsAiTurn ? PrototypeAiCommander.Choose(game) : null;
+        public AiDecision ToolkitChooseAiDecision()
+        {
+            if (!IsAiTurn) return null;
+            FormationState actor = game.Active;
+            if (PrototypeAiCommander.TryPlayUsefulResponse(game, out string responseMessage))
+                telemetry.RecordChoice(game, actor, "AiCommandResponsePlayed", "Response", responseMessage, LegalAlternatives());
+            return PrototypeAiCommander.Choose(game);
+        }
 
         public string ToolkitExecuteAiTurn() => ToolkitExecuteAiTurn(null, null, null);
 
@@ -234,7 +241,61 @@ namespace SeaOfUncertainty.Prototype
 
         public string ToolkitPlayResponse(string cardId, FormationState formation = null, ContactState contact = null, HexCoord? hex = null, ActionKind? mission = null)
         {
-            lastActionSucceeded = game.PlayCommandResponse(game.Active.Side, cardId, formation, contact, hex, mission, out string message);
+            return ToolkitPlayResponseForSide(game.Active.Side, cardId, formation, contact, hex, mission);
+        }
+        public string ToolkitPlayResponseForSide(Side side, string cardId, FormationState formation = null, ContactState contact = null, HexCoord? hex = null, ActionKind? mission = null)
+        {
+            lastActionSucceeded = game.PlayCommandResponse(side, cardId, formation, contact, hex, mission, out string message);
+            if (lastActionSucceeded) telemetry.RecordChoice(game, formation ?? game.Active, "CommandResponsePlayed", cardId, message, LegalAlternatives());
+            Toast(message);
+            return message;
+        }
+        public string ToolkitDeclareSynchronizedStrike(IEnumerable<FormationState> participants, ContactState contact, HexCoord aim, Salvo salvo, bool priorPlanning, string deconflictedFormationId)
+        {
+            lastActionSucceeded = false;
+            FormationState actor = game.Active;
+            string alternatives = LegalAlternatives();
+            PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
+            lastActionSucceeded = game.DeclareSynchronizedStrike(actor, participants, contact, aim, salvo, priorPlanning, deconflictedFormationId, out SynchronizedStrikeState strike, out string message);
+            if (lastActionSucceeded)
+            {
+                telemetry.RecordAction(game, before, actor, "Synchronized Strike Declared", salvo.ToString(), contact?.TargetId ?? aim.ToString(), alternatives, DecisionSeconds(), $"Strike Time T{strike.StrikeTime:00}; {strike.Participants.Count} reserved; C-02 {priorPlanning}; C-10 {deconflictedFormationId}", message);
+                inspected = game.Active;
+            }
+            else telemetry.RecordRejected(game, actor, "Synchronized Strike Declared", salvo.ToString(), aim.ToString(), message, DecisionSeconds());
+            Toast(message);
+            return message;
+        }
+        public string ToolkitResolveSynchronizedStrike(SynchronizedStrikeState strike, Reaction reaction, HexCoord? evadeDestination, bool continueBlind)
+        {
+            lastActionSucceeded = false;
+            FormationState actor = game.Active;
+            string alternatives = LegalAlternatives();
+            PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
+            lastActionSucceeded = game.ResolveSynchronizedStrike(strike, reaction, evadeDestination, continueBlind, out SynchronizedStrikeResult result, out string message);
+            if (lastActionSucceeded)
+            {
+                telemetry.RecordAction(game, before, actor, "Synchronized Strike Resolved", "Sequential Volley", strike.Aim.ToString(), alternatives, DecisionSeconds(), $"{strike.Participants.Count} attacks; one Reaction; Defense -1 per subsequent attack; blind {continueBlind}", message);
+                inspected = game.Active;
+                AfterSuccessfulAction(actor.Side);
+            }
+            else telemetry.RecordRejected(game, actor, "Synchronized Strike Resolved", "Sequential Volley", strike?.Aim.ToString() ?? "", message, DecisionSeconds());
+            Toast(message);
+            return message;
+        }
+        public string ToolkitAbortSynchronizedStrike(SynchronizedStrikeState strike)
+        {
+            FormationState actor = game.Active;
+            lastActionSucceeded = game.AbortSynchronizedStrike(strike, out string message);
+            telemetry.RecordChoice(game, actor, lastActionSucceeded ? "SynchronizedStrikeAborted" : "SynchronizedStrikeAbortRejected", "Abort", strike?.Id ?? "", LegalAlternatives());
+            if (lastActionSucceeded) inspected = game.Active;
+            Toast(message);
+            return message;
+        }
+        public string ToolkitRetaskSynchronizedStrike(SynchronizedStrikeState strike, ContactState contact, HexCoord aim)
+        {
+            lastActionSucceeded = game.RetaskSynchronizedStrike(strike, contact, aim, out string message);
+            telemetry.RecordChoice(game, game.Active, lastActionSucceeded ? "SynchronizedStrikeRetasked" : "SynchronizedStrikeRetaskRejected", "Retask", contact?.TargetId ?? aim.ToString(), LegalAlternatives());
             Toast(message);
             return message;
         }

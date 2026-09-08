@@ -9,7 +9,7 @@ namespace SeaOfUncertainty.Core
         [Serializable]
         public sealed class SaveData
         {
-            public int Version = 9;
+            public int Version = 10;
             public string ScenarioId;
             public string OperationalAreaId;
             public int Time;
@@ -24,6 +24,7 @@ namespace SeaOfUncertainty.Core
             public List<EntropyDrawNotice> PendingEntropyReveals = new List<EntropyDrawNotice>();
             public List<EntropyResponseWindowState> EntropyResponseWindows = new List<EntropyResponseWindowState>();
             public List<CommandResponseDeckState> CommandResponseDecks = new List<CommandResponseDeckState>();
+            public List<SynchronizedStrikeState> SynchronizedStrikes = new List<SynchronizedStrikeState>();
             public List<string> Log = new List<string>();
             public List<OperationalLogEntry> LogEntries = new List<OperationalLogEntry>();
         }
@@ -36,6 +37,7 @@ namespace SeaOfUncertainty.Core
         public readonly List<EntropyDrawNotice> PendingEntropyReveals = new List<EntropyDrawNotice>();
         public readonly List<EntropyResponseWindowState> EntropyResponseWindows = new List<EntropyResponseWindowState>();
         public readonly List<CommandResponseDeckState> CommandResponseDecks = new List<CommandResponseDeckState>();
+        public readonly List<SynchronizedStrikeState> SynchronizedStrikes = new List<SynchronizedStrikeState>();
         public readonly List<string> Log = new List<string>();
         public readonly List<OperationalLogEntry> LogEntries = new List<OperationalLogEntry>();
         public event Action<FormationState, ActionKind> ActionCompleted;
@@ -48,6 +50,7 @@ namespace SeaOfUncertainty.Core
         public bool AgeTwoTargetingPenalty = true;
         private Side? lastActingSide;
         private readonly int seed;
+        private string resolvingSynchronizedStrikeId;
 
         public PrototypeGame(int seed = 1978, ScenarioDefinition scenario = null)
         {
@@ -304,6 +307,7 @@ namespace SeaOfUncertainty.Core
                 PendingEntropyReveals = PendingEntropyReveals.Select(notice => new EntropyDrawNotice { CardId = notice.CardId, FormationId = notice.FormationId }).ToList(),
                 EntropyResponseWindows = EntropyResponseWindows.Select(window => new EntropyResponseWindowState { FormationId = window.FormationId, CardId = window.CardId, ExpiresAfterCompletedActions = window.ExpiresAfterCompletedActions }).ToList(),
                 CommandResponseDecks = CommandResponseDecks.Select(CloneResponseDeck).ToList(),
+                SynchronizedStrikes = SynchronizedStrikes.Select(CloneSynchronizedStrike).ToList(),
                 Log = new List<string>(Log),
                 LogEntries = LogEntries.Select(entry => new OperationalLogEntry { Text = entry.Text, IsPrivate = entry.IsPrivate, Audience = entry.Audience }).ToList()
             };
@@ -311,7 +315,7 @@ namespace SeaOfUncertainty.Core
 
         public void RestoreState(SaveData data)
         {
-            if (data == null || data.Version < 1 || data.Version > 9) throw new ArgumentException("Unsupported or empty save data.");
+            if (data == null || data.Version < 1 || data.Version > 10) throw new ArgumentException("Unsupported or empty save data.");
             if (data.Version >= 2 && !string.IsNullOrEmpty(data.ScenarioId) && !string.Equals(data.ScenarioId, Scenario.Id, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException($"Save scenario {data.ScenarioId} does not match loaded scenario {Scenario.Id}.");
             Formations.Clear();
             Formations.AddRange(data.Formations ?? new List<FormationState>());
@@ -343,6 +347,8 @@ namespace SeaOfUncertainty.Core
             CommandResponseDecks.Clear();
             if (data.Version >= 5 && data.CommandResponseDecks != null && data.CommandResponseDecks.Count > 0) CommandResponseDecks.AddRange(data.CommandResponseDecks.Select(CloneResponseDeck));
             else InitializeCommandResponseDecks(seed);
+            SynchronizedStrikes.Clear();
+            if (data.Version >= 10 && data.SynchronizedStrikes != null) SynchronizedStrikes.AddRange(data.SynchronizedStrikes.Select(CloneSynchronizedStrike));
             Log.Clear();
             Log.AddRange(data.Log ?? new List<string>());
             LogEntries.Clear();
@@ -406,10 +412,13 @@ namespace SeaOfUncertainty.Core
             CommandResponseDefinition card = CommandResponseCatalog.Find(cardId);
             if (card == null || !deck.Hand.Contains(cardId)) { message = "That Command Response is not in hand."; return false; }
             if (!card.MechanicallySupported) { message = $"{card.Title} requires a game system that is not active in this prototype."; return false; }
+            if (Active == null || Active.Side != side && card.Target != ResponseTarget.Reaction) { message = "Command Responses may be played only during that side's planning window, except Reaction preparations before a committed attack."; return false; }
+            if (card.Target == ResponseTarget.SynchronizedStrike) { message = $"{card.Title} may be committed only while declaring a Synchronized Strike."; return false; }
             if (formation != null && formation.Side != side) { message = "Command Responses may target only friendly formations."; return false; }
             if (!ApplyCommandResponse(card, side, formation, contact, hex, mission, out message)) return false;
             deck.Hand.Remove(cardId);
             deck.DiscardPile.Add(cardId);
+            AwardPendingResponseDraws(side);
             string targetDetail = card.Id == "C-04" || card.Id == "C-17" ? $" {formation.Name} is now assigned to {mission}." : card.Id == "C-18" ? $" {formation.Name} prepared an Evade and two-hex withdrawal." : string.Empty;
             AddLog($"T{Time:00}  RESPONSE PLAYED — {side}: {card.Id} {card.Title}.{targetDetail} {card.Play}{(string.IsNullOrEmpty(card.Cost) ? string.Empty : " Cost: " + card.Cost)}", side);
             message = Log[0];
@@ -634,6 +643,183 @@ namespace SeaOfUncertainty.Core
 
         public bool Strike(FormationState attacker, FormationState target, Salvo salvo, Reaction reaction, out CombatResult result, out string message)
             => Strike(attacker, target, salvo, reaction, null, out result, out message);
+
+        public SynchronizedStrikeState SynchronizedStrikeFor(FormationState formation)
+            => formation == null || string.IsNullOrEmpty(formation.SynchronizedStrikeId) ? null : SynchronizedStrikes.FirstOrDefault(strike => strike.Id == formation.SynchronizedStrikeId);
+
+        public SynchronizedStrikeState ReadySynchronizedStrikeFor(FormationState formation)
+        {
+            SynchronizedStrikeState strike = SynchronizedStrikeFor(formation);
+            return formation == Active && formation != null && formation.IsSynchronizedStrikeLeader && strike != null && strike.StrikeTime <= Time ? strike : null;
+        }
+
+        public IReadOnlyList<FormationState> EligibleSynchronizedStrikeParticipants(Side side, ContactState contact, HexCoord aim, Salvo salvo = Salvo.Standard)
+        {
+            if (contact == null || contact.Owner != side || contact.IsLost || !ContactPossibleHexes(contact).Contains(aim)) return new List<FormationState>();
+            return Formations.Where(formation => formation.Side == side && !formation.IsDestroyed && string.IsNullOrEmpty(formation.SynchronizedStrikeId))
+                .Where(CanParticipateInSynchronization)
+                .Where(formation => salvo != Salvo.Heavy || formation.CanHeavySalvo)
+                .Where(formation => HexCoord.Distance(formation.Position, aim) <= Rules.StrikeRange(formation.Kind, salvo))
+                .OrderBy(formation => formation.Id, StringComparer.Ordinal).ToList();
+        }
+
+        public bool DeclareSynchronizedStrike(FormationState leader, IEnumerable<FormationState> selectedParticipants, ContactState contact, HexCoord aim, Salvo salvo,
+            bool usePriorPlanning, string deconflictedFormationId, out SynchronizedStrikeState strike, out string message)
+        {
+            strike = null;
+            if (leader == null || leader != Active) { message = "Only the highlighted Ready formation may coordinate a Synchronized Strike."; return false; }
+            if (SynchronizedStrikes.Any(item => item.Side == leader.Side)) { message = "That side already has a Synchronized Strike on the timeline."; return false; }
+            if (contact == null || contact.Owner != leader.Side || contact.IsLost || !Contacts.Contains(contact)) { message = "Choose one of your usable Contacts."; return false; }
+            if (!ContactPossibleHexes(contact).Contains(aim)) { message = "Choose an aim hex inside the Contact's possible area."; return false; }
+            List<FormationState> participants = (selectedParticipants ?? Enumerable.Empty<FormationState>()).Where(item => item != null).Distinct().OrderBy(item => item.Id, StringComparer.Ordinal).ToList();
+            if (!participants.Contains(leader)) participants.Insert(0, leader);
+            if (participants.Count < 2 || participants.Count > 4) { message = "A Synchronized Strike requires two to four participants, including its leader."; return false; }
+            IReadOnlyList<FormationState> eligible = EligibleSynchronizedStrikeParticipants(leader.Side, contact, aim, salvo);
+            FormationState invalid = participants.FirstOrDefault(item => !eligible.Contains(item));
+            if (invalid != null) { message = $"{invalid.Name} is unavailable, coordination-blocked, reserved, or outside {salvo} range."; return false; }
+            if (participants.Any(item => item.EntropySources >= 3 && !item.PushThroughReady)) { message = "Each Disorganized participant must Push Through before reservation."; return false; }
+            CommandResponseDeckState deck = CommandResponseDecks.First(state => state.Side == leader.Side);
+            if (usePriorPlanning && !deck.Hand.Contains("C-02")) { message = "Prior Planning is not in hand."; return false; }
+            if (!string.IsNullOrEmpty(deconflictedFormationId) && (!deck.Hand.Contains("C-10") || !participants.Any(item => item.Id == deconflictedFormationId))) { message = "Deconfliction Cell must name a participating formation and be in hand."; return false; }
+            if (!TryOccupyCommand(leader.Side, 1, "Synchronized Strike", leader.Id, -1, out message)) return false;
+
+            int strikeTime = Math.Max(Time + 1, participants.Max(item => item.ReadyTime));
+            strike = new SynchronizedStrikeState
+            {
+                Id = $"SYNC-{leader.Side}-{Time:00}-{leader.Id}", Side = leader.Side, LeaderId = leader.Id, ContactTargetId = contact.TargetId,
+                Aim = aim, DeclaredTime = Time, StrikeTime = strikeTime, DeclaredLocation = contact.Location, DeclaredIdentity = contact.Identity,
+                DeclaredAge = contact.Age, PriorPlanning = usePriorPlanning, DeconflictedFormationId = deconflictedFormationId,
+                Participants = participants.Select(item => new SynchronizedStrikeParticipant { FormationId = item.Id, Salvo = salvo }).ToList()
+            };
+            SynchronizedStrikes.Add(strike);
+            foreach (FormationState participant in participants)
+            {
+                participant.SynchronizedStrikeId = strike.Id;
+                participant.IsSynchronizedStrikeLeader = participant == leader;
+                participant.ReadyTime = strikeTime;
+                if (participant.EntropySources >= 3) participant.PushThroughReady = false;
+            }
+            if (usePriorPlanning) DiscardResponseCard(leader.Side, "C-02");
+            if (!string.IsNullOrEmpty(deconflictedFormationId)) DiscardResponseCard(leader.Side, "C-10");
+            foreach (FormationState participant in participants)
+                if (ConsumeSupportBonus(participant, SupportKind.Synchronization) > 0) strike.CoordinationSupportedFormationIds.Add(participant.Id);
+            AddLog($"T{Time:00}  SYNCHRONIZED STRIKE DECLARED — {participants.Count} formations reserved against Contact {contact.Summary} at {aim}; execution T{strikeTime:00}. Command Slot held.", leader.Side);
+            CommandEvent?.Invoke(leader, "SynchronizedStrikeDeclared", $"{strike.Id}; T{strikeTime:00}; {participants.Count}; {aim}");
+            lastActingSide = leader.Side;
+            AdvanceToNextFormation();
+            message = Log[0];
+            return true;
+        }
+
+        public bool AbortSynchronizedStrike(SynchronizedStrikeState strike, out string message)
+        {
+            if (strike == null || !SynchronizedStrikes.Contains(strike)) { message = "That Synchronized Strike is no longer active."; return false; }
+            if (Time < strike.StrikeTime) { message = "A Synchronized Strike may be aborted only at its Strike Time."; return false; }
+            List<FormationState> participants = StrikeParticipants(strike);
+            foreach (FormationState participant in participants)
+            {
+                participant.ReadyTime = Math.Max(Time + 1, participant.ReadyTime + 1);
+                ClearSynchronizedReservation(participant);
+            }
+            FormationState leader = Find(strike.LeaderId);
+            if (leader != null && !leader.Friction) MarkEntropy(leader, EntropySource.Friction);
+            SynchronizedStrikes.Remove(strike);
+            ReleaseCommandForFormation(leader);
+            AddLog($"T{Time:00}  SYNCHRONIZED STRIKE ABORTED — Contact solution was lost; participants retask at +1 Time and the leader marks Friction.", strike.Side);
+            CommandEvent?.Invoke(leader, "SynchronizedStrikeAborted", strike.Id);
+            lastActingSide = strike.Side;
+            AdvanceToNextFormation();
+            message = Log[0];
+            return true;
+        }
+
+        public bool RetaskSynchronizedStrike(SynchronizedStrikeState strike, ContactState contact, HexCoord aim, out string message)
+        {
+            if (strike == null || ReadySynchronizedStrikeFor(Find(strike.LeaderId)) != strike) { message = "Retasking is available only at the event's Strike Time."; return false; }
+            if (contact == null || contact.Owner != strike.Side || contact.IsLost || !ContactPossibleHexes(contact).Contains(aim)) { message = "Choose a usable friendly Contact aim area."; return false; }
+            List<FormationState> participants = StrikeParticipants(strike);
+            if (participants.Any(item => HexCoord.Distance(item.Position, aim) > Rules.StrikeRange(item.Kind, strike.Participants.First(p => p.FormationId == item.Id).Salvo))) { message = "Every reserved participant must be in range of the new aim."; return false; }
+            strike.ContactTargetId = contact.TargetId;
+            strike.Aim = aim;
+            strike.DeclaredLocation = contact.Location;
+            strike.DeclaredIdentity = contact.Identity;
+            strike.DeclaredAge = contact.Age;
+            foreach (FormationState participant in participants) participant.NextReadyTimeBonus++;
+            FormationState leader = Find(strike.LeaderId);
+            if (leader != null && !leader.Friction) MarkEntropy(leader, EntropySource.Friction);
+            AddLog($"T{Time:00}  SYNCHRONIZED STRIKE RETASKED — new Contact aim {aim}; every participant receives +1 Time and the leader marks Friction.", strike.Side);
+            message = Log[0];
+            return true;
+        }
+
+        public bool ResolveSynchronizedStrike(SynchronizedStrikeState strike, Reaction reaction, HexCoord? evadeDestination, bool continueBlind, out SynchronizedStrikeResult result, out string message)
+        {
+            result = null;
+            FormationState leader = strike == null ? null : Find(strike.LeaderId);
+            if (strike == null || ReadySynchronizedStrikeFor(leader) != strike) { message = "That Synchronized Strike is not Ready to resolve."; return false; }
+            ContactState contact = Contacts.FirstOrDefault(item => item.Owner == strike.Side && item.TargetId == strike.ContactTargetId);
+            if ((contact == null || contact.IsLost) && !continueBlind) { message = "The Contact is lost. Abort, retask, or explicitly continue against the declared aim."; return false; }
+            List<FormationState> participants = StrikeParticipants(strike);
+            if (participants.Count != strike.Participants.Count || participants.Any(item => item.IsDestroyed || item.SynchronizedStrikeId != strike.Id)) { message = "A reserved participant is no longer valid; abort or retask the strike."; return false; }
+            foreach (FormationState participant in participants)
+            {
+                Salvo participantSalvo = strike.Participants.First(item => item.FormationId == participant.Id).Salvo;
+                if (HexCoord.Distance(participant.Position, strike.Aim) > Rules.StrikeRange(participant.Kind, participantSalvo)) { message = $"{participant.Name} is outside range at resolution; abort or retask the strike."; return false; }
+            }
+
+            FormationState target = contact != null && !contact.IsFalse ? Find(contact.TargetId) : null;
+            bool hit = target != null && !target.IsDestroyed && target.Position.Equals(strike.Aim);
+            if (hit && !AvailableReactions(leader, target).Contains(reaction)) { message = $"{reaction} is not a legal Reaction for {target.Name}."; return false; }
+            if (!hit) reaction = Reaction.None;
+            var resolved = new SynchronizedStrikeResult { StrikeId = strike.Id, Hit = hit, ContinuedBlind = continueBlind, Reaction = reaction };
+            resolvingSynchronizedStrikeId = strike.Id;
+            int defenseSupport = hit ? ConsumeSupportBonus(target, SupportKind.Defense) : 0;
+            int screenDefense = hit ? ConsumeScreenDefenseBonus(target) : 0;
+            int preparedReactionDefense = hit ? target.ReactionDefenseBonus : 0;
+            int targeting = Rules.TargetingModifier(contact ?? new ContactState { Location = strike.DeclaredLocation, Identity = strike.DeclaredIdentity, Age = strike.DeclaredAge }, AgeTwoTargetingPenalty);
+            for (int index = 0; index < participants.Count; index++)
+            {
+                FormationState attacker = participants[index];
+                Salvo participantSalvo = strike.Participants.First(item => item.FormationId == attacker.Id).Salvo;
+                int salvoModifier = participantSalvo == Salvo.Standard && attacker.HasEffect("X-11") ? Rules.SalvoModifier(Salvo.Light) : Rules.SalvoModifier(participantSalvo);
+                int attack = attacker.EffectiveStrike + salvoModifier + ConsumeSupportBonus(attacker, SupportKind.Strike) + targeting;
+                var combat = new CombatResult { Attack = attack, Reaction = index == 0 ? reaction : Reaction.None };
+                if (hit && !target.IsDestroyed)
+                {
+                    int reactionDefense = index == 0 && (reaction == Reaction.Defend || reaction == Reaction.Evade) ? 1 : 0;
+                    int defense = Math.Max(0, target.EffectiveDefense - (index == 0 ? 0 : preparedReactionDefense) + reactionDefense + (index == 0 ? defenseSupport + screenDefense : 0) - (target.Destruction ? 1 : 0) - index);
+                    CombatBand band = Rules.BandFor(attack - defense);
+                    int roll = Roll();
+                    DamageState damage = Rules.DamageFor(band, roll);
+                    combat.Defense = defense; combat.Difference = attack - defense; combat.Band = band; combat.Roll = roll; combat.Damage = damage; combat.ResultingDamage = ApplyDamage(target, damage);
+                }
+                else combat.ResultingDamage = target?.Damage ?? DamageState.None;
+                if (participantSalvo == Salvo.Heavy) attacker.WeaponExpended = true;
+                if (attacker.HasEffect("F-04")) DegradeEndurance(attacker);
+                resolved.Attacks.Add(combat);
+            }
+            if (hit) target.ReactionDefenseBonus = 0;
+            if (hit) ResolveSynchronizedReactionAfterVolley(leader, target, contact, reaction, evadeDestination, resolved);
+            resolvingSynchronizedStrikeId = null;
+            if (participants.Count >= 3)
+            {
+                int start = strike.PriorPlanning ? 1 : 0;
+                for (int index = start; index < participants.Count; index++) if (!participants[index].Friction) MarkEntropy(participants[index], EntropySource.Friction);
+            }
+            foreach (FormationState participant in participants) CompleteSynchronizedStrikeAction(participant,
+                participant.Id == strike.DeconflictedFormationId || strike.CoordinationSupportedFormationIds.Contains(participant.Id) ? 0 : 1);
+            foreach (FormationState participant in participants) ClearSynchronizedReservation(participant);
+            SynchronizedStrikes.Remove(strike);
+            ReleaseCommandForFormation(leader);
+            string attacks = string.Join("; ", resolved.Attacks.Select((item, index) => $"{participants[index].Name} {item.Attack}v{item.Defense} {item.Damage}"));
+            AddLog($"T{Time:00}  SYNCHRONIZED STRIKE RESOLVED — {participants.Count} attacks at {strike.Aim}; {(hit ? attacks : "no confirmed effect")}. One Reaction: {reaction}.");
+            CommandEvent?.Invoke(leader, "SynchronizedStrikeResolved", $"{strike.Id}; {participants.Count}; hit {hit}; {reaction}");
+            lastActingSide = strike.Side;
+            result = resolved;
+            AdvanceToNextFormation();
+            message = Log[0];
+            return true;
+        }
 
         public bool Strike(FormationState attacker, FormationState target, Salvo salvo, Reaction reaction, HexCoord? evadeDestination, out CombatResult result, out string message)
         {
@@ -948,6 +1134,104 @@ namespace SeaOfUncertainty.Core
 
         private static void SyncCommandCount(SideState side) => side.CommandSlots = side.SlotStates.Count(slot => slot.Status == CommandSlotStatus.Free);
 
+        private List<FormationState> StrikeParticipants(SynchronizedStrikeState strike)
+            => (strike?.Participants ?? new List<SynchronizedStrikeParticipant>()).Select(item => Find(item.FormationId)).Where(item => item != null).ToList();
+
+        private static void ClearSynchronizedReservation(FormationState formation)
+        {
+            if (formation == null) return;
+            formation.SynchronizedStrikeId = null;
+            formation.IsSynchronizedStrikeLeader = false;
+        }
+
+        private void CancelSynchronizedStrikeForDestroyedParticipant(FormationState destroyed)
+        {
+            SynchronizedStrikeState strike = SynchronizedStrikeFor(destroyed);
+            if (strike == null || strike.Id == resolvingSynchronizedStrikeId) return;
+            List<FormationState> participants = StrikeParticipants(strike);
+            FormationState originalLeader = Find(strike.LeaderId);
+            FormationState survivingLeader = originalLeader != null && !originalLeader.IsDestroyed ? originalLeader : participants.FirstOrDefault(item => !item.IsDestroyed);
+            foreach (FormationState participant in participants)
+            {
+                if (!participant.IsDestroyed) participant.ReadyTime = Math.Max(participant.ReadyTime, Time + 1);
+                ClearSynchronizedReservation(participant);
+            }
+            SynchronizedStrikes.Remove(strike);
+            ReleaseCommandForFormation(originalLeader);
+            if (survivingLeader != null && !survivingLeader.Friction) MarkEntropy(survivingLeader, EntropySource.Friction);
+            AddLog($"T{Time:00}  SYNCHRONIZED STRIKE FORCED ABORT — {destroyed.Name} was Destroyed before Strike Time; reservations and Command released.", strike.Side);
+            CommandEvent?.Invoke(survivingLeader, "SynchronizedStrikeForcedAbort", $"{strike.Id}; destroyed {destroyed.Id}");
+        }
+
+        private void ResolveSynchronizedReactionAfterVolley(FormationState leader, FormationState target, ContactState contact, Reaction reaction, HexCoord? evadeDestination, SynchronizedStrikeResult result)
+        {
+            if (reaction == Reaction.None || target == null) return;
+            target.HasReacted = true;
+            target.ReactionDefenseBonus = 0;
+            if (reaction == Reaction.Evade)
+            {
+                int allowance = target.OrderlyWithdrawalReady ? 2 : 1;
+                List<HexCoord> legal = LegalEvadeDestinations(leader, target, allowance).ToList();
+                HexCoord destination = evadeDestination.HasValue && legal.Contains(evadeDestination.Value) ? evadeDestination.Value : legal.FirstOrDefault();
+                if (legal.Count > 0 && !target.IsDestroyed)
+                {
+                    target.Position = destination;
+                    if (contact != null) { contact.LastKnownPosition = destination; contact.Age = 0; contact.HasContradictoryPosition = false; }
+                    if (result.Attacks.Count > 0) { result.Attacks[0].Withdrew = true; result.Attacks[0].WithdrawalDestination = destination; }
+                }
+                target.OrderlyWithdrawalReady = false;
+            }
+            else if (reaction == Reaction.Counterattack && !target.IsDestroyed && leader != null && !leader.IsDestroyed)
+            {
+                ContactState returnContact = ContactFor(target.Side, leader.Id);
+                if (returnContact == null) return;
+                int attack = target.EffectiveStrike + Rules.SalvoModifier(Salvo.Light) + Rules.TargetingModifier(returnContact, AgeTwoTargetingPenalty);
+                int defense = leader.EffectiveDefense - (leader.Destruction ? 1 : 0);
+                CombatBand band = Rules.BandFor(attack - defense);
+                int roll = Roll();
+                DamageState damage = Rules.DamageFor(band, roll);
+                CombatResult first = result.Attacks.FirstOrDefault();
+                if (first != null)
+                {
+                    first.Counterattacked = true; first.CounterattackRoll = roll; first.CounterattackDamage = damage; first.CounterattackResultingDamage = ApplyDamage(leader, damage);
+                }
+            }
+        }
+
+        private void CompleteSynchronizedStrikeAction(FormationState formation, int coordinationDrift)
+        {
+            ClearPatrol(formation);
+            ClearSupport(formation);
+            bool acceptedRisk = formation.IgnoreEntropyNextAction;
+            int cost = Rules.ActionTime(ActionKind.Strike) + coordinationDrift + formation.NextReadyTimeBonus;
+            if (formation.Friction && !acceptedRisk) cost++;
+            if (formation.HasEffect("F-01")) cost++;
+            if (formation.HasEffect("F-09")) cost++;
+            if (formation.HasEffect("X-12")) cost++;
+            formation.ReadyTime = Time + cost;
+            formation.HasReacted = false;
+            formation.MajorActions++;
+            if (formation.MajorActions >= 3)
+            {
+                formation.MajorActions = 0;
+                if (formation.Endurance < Endurance.Critical) formation.Endurance++;
+            }
+            if (acceptedRisk) MarkEntropy(formation, EntropySource.Friction);
+            formation.CommandBonus = 0; formation.MoveBonus = 0; formation.SignatureBonus = 0; formation.MovementSignatureModifier = 0;
+            formation.Loud = false; formation.FreeFocusedSearch = false; formation.SuppressDestructionNextAction = false; formation.IgnoreEntropyNextAction = false;
+            formation.NextReadyTimeBonus = 0; formation.MissionChangeLockedUntilAction = false; formation.CompletedActions++;
+            EntropyResponseWindows.RemoveAll(window => window.FormationId == formation.Id && formation.CompletedActions >= window.ExpiresAfterCompletedActions);
+            if (formation.HasEffect("F-02") && !EntropyResponseWindows.Any(window => window.FormationId == formation.Id && window.CardId == "F-02")) ResolveAttachedEffect(formation, "F-02");
+            if (formation.Damage == DamageState.Light && formation.LightDamageExpiresAfterAction > 0 && formation.CompletedActions >= formation.LightDamageExpiresAfterAction)
+            {
+                formation.Damage = DamageState.None;
+                formation.LightDamageExpiresAfterAction = 0;
+            }
+            TrackResponseDraw(formation.Side);
+            ReleaseCommandForFormation(formation);
+            ActionCompleted?.Invoke(formation, ActionKind.Strike);
+        }
+
         private void CompleteAction(FormationState formation, ActionKind action, bool generatedFriction, string entry, int additionalTime = 0, int movementSignatureAfter = 0, bool loudAfterAction = false)
         {
             if (action != ActionKind.Patrol) ClearPatrol(formation);
@@ -964,6 +1248,7 @@ namespace SeaOfUncertainty.Core
             if (Rules.IsMajorAction(action))
             {
                 formation.MajorActions++;
+                TrackResponseDraw(formation.Side);
                 if (formation.MajorActions >= 3)
                 {
                     formation.MajorActions = 0;
@@ -1036,6 +1321,7 @@ namespace SeaOfUncertainty.Core
             if (combined >= DamageState.Heavy && combined > previous) MarkEntropy(target, EntropySource.Destruction);
             if (target.IsDestroyed)
             {
+                CancelSynchronizedStrikeForDestroyedParticipant(target);
                 ClearPatrol(target);
                 ClearSupport(target);
                 foreach (FormationState formation in Formations.Where(candidate => candidate.SupportRecipientId == target.Id)) ClearSupport(formation);
@@ -1186,9 +1472,11 @@ namespace SeaOfUncertainty.Core
         public CommandResponseDefinition DrawCommandResponse(Side side)
         {
             CommandResponseDeckState deck = CommandResponseDecks.First(state => state.Side == side);
+            if (deck.Hand.Count >= 5) return null;
             if (deck.DrawPile.Count == 0 && deck.DiscardPile.Count > 0)
             {
-                deck.DrawPile.AddRange(deck.DiscardPile);
+                // A deterministic reverse-cut models reshuffling without adding unsaved RNG state.
+                for (int index = deck.DiscardPile.Count - 1; index >= 0; index--) deck.DrawPile.Add(deck.DiscardPile[index]);
                 deck.DiscardPile.Clear();
             }
             if (deck.DrawPile.Count == 0) return null;
@@ -1196,6 +1484,35 @@ namespace SeaOfUncertainty.Core
             deck.DrawPile.RemoveAt(0);
             deck.Hand.Add(id);
             return CommandResponseCatalog.Find(id);
+        }
+
+        private void TrackResponseDraw(Side side)
+        {
+            CommandResponseDeckState deck = CommandResponseDecks.First(state => state.Side == side);
+            deck.MajorActionsTowardDraw++;
+            AwardPendingResponseDraws(side);
+        }
+
+        private void AwardPendingResponseDraws(Side side)
+        {
+            CommandResponseDeckState deck = CommandResponseDecks.First(state => state.Side == side);
+            while (deck.MajorActionsTowardDraw >= 3 && deck.Hand.Count < 5)
+            {
+                CommandResponseDefinition card = DrawCommandResponse(side);
+                if (card == null) break;
+                deck.MajorActionsTowardDraw -= 3;
+                AddLog($"T{Time:00}  RESPONSE DRAW — {side} drew one Command Response after three Major Actions ({deck.Hand.Count}/5 in hand).", side);
+            }
+        }
+
+        private void DiscardResponseCard(Side side, string cardId)
+        {
+            CommandResponseDeckState deck = CommandResponseDecks.First(state => state.Side == side);
+            if (!deck.Hand.Remove(cardId)) return;
+            deck.DiscardPile.Add(cardId);
+            CommandResponseDefinition card = CommandResponseCatalog.Find(cardId);
+            AddLog($"T{Time:00}  RESPONSE PLAYED — {side}: {cardId} {card?.Title} committed to Synchronized Strike declaration.", side);
+            AwardPendingResponseDraws(side);
         }
 
         private EntropyEffectDefinition DrawApplicableCard(EntropyDeckState deck, FormationKind kind)
@@ -1479,7 +1796,17 @@ namespace SeaOfUncertainty.Core
             Side = deck.Side,
             DrawPile = new List<string>(deck.DrawPile ?? new List<string>()),
             Hand = new List<string>(deck.Hand ?? new List<string>()),
-            DiscardPile = new List<string>(deck.DiscardPile ?? new List<string>())
+            DiscardPile = new List<string>(deck.DiscardPile ?? new List<string>()),
+            MajorActionsTowardDraw = deck.MajorActionsTowardDraw
+        };
+        private static SynchronizedStrikeState CloneSynchronizedStrike(SynchronizedStrikeState strike) => new SynchronizedStrikeState
+        {
+            Id = strike.Id, Side = strike.Side, LeaderId = strike.LeaderId, ContactTargetId = strike.ContactTargetId, Aim = strike.Aim,
+            DeclaredTime = strike.DeclaredTime, StrikeTime = strike.StrikeTime, DeclaredLocation = strike.DeclaredLocation,
+            DeclaredIdentity = strike.DeclaredIdentity, DeclaredAge = strike.DeclaredAge, PriorPlanning = strike.PriorPlanning,
+            DeconflictedFormationId = strike.DeconflictedFormationId,
+            CoordinationSupportedFormationIds = new List<string>(strike.CoordinationSupportedFormationIds ?? new List<string>()),
+            Participants = (strike.Participants ?? new List<SynchronizedStrikeParticipant>()).Select(item => new SynchronizedStrikeParticipant { FormationId = item.FormationId, Salvo = item.Salvo }).ToList()
         };
         private EntropyDrawNotice PendingNoticeFor(Side side) => PendingEntropyReveals.FirstOrDefault(notice => Find(notice.FormationId)?.Side == side);
 

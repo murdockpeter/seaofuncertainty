@@ -1,0 +1,142 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using SeaOfUncertainty.Core;
+using UnityEditor;
+using UnityEngine;
+
+namespace SeaOfUncertainty.EditorTools
+{
+    public static class SynchronizedStrikeFeatureTests
+    {
+        [MenuItem("Sea of Uncertainty/Tests/Command Responses and Synchronized Strikes")]
+        public static void Run()
+        {
+            TestDeclarationSaveResolutionAndDraw();
+            TestLostContactAbort();
+            TestAiResponseUsesOwnedState();
+            Debug.Log("COMMAND RESPONSE / SYNCHRONIZED STRIKE TESTS PASSED");
+        }
+
+        private static void TestDeclarationSaveResolutionAndDraw()
+        {
+            var game = new PrototypeGame(4401);
+            FormationState leader = game.Active;
+            List<FormationState> participants = game.Formations.Where(item => item.Side == leader.Side).OrderBy(item => item.Id).Take(3).ToList();
+            if (!participants.Contains(leader)) { participants[participants.Count - 1] = leader; participants = participants.OrderBy(item => item.Id).ToList(); }
+            FormationState target = game.Formations.First(item => item.Side != leader.Side);
+            foreach (FormationState participant in participants)
+            {
+                participant.Position = target.Position;
+                participant.Friction = false;
+                participant.Disruption = false;
+                participant.Destruction = false;
+                participant.ActiveEffectCardIds.Clear();
+                participant.Ratings.Strike = 1;
+            }
+            target.Ratings.Defense = 20;
+            target.Damage = DamageState.Heavy;
+            FormationState synchronizationSupporter = game.Formations.First(item => item.Side == leader.Side && !participants.Contains(item));
+            synchronizationSupporter.Position = participants[1].Position;
+            synchronizationSupporter.SupportActive = true;
+            synchronizationSupporter.SupportKind = SupportKind.Synchronization;
+            synchronizationSupporter.SupportRecipientId = participants[1].Id;
+            ContactState contact = EnsureContact(game, leader.Side, target, LocationQuality.High, IdentityQuality.Identified);
+            CommandResponseDeckState deck = game.CommandResponseDecks.First(item => item.Side == leader.Side);
+            PutInHand(deck, "C-02"); PutInHand(deck, "C-10");
+            deck.MajorActionsTowardDraw = 0;
+            int handBefore = deck.Hand.Count;
+            Assert(game.DeclareSynchronizedStrike(leader, participants, contact, target.Position, Salvo.Standard, true, participants.Last().Id, out SynchronizedStrikeState strike, out string declaration), declaration);
+            Assert(strike.StrikeTime >= strike.DeclaredTime + 1, "Strike Time must be in the future.");
+            Assert(game.Sides[leader.Side].CommandSlots == 2, "Declaration must hold one Command Slot.");
+            Assert(participants.All(item => item.SynchronizedStrikeId == strike.Id), "All participants must be reserved.");
+            Assert(!deck.Hand.Contains("C-02") && !deck.Hand.Contains("C-10"), "C-02 and C-10 must discard atomically at declaration.");
+            Assert(strike.CoordinationSupportedFormationIds.Contains(participants[1].Id) && !synchronizationSupporter.SupportActive, "Stored Synchronization Support must be consumed into the event.");
+
+            PrototypeGame.SaveData saved = game.CaptureState();
+            var restored = new PrototypeGame(4401);
+            restored.RestoreState(saved);
+            Assert(restored.SynchronizedStrikes.Count == 1 && restored.SynchronizedStrikes[0].Participants.Count == 3, "Pending synchronized event must survive save/load.");
+            AdvanceUntilSynchronizedReady(restored);
+            SynchronizedStrikeState restoredStrike = restored.SynchronizedStrikes[0];
+            FormationState restoredTarget = restored.Find(target.Id);
+            Reaction reaction = restored.AvailableReactions(restored.Active, restoredTarget).Contains(Reaction.Defend) ? Reaction.Defend : Reaction.None;
+            Assert(restored.ResolveSynchronizedStrike(restoredStrike, reaction, null, false, out SynchronizedStrikeResult result, out string resolution), resolution);
+            Assert(result.Hit && result.Attacks.Count == 3, "All three reserved attacks must resolve against a valid aim.");
+            Assert(result.Attacks[1].Defense == result.Attacks[0].Defense - (reaction == Reaction.Defend ? 2 : 1), "Second attack must lose sequential Defense and the first-only Reaction bonus.");
+            Assert(result.Attacks[2].Defense == result.Attacks[1].Defense - 1, "Third attack must lose another Defense step.");
+            List<FormationState> resolvedParticipants = participants.Select(item => restored.Find(item.Id)).ToList();
+            Assert(!resolvedParticipants[0].Friction && resolvedParticipants.Skip(1).All(item => item.Friction), "C-02 must ignore only the first Friction generated by a 3-participant strike.");
+            Assert(resolvedParticipants.All(item => string.IsNullOrEmpty(item.SynchronizedStrikeId)), "Reservations must clear after resolution.");
+            Assert(restored.Sides[leader.Side].CommandSlots == 3, "The synchronized Command Slot must release after resolution.");
+            CommandResponseDeckState restoredDeck = restored.CommandResponseDecks.First(item => item.Side == leader.Side);
+            Assert(restoredDeck.Hand.Count == Math.Min(5, handBefore - 2 + 1), "Three participant Major Actions must award one replacement draw.");
+            Assert(restoredDeck.MajorActionsTowardDraw == 0, "The three-action draw counter must reset after its award.");
+        }
+
+        private static void TestLostContactAbort()
+        {
+            var game = new PrototypeGame(4402);
+            FormationState leader = game.Active;
+            FormationState partner = game.Formations.Where(item => item.Side == leader.Side && item != leader).OrderBy(item => item.Id).First();
+            FormationState target = game.Formations.First(item => item.Side != leader.Side);
+            leader.Position = target.Position; partner.Position = target.Position;
+            ContactState contact = EnsureContact(game, leader.Side, target, LocationQuality.High, IdentityQuality.Identified);
+            Assert(game.DeclareSynchronizedStrike(leader, new[] { leader, partner }, contact, target.Position, Salvo.Standard, false, null, out SynchronizedStrikeState strike, out string declaration), declaration);
+            AdvanceUntilSynchronizedReady(game);
+            contact.IsLost = true;
+            Assert(!game.ResolveSynchronizedStrike(strike, Reaction.None, null, false, out _, out string blocked) && blocked.Contains("lost"), "Lost Contact must require an explicit branch.");
+            Assert(game.AbortSynchronizedStrike(strike, out string aborted), aborted);
+            Assert(game.SynchronizedStrikes.Count == 0 && string.IsNullOrEmpty(leader.SynchronizedStrikeId) && string.IsNullOrEmpty(partner.SynchronizedStrikeId), "Abort must release the event and participants.");
+            Assert(leader.Friction && game.Sides[leader.Side].CommandSlots == 3, "Abort must mark leader Friction and release Command.");
+        }
+
+        private static void TestAiResponseUsesOwnedState()
+        {
+            var game = new PrototypeGame(4403);
+            FormationState actor = game.Active;
+            actor.Endurance = Endurance.Extended;
+            CommandResponseDeckState deck = game.CommandResponseDecks.First(item => item.Side == actor.Side);
+            deck.Hand.Clear();
+            foreach (string id in new[] { "C-19", "C-02", "C-04", "C-07", "C-14" }) { deck.DrawPile.Remove(id); deck.DiscardPile.Remove(id); deck.Hand.Add(id); }
+            deck.MajorActionsTowardDraw = 3;
+            Assert(!game.PlayCommandResponse(actor.Side, "C-02", null, null, null, out string window) && window.Contains("declaring"), "C-02 must reject play outside synchronized declaration.");
+            Assert(PrototypeAiCommander.TryPlayUsefulResponse(game, out string message), message);
+            Assert(actor.Endurance == Endurance.Ready && deck.DiscardPile.Contains("C-19"), "AI must play a useful owned Response through the normal public API.");
+            Assert(deck.Hand.Count == 5 && deck.MajorActionsTowardDraw == 0, "A full hand must defer an earned draw until a successful play opens a slot.");
+        }
+
+        private static ContactState EnsureContact(PrototypeGame game, Side owner, FormationState target, LocationQuality location, IdentityQuality identity)
+        {
+            ContactState contact = game.Contacts.FirstOrDefault(item => item.Owner == owner && item.TargetId == target.Id) ?? new ContactState { Owner = owner, TargetId = target.Id };
+            if (!game.Contacts.Contains(contact)) game.Contacts.Add(contact);
+            contact.LastKnownPosition = target.Position; contact.Location = location; contact.Identity = identity; contact.Age = 0; contact.MovementUncertainty = 0; contact.IsLost = false; contact.IsFalse = false; contact.HasContradictoryPosition = false;
+            return contact;
+        }
+
+        private static void PutInHand(CommandResponseDeckState deck, string id)
+        {
+            deck.DrawPile.Remove(id); deck.DiscardPile.Remove(id);
+            if (!deck.Hand.Contains(id)) deck.Hand.Add(id);
+            while (deck.Hand.Count > 5) deck.DrawPile.Add(deck.Hand[0]);
+            while (deck.Hand.Count > 5) deck.Hand.RemoveAt(0);
+        }
+
+        private static void AdvanceUntilSynchronizedReady(PrototypeGame game)
+        {
+            int guard = 0;
+            while (game.ReadySynchronizedStrikeFor(game.Active) == null && guard++ < 64)
+            {
+                FormationState active = game.Active;
+                Assert(active != null, "Ready scheduler ended before the synchronized event.");
+                Assert(game.Hold(active, out string message), message);
+            }
+            Assert(game.ReadySynchronizedStrikeFor(game.Active) != null, "Synchronized event did not become Ready deterministically.");
+        }
+
+        private static void Assert(bool condition, string message)
+        {
+            if (!condition) throw new InvalidOperationException(message);
+        }
+    }
+}

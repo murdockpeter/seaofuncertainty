@@ -33,6 +33,8 @@ namespace SeaOfUncertainty.Prototype
         private AiDecision pendingAiStrike;
         private ContactState pendingStrikeContact;
         private HexCoord pendingStrikeAim;
+        private SynchronizedStrikeState pendingSynchronizedStrike;
+        private bool pendingSynchronizedBlind;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -258,7 +260,7 @@ namespace SeaOfUncertainty.Prototype
                 backend.ToolkitBeginDecision();
                 yield return new WaitForSecondsRealtime(backend.ReducedMotion ? .05f : .22f);
                 AiDecision decision = backend.ToolkitChooseAiDecision();
-                if (decision?.Action == ActionKind.Strike)
+                if (decision?.Action == ActionKind.Strike && !decision.DeclareSynchronizedStrike)
                 {
                     ContactState contact = backend.Game.Contacts.FirstOrDefault(item => item.Owner == backend.Game.Active.Side && !item.IsLost && item.TargetId == decision.TargetId);
                     FormationState target = backend.Game.Find(decision.TargetId);
@@ -346,6 +348,12 @@ namespace SeaOfUncertainty.Prototype
             reason.tooltip = "Lowest Ready Time. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable ID.";
             panel.Add(reason);
             ScrollView scroll = new ScrollView();
+            foreach (SynchronizedStrikeState strike in backend.Game.SynchronizedStrikes.Where(item => item.Side == backend.Game.Active.Side).OrderBy(item => item.StrikeTime))
+            {
+                Button sync = ActionButton($"SYNC EVENT  •  T{strike.StrikeTime:00}\n{strike.Participants.Count} FORMATIONS  •  AIM {strike.Aim}\nCOMMAND SLOT HELD", () => UpdateDossier(null), "selected");
+                sync.AddToClassList("timeline-row");
+                scroll.Add(sync);
+            }
             int queuePosition = 0;
             foreach (FormationState formation in backend.Game.ActivationQueue())
             {
@@ -366,6 +374,20 @@ namespace SeaOfUncertainty.Prototype
         private VisualElement BuildActions()
         {
             VisualElement panel = Panel("actions");
+            SynchronizedStrikeState readyStrike = backend.Game.ReadySynchronizedStrikeFor(backend.Game.Active);
+            if (readyStrike != null)
+            {
+                ContactState current = backend.Game.Contacts.FirstOrDefault(item => item.Owner == readyStrike.Side && item.TargetId == readyStrike.ContactTargetId);
+                panel.Add(Text($"SYNCHRONIZED STRIKE READY  •  T{readyStrike.StrikeTime:00}", "subheading", "amber"));
+                panel.Add(Text($"{readyStrike.Participants.Count} reserved formations  •  aim {readyStrike.Aim}  •  one defender Reaction  •  Defense −1 after each attack\nContact: {(current == null || current.IsLost ? "LOST — abort, retask, or continue blind" : current.Summary)}", "body-copy"));
+                VisualElement resolution = El("row");
+                resolution.Add(ActionButton(current == null || current.IsLost ? "CONTINUE BLIND" : "RESOLVE VOLLEY", () => BeginSynchronizedStrikeResolution(readyStrike, current == null || current.IsLost), "primary"));
+                resolution.Add(ActionButton("RETASK  •  +1 TIME / FRICTION", () => ShowSynchronizedRetaskContacts(readyStrike), "warning"));
+                resolution.Add(ActionButton("ABORT  •  +1 TIME / FRICTION", () => ResolveAction(() => backend.ToolkitAbortSynchronizedStrike(readyStrike))));
+                panel.Add(resolution);
+                panel.Add(Text(backend.LastMessage, "muted"));
+                return panel;
+            }
             SideState commandSide = backend.Game.Sides[backend.Game.Active.Side];
             VisualElement actionHeader = El("row");
             actionHeader.Add(Text("CHOOSE AN ACTION", "subheading"));
@@ -388,6 +410,7 @@ namespace SeaOfUncertainty.Prototype
             assignments.Add(ActionButton("6  PATROL / SCREEN • 1", ShowPatrolSetup));
             assignments.Add(ActionButton("7  SUPPORT • 1", ShowSupportSetup));
             assignments.Add(ActionButton("8  REPLENISH • 3", () => { SelectAction(ToolkitActionMode.Replenish); ShowReplenishmentSetup(); }));
+            assignments.Add(ActionButton("9  SYNC STRIKE", ShowSynchronizedStrikeContacts));
             panel.Add(assignments);
             VisualElement modes = El("row");
             if (actionMode == ToolkitActionMode.Move)
@@ -780,6 +803,116 @@ namespace SeaOfUncertainty.Prototype
             modal.Add(ActionButton("BACK", () => ShowMissionPostures(formation, task, objective, objectiveId, objectiveHex)));
         }
 
+        private void ShowSynchronizedStrikeContacts()
+        {
+            FormationState leader = backend.Game.Active;
+            VisualElement modal = Modal("SYNCHRONIZED STRIKE • SELECT CONTACT");
+            modal.Add(Text("Reserve two to four formations now. The event executes at the latest participant Ready Time, no earlier than T+1, and holds one Command Slot.", "body-copy"));
+            foreach (ContactState contact in backend.Game.Contacts.Where(item => item.Owner == leader.Side && !item.IsLost).OrderByDescending(item => item.Location).ThenBy(item => item.TargetId))
+            {
+                ContactState selected = contact;
+                modal.Add(ActionButton($"{selected.Summary}  •  {selected.LastKnownPosition}", () => ShowSynchronizedStrikeAims(selected)));
+            }
+            modal.Add(ActionButton("CANCEL", CloseOverlay));
+        }
+
+        private void ShowSynchronizedStrikeAims(ContactState contact)
+        {
+            VisualElement modal = Modal("SYNCHRONIZED STRIKE • SELECT AIM");
+            modal.Add(Text("Every selected participant must be in range of this aim at declaration and resolution.", "body-copy"));
+            foreach (HexCoord aim in backend.Game.ContactPossibleHexes(contact).OrderBy(hex => HexCoord.Distance(hex, contact.LastKnownPosition)).ThenBy(hex => hex.Q).ThenBy(hex => hex.R))
+            {
+                HexCoord selected = aim;
+                int eligible = backend.Game.EligibleSynchronizedStrikeParticipants(backend.Game.Active.Side, contact, selected, salvo).Count;
+                Button button = ActionButton($"HEX {selected}  •  {eligible} ELIGIBLE AT {salvo.ToString().ToUpperInvariant()}", () => ShowSynchronizedStrikeParticipants(contact, selected));
+                button.SetEnabled(eligible >= 2 && backend.Game.EligibleSynchronizedStrikeParticipants(backend.Game.Active.Side, contact, selected, salvo).Contains(backend.Game.Active));
+                modal.Add(button);
+            }
+            modal.Add(ActionButton("BACK", ShowSynchronizedStrikeContacts));
+        }
+
+        private void ShowSynchronizedStrikeParticipants(ContactState contact, HexCoord aim)
+        {
+            FormationState leader = backend.Game.Active;
+            List<FormationState> eligible = backend.Game.EligibleSynchronizedStrikeParticipants(leader.Side, contact, aim, salvo).ToList();
+            VisualElement modal = Modal("SYNCHRONIZED STRIKE • PARTICIPANTS");
+            modal.Add(Text($"Leader {leader.Name}. Choose a package; all participants are reserved with no intervening actions. {salvo} is used by every participant.", "body-copy"));
+            bool hasC02 = backend.ToolkitResponseHand(leader.Side).Any(card => card.Id == "C-02");
+            bool hasC10 = backend.ToolkitResponseHand(leader.Side).Any(card => card.Id == "C-10");
+            foreach (List<FormationState> package in SynchronizedPackages(leader, eligible))
+            {
+                List<FormationState> selected = package;
+                string names = string.Join(" + ", selected.Select(item => item.Name.ToUpperInvariant()));
+                modal.Add(ActionButton(names, () => CommitSynchronizedStrike(selected, contact, aim, false, null), "primary"));
+                if (hasC02) modal.Add(ActionButton(names + "  •  C-02 PRIOR PLANNING", () => CommitSynchronizedStrike(selected, contact, aim, true, null)));
+                if (hasC10)
+                {
+                    FormationState deconflicted = selected.Last();
+                    modal.Add(ActionButton(names + $"  •  C-10 FOR {deconflicted.Name.ToUpperInvariant()}", () => CommitSynchronizedStrike(selected, contact, aim, false, deconflicted.Id)));
+                    if (hasC02) modal.Add(ActionButton(names + $"  •  C-02 + C-10 FOR {deconflicted.Name.ToUpperInvariant()}", () => CommitSynchronizedStrike(selected, contact, aim, true, deconflicted.Id)));
+                }
+            }
+            modal.Add(ActionButton("BACK", () => ShowSynchronizedStrikeAims(contact)));
+        }
+
+        private static IEnumerable<List<FormationState>> SynchronizedPackages(FormationState leader, List<FormationState> eligible)
+        {
+            List<FormationState> others = eligible.Where(item => item != leader).OrderBy(item => item.Id).ToList();
+            int combinations = 1 << others.Count;
+            for (int mask = 1; mask < combinations; mask++)
+            {
+                var package = new List<FormationState> { leader };
+                for (int index = 0; index < others.Count; index++) if ((mask & (1 << index)) != 0) package.Add(others[index]);
+                if (package.Count <= 4) yield return package;
+            }
+        }
+
+        private void CommitSynchronizedStrike(List<FormationState> participants, ContactState contact, HexCoord aim, bool priorPlanning, string deconflictedFormationId)
+        {
+            CloseOverlay();
+            ResolveAction(() => backend.ToolkitDeclareSynchronizedStrike(participants, contact, aim, salvo, priorPlanning, deconflictedFormationId));
+        }
+
+        private void BeginSynchronizedStrikeResolution(SynchronizedStrikeState strike, bool continueBlind)
+        {
+            pendingSynchronizedStrike = strike;
+            pendingSynchronizedBlind = continueBlind;
+            ContactState contact = backend.Game.Contacts.FirstOrDefault(item => item.Owner == strike.Side && item.TargetId == strike.ContactTargetId);
+            FormationState target = contact == null || contact.IsFalse ? null : backend.Game.Find(contact.TargetId);
+            if (target != null && !target.IsDestroyed && target.Position.Equals(strike.Aim))
+            {
+                Salvo firstSalvo = strike.Participants.Count == 0 ? Salvo.Standard : strike.Participants[0].Salvo;
+                BeginStrikeReaction(target, firstSalvo);
+            }
+            else ResolveAction(() => backend.ToolkitResolveSynchronizedStrike(strike, Reaction.None, null, continueBlind));
+        }
+
+        private void ShowSynchronizedRetaskContacts(SynchronizedStrikeState strike)
+        {
+            VisualElement modal = Modal("SYNCHRONIZED STRIKE • RETASK CONTACT");
+            foreach (ContactState contact in backend.Game.Contacts.Where(item => item.Owner == strike.Side && !item.IsLost).OrderByDescending(item => item.Location).ThenBy(item => item.TargetId))
+            {
+                ContactState selected = contact;
+                modal.Add(ActionButton($"{selected.Summary}  •  {selected.LastKnownPosition}", () => ShowSynchronizedRetaskAims(strike, selected)));
+            }
+            modal.Add(ActionButton("CANCEL", CloseOverlay));
+        }
+
+        private void ShowSynchronizedRetaskAims(SynchronizedStrikeState strike, ContactState contact)
+        {
+            VisualElement modal = Modal("SYNCHRONIZED STRIKE • RETASK AIM");
+            foreach (HexCoord aim in backend.Game.ContactPossibleHexes(contact).OrderBy(hex => HexCoord.Distance(hex, contact.LastKnownPosition)).ThenBy(hex => hex.Q).ThenBy(hex => hex.R))
+            {
+                HexCoord selected = aim;
+                modal.Add(ActionButton("HEX " + selected, () =>
+                {
+                    backend.ToolkitRetaskSynchronizedStrike(strike, contact, selected);
+                    if (backend.LastToolkitActionSucceeded) ShowGame(); else ShowSynchronizedRetaskAims(strike, contact);
+                }));
+            }
+            modal.Add(ActionButton("BACK", () => ShowSynchronizedRetaskContacts(strike)));
+        }
+
         private void SelectAction(ToolkitActionMode mode)
         {
             actionMode = mode;
@@ -868,6 +1001,7 @@ namespace SeaOfUncertainty.Prototype
             ReactionControl control = PrototypeGame.ReactionController(backend.SelectedMode, backend.HumanSide, target.Side);
             if (control == ReactionControl.Ai)
             {
+                PrototypeAiCommander.TryPrepareReactionResponse(backend.Game, target, out _);
                 Reaction aiReaction = PrototypeAiCommander.ChooseReaction(backend.Game, backend.Game.Active, target);
                 HexCoord? aiDestination = aiReaction == Reaction.Evade ? PrototypeAiCommander.ChooseEvadeDestination(backend.Game, backend.Game.Active, target) : null;
                 ResolvePendingStrike(aiReaction, aiDestination);
@@ -903,6 +1037,11 @@ namespace SeaOfUncertainty.Prototype
             card.Add(Text(defender.Name.ToUpperInvariant(), "front-title"));
             card.Add(Text($"Attacker: {attackerLabel}\nDefender Reaction is available and does not change Ready Time. The choice is consumed until this Formation completes its own Action.", "body-copy"));
             IReadOnlyList<Reaction> legal = backend.Game.AvailableReactions(attacker, defender);
+            IReadOnlyList<CommandResponseDefinition> responseHand = backend.ToolkitResponseHand(defender.Side);
+            if (responseHand.Any(response => response.Id == "C-16") && defender.ReactionDefenseBonus == 0)
+                card.Add(ActionButton("PLAY C-16 COVERING FIRES  •  +1 DEFENSE", () => { backend.ToolkitPlayResponseForSide(defender.Side, "C-16", defender); ShowReactionChoice(); }, "warning"));
+            if (responseHand.Any(response => response.Id == "C-18") && !defender.OrderlyWithdrawalReady)
+                card.Add(ActionButton("PLAY C-18 ORDERLY WITHDRAWAL  •  EVADE 2", () => { backend.ToolkitPlayResponseForSide(defender.Side, "C-18", defender); ShowReactionChoice(); }, "warning"));
             if (legal.Contains(Reaction.Defend)) card.Add(ActionButton("DEFEND  •  +1 DEFENSE", () => ResolvePendingStrike(Reaction.Defend, null), "primary"));
             if (legal.Contains(Reaction.Evade)) card.Add(ActionButton($"EVADE  •  +1 DEFENSE  •  MOVE {(defender.OrderlyWithdrawalReady ? 2 : 1)} AFTER", ShowEvadeDestinations));
             if (legal.Contains(Reaction.Counterattack)) card.Add(ActionButton("COUNTERATTACK  •  LIGHT STRIKE AFTER  •  NO DEFENSE BONUS", () => ResolvePendingStrike(Reaction.Counterattack, null), "warning"));
@@ -944,11 +1083,20 @@ namespace SeaOfUncertainty.Prototype
         {
             FormationState target = pendingReactionTarget;
             AiDecision aiDecision = pendingAiStrike;
+            SynchronizedStrikeState synchronizedStrike = pendingSynchronizedStrike;
+            bool continuedBlind = pendingSynchronizedBlind;
             ContactState contact = pendingStrikeContact;
             HexCoord aim = pendingStrikeAim;
             pendingReactionTarget = null;
             pendingAiStrike = null;
             pendingStrikeContact = null;
+            pendingSynchronizedStrike = null;
+            pendingSynchronizedBlind = false;
+            if (synchronizedStrike != null)
+            {
+                ResolveAction(() => backend.ToolkitResolveSynchronizedStrike(synchronizedStrike, reaction, evadeDestination, continuedBlind));
+                return;
+            }
             if (aiDecision == null)
             {
                 if (contact != null) ResolveAction(() => backend.ToolkitStrikeContact(contact, aim, pendingReactionSalvo, reaction, evadeDestination));
@@ -1097,7 +1245,12 @@ namespace SeaOfUncertainty.Prototype
             Side side = backend.Game.Active.Side;
             VisualElement modal = Modal(card.Id + "  •  " + card.Title.ToUpperInvariant());
             modal.Add(Text(card.Play + (string.IsNullOrEmpty(card.Cost) ? string.Empty : "\nCOST  •  " + card.Cost), "body-copy"));
-            if (card.Target == ResponseTarget.Contact)
+            if (card.Target == ResponseTarget.SynchronizedStrike)
+            {
+                modal.Add(Text("This card is consumed atomically during declaration, after participants and an aim are chosen.", "muted"));
+                modal.Add(ActionButton("DECLARE SYNCHRONIZED STRIKE", ShowSynchronizedStrikeContacts, "primary"));
+            }
+            else if (card.Target == ResponseTarget.Contact)
             {
                 foreach (ContactState contact in backend.Game.Contacts.Where(candidate => candidate.Owner == side && !candidate.IsLost))
                 {

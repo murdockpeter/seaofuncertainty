@@ -24,6 +24,7 @@ namespace SeaOfUncertainty.Core
         public List<string> DrawPile = new List<string>();
         public List<string> Hand = new List<string>();
         public List<string> DiscardPile = new List<string>();
+        public int MajorActionsTowardDraw;
     }
 
     public static class CommandResponseCatalog
@@ -31,7 +32,7 @@ namespace SeaOfUncertainty.Core
         private static readonly List<CommandResponseDefinition> cards = new List<CommandResponseDefinition>
         {
             Card("C-01", "Commander's Presence", "Remove one Friction effect.", "Mark 1 Command Strain.", ResponseTarget.Formation, true),
-            Card("C-02", "Prior Planning", "When declaring a Synchronized Strike, ignore the first Friction generated.", "", ResponseTarget.SynchronizedStrike, false),
+            Card("C-02", "Prior Planning", "When declaring a Synchronized Strike, ignore the first Friction generated.", "", ResponseTarget.SynchronizedStrike, true),
             Card("C-03", "Mission Command", "A Broken Link Formation may alter Mission by Trigger without Command Attention.", "", ResponseTarget.Formation, true),
             Card("C-04", "Rapid Replan", "Change one Formation's Mission without a Command Slot.", "Next Ready is +1 Time.", ResponseTarget.Formation, true),
             Card("C-05", "Directed Telescope", "Conduct a Focused Search without occupying a Command Slot.", "", ResponseTarget.Formation, true),
@@ -39,7 +40,7 @@ namespace SeaOfUncertainty.Core
             Card("C-07", "Delegate Authority", "Choose one Formation: +1 Command until its next Action.", "That Formation may not change Mission.", ResponseTarget.Formation, true),
             Card("C-08", "Accept the Risk", "Ignore one Entropy restriction for this Action.", "Afterward mark Friction.", ResponseTarget.Formation, true),
             Card("C-09", "Reserve Staff", "Remove one Communications Latency or Staff Overload effect.", "", ResponseTarget.Formation, true),
-            Card("C-10", "Deconfliction Cell", "One Synchronized Strike participant ignores a +1 Time Coordination Drift.", "", ResponseTarget.SynchronizedStrike, false),
+            Card("C-10", "Deconfliction Cell", "One Synchronized Strike participant ignores a +1 Time Coordination Drift.", "", ResponseTarget.SynchronizedStrike, true),
             Card("C-11", "Repair Focus", "Treat Destruction as one step lighter until end of next Action.", "", ResponseTarget.Formation, true),
             Card("C-12", "Update the Plot", "Refresh one Contact's Age to 0, but do not improve certainty.", "", ResponseTarget.Contact, true),
             Card("C-13", "Battle Rhythm", "Remove one Delayed Execution or Hasty Retasking effect.", "", ResponseTarget.Formation, true),
