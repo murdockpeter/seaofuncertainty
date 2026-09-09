@@ -24,16 +24,20 @@ The package is pinned as `com.unity.services.multiplayer` 1.2.0. Its resolved Un
 
 `UnityMultiplayerSessionGateway` maps that lifecycle onto MPS Sessions. Public indexed properties contain only scenario and rules compatibility. Seed, phase, player name, side, and ready state are members-only. Full simulation state is never stored as a public session property.
 
-## Developer activation surface
+## Activation surface
 
-The operation-mode screen now exposes **Online Preview** in the Unity Editor and development builds. A non-development player build keeps it hidden unless launched with `-enableOnlinePreview`. Two paths share the same authoritative lifecycle and wire protocol:
+The operation-mode screen exposes **Online Multiplayer** in every build, Editor and release alike. Two paths share the same authoritative lifecycle and wire protocol:
 
-- **Direct IP** needs no Unity account or Cloud project. A host listens on a chosen UDP port; a client supplies a numeric IP address, port, and private match code. Both seats authenticate, ready, and start the authority through the same UI. Internet hosts may need firewall and UDP port-forwarding configuration.
-- **Unity Relay** supplies managed membership/join codes, NAT traversal, DTLS encryption, IP concealment, and host-migration coordination.
+- **Unity Relay** is the primary path: managed membership/join codes, NAT traversal, DTLS encryption, IP concealment, and host-migration coordination. It requires the Unity project to be linked to a Cloud project (`ProjectSettings.cloudProjectId`/`organizationId`); an unlinked project surfaces this as an actionable setup error rather than a raw exception.
+- **Direct IP** needs no Unity account or Cloud project. A host listens on a chosen UDP port; a client supplies a numeric IP address, port, and private match code. Both seats authenticate, ready, and start the authority through the same UI. Internet hosts may need firewall and UDP port-forwarding configuration. The UI only shows Direct IP as a fallback while Relay is disabled (see below) — it is not offered side-by-side with Relay under normal conditions.
 
 Both paths can measure guest-to-authority round-trip time through the state-free ping/pong protocol. Direct IP uses Unity Transport's reliable-sequenced UDP pipeline rather than TCP because the existing command framing, ordering, fragmentation, and retransmission guarantees are already implemented there. Direct IP itself is not encrypted and exposes the host address, so Internet use should run through a trusted LAN/VPN until application-layer encryption is added; Relay remains the safer public-Internet path.
 
-This is a validation surface, not a public multiplayer mode. It deliberately stops at the authority transport boundary: routing the complete playable command UI through side-scoped receipts remains gated on the Hotseat privacy session and live two-build validation below. The Relay screen reports missing Cloud-project linkage as an actionable setup error; Direct IP remains available without it.
+This currently stops at the authority transport boundary: routing the complete playable command UI through side-scoped receipts is separate follow-on work.
+
+## Remote kill switch
+
+`MultiplayerKillSwitch` (`Assets/Scripts/Prototype/MultiplayerKillSwitch.cs`) fetches the Unity Remote Config boolean `multiplayer_enabled` (and string `multiplayer_disabled_message`) before every Relay host/join attempt (`OnlineMultiplayerCoordinator.HostAsync`/`JoinAsync`), and the online screen also fetches it proactively on entry to decide which buttons to draw. Setting `multiplayer_enabled` to `false` in the Unity Dashboard and publishing stops new Relay sessions for every client within seconds, with no rebuild, and reveals Direct IP as a fallback in the UI — this is the operator response to a Unity Gaming Services budget alert. The fetch fails open (defaults to enabled) if Remote Config is unreachable, so a transient network issue never blocks legitimate play.
 
 ## Network protocol and privacy
 

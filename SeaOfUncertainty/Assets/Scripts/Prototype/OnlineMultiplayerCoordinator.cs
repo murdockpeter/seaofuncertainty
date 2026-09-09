@@ -11,8 +11,9 @@ namespace SeaOfUncertainty.Prototype
     public enum OnlinePreviewState { Offline, Working, Lobby, Starting, Connected, Error }
 
     /// <summary>
-    /// Developer-facing activation shell for the production Sessions/Relay stack. It intentionally
-    /// keeps online play behind a launch flag until the two-build privacy gate is signed off.
+    /// Activation shell for the production Sessions/Relay stack. Relay is the primary online path;
+    /// Direct IP is a fallback the UI surfaces only while <see cref="MultiplayerKillSwitch"/> reports
+    /// Relay disabled via Remote Config.
     /// </summary>
     public sealed class OnlineMultiplayerCoordinator : MonoBehaviour
     {
@@ -44,17 +45,11 @@ namespace SeaOfUncertainty.Prototype
         private bool directHost;
         private long pingSentAt;
 
-        public static bool IsDeveloperPreviewEnabled(string[] arguments = null, bool? isEditor = null, bool? isDebugBuild = null)
-        {
-            string[] args = arguments ?? Environment.GetCommandLineArgs();
-            bool explicitFlag = args.Any(item => string.Equals(item, "-enableOnlinePreview", StringComparison.OrdinalIgnoreCase));
-            return explicitFlag || (isEditor ?? Application.isEditor) || (isDebugBuild ?? Debug.isDebugBuild);
-        }
-
         public async Task HostAsync(string commanderName, string scenarioId)
         {
             await RunAsync(async () =>
             {
+                if (!await MultiplayerKillSwitch.RefreshAsync()) throw new InvalidOperationException(MultiplayerKillSwitch.DisabledMessage);
                 lifecycle = new MultiplayerMatchLifecycle();
                 hostAccess = lifecycle.Create("Sea of Uncertainty Preview", scenarioId, 1978, commanderName, true);
                 if (!hostAccess.Success) throw new InvalidOperationException(hostAccess.Message);
@@ -106,6 +101,7 @@ namespace SeaOfUncertainty.Prototype
         {
             await RunAsync(async () =>
             {
+                if (!await MultiplayerKillSwitch.RefreshAsync()) throw new InvalidOperationException(MultiplayerKillSwitch.DisabledMessage);
                 gateway = CreateGateway();
                 await gateway.JoinByCodeAsync(NormalizeCode(joinCode), commanderName);
                 AttachTransportDiagnostics();

@@ -13,8 +13,6 @@ namespace SeaOfUncertainty.Editor
         [MenuItem("Sea of Uncertainty/Tests/Run Multiplayer Foundation Suite")]
         public static void Run()
         {
-            Assert(!OnlineMultiplayerCoordinator.IsDeveloperPreviewEnabled(Array.Empty<string>(), false, false), "Online preview remains hidden in a non-development release");
-            Assert(OnlineMultiplayerCoordinator.IsDeveloperPreviewEnabled(new[] { "game.exe", "-enableOnlinePreview" }, false, false), "Explicit launch flag enables the online validation surface");
             AssertSessionLifecycleAndInterruptedRecovery();
             var server = new AuthoritativeMatchServer("PHASE1-SECURITY", 424242, ScenarioCatalog.Find("meridian-veil"));
             AssertPrivacy(server, Side.Blue);

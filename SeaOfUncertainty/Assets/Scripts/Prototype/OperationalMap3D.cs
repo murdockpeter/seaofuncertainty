@@ -26,7 +26,19 @@ namespace SeaOfUncertainty.Prototype
         private readonly List<GameObject> stateObjects = new List<GameObject>();
         private readonly List<Mesh> generatedMeshes = new List<Mesh>();
         private readonly List<Texture2D> generatedTextures = new List<Texture2D>();
-        private readonly Dictionary<string, HexCoord> presentedPositions = new Dictionary<string, HexCoord>();
+        // Static, not per-instance: SeaUIToolkitController.ShowGame() rebuilds a fresh TacticalMapElement
+        // (and thus a fresh OperationalMap3D) after almost every action, so tracking last-known position
+        // and facing has to outlive this instance to detect movement across that rebuild. Callers must
+        // invoke ResetPresentationMemory() whenever a new match/scenario begins, so a formation ID reused
+        // by a fresh scenario doesn't inherit stale motion from a previous match.
+        private static readonly Dictionary<string, HexCoord> presentedPositions = new Dictionary<string, HexCoord>();
+        private static readonly Dictionary<string, Quaternion> presentedRotations = new Dictionary<string, Quaternion>();
+
+        public static void ResetPresentationMemory()
+        {
+            presentedPositions.Clear();
+            presentedRotations.Clear();
+        }
         private readonly List<Motion> motions = new List<Motion>();
         private readonly List<LodPair> lodPairs = new List<LodPair>();
         private readonly Dictionary<OperationalEffectKind, Stack<GameObject>> effectPools = new Dictionary<OperationalEffectKind, Stack<GameObject>>();
@@ -77,7 +89,7 @@ namespace SeaOfUncertainty.Prototype
         private CameraPose savedCameraPose;
         private bool hasSavedCameraPose;
 
-        private sealed class Motion { public Transform Transform; public Vector3 Start; public Vector3 End; public float Progress; }
+        private sealed class Motion { public Transform Transform; public Vector3 Start; public Vector3 End; public Quaternion StartRotation; public Quaternion EndRotation; public float Progress; }
         private sealed class LodPair { public GameObject Detail; public GameObject Symbol; }
         private sealed class EffectInstance { public OperationalEffectKind Kind; public GameObject Object; public Vector3 BaseScale; public Vector3 Start; public float Age; public float Duration; }
         private struct CameraPose { public Vector3 Focus; public float Yaw; public float Pitch; public float Distance; }
@@ -286,6 +298,7 @@ namespace SeaOfUncertainty.Prototype
                 motion.Progress = reducedMotion ? 1f : Mathf.Clamp01(motion.Progress + deltaTime * 2.5f);
                 float eased = motion.Progress * motion.Progress * (3f - 2f * motion.Progress);
                 motion.Transform.position = Vector3.Lerp(motion.Start, motion.End, eased);
+                motion.Transform.rotation = Quaternion.Slerp(motion.StartRotation, motion.EndRotation, eased);
                 if (motion.Progress >= 1f) motions.RemoveAt(i);
             }
             for (int i = activeEffects.Count - 1; i >= 0; i--)
@@ -945,9 +958,15 @@ namespace SeaOfUncertainty.Prototype
             float markerHeight = formation.Kind == FormationKind.AirGroup ? 1.15f : formation.Kind == FormationKind.Submarine ? .025f : .015f;
             Vector3 destination = HexToWorld(formation.Position) + Vector3.up * markerHeight;
             Vector3 start = presentedPositions.TryGetValue(formation.Id, out HexCoord oldHex) ? HexToWorld(oldHex) + Vector3.up * markerHeight : destination;
+            Quaternion previousRotation = presentedRotations.TryGetValue(formation.Id, out Quaternion storedRotation) ? storedRotation : Quaternion.identity;
+            Vector3 travelDirection = destination - start;
+            travelDirection.y = 0f;
+            Quaternion targetRotation = travelDirection.sqrMagnitude > .0001f ? Quaternion.LookRotation(travelDirection.normalized, Vector3.up) : previousRotation;
             marker.transform.position = reducedMotion ? destination : start;
-            if (start != destination) motions.Add(new Motion { Transform = marker.transform, Start = start, End = destination });
+            marker.transform.rotation = reducedMotion ? targetRotation : previousRotation;
+            if (start != destination) motions.Add(new Motion { Transform = marker.transform, Start = start, End = destination, StartRotation = previousRotation, EndRotation = targetRotation });
             presentedPositions[formation.Id] = formation.Position;
+            presentedRotations[formation.Id] = targetRotation;
             Material material = formation.Side == Side.Blue ? blueMaterial : redMaterial;
             GameObject detail = Child("Production Formation Model", marker.transform);
             switch (formation.Kind)

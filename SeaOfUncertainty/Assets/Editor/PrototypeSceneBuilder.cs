@@ -48,7 +48,7 @@ namespace SeaOfUncertainty.Editor
             var options = new BuildPlayerOptions
             {
                 scenes = new[] { "Assets/Scenes/Prototype.unity" },
-                locationPathName = "Builds/Windows/SeaOfUncertainty.exe",
+                locationPathName = "Builds/Windows/Sea of Uncertainty.exe",
                 target = BuildTarget.StandaloneWindows64,
                 options = BuildOptions.Development
             };
