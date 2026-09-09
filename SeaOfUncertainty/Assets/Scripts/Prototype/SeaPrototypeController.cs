@@ -23,6 +23,14 @@ namespace SeaOfUncertainty.Prototype
         public ScenarioOutcome FinalOutcome => finalOutcome;
         public bool AgeTwoPenalty => ageTwoTargetingPenalty;
         public bool AudioEnabled => audioEnabled;
+        public float MasterVolume => masterVolume;
+        public float EffectsVolume => effectsVolume;
+        public float AmbientVolume => ambientVolume;
+        public bool AudioDescriptions => audioDescriptions;
+        public float TextScale => textScale;
+        public bool ControllerNavigation => controllerNavigation;
+        public float ControllerDeadZone => controllerDeadZone;
+        public string LastAudioDescription => lastAudioDescription;
         public bool HighContrast => highContrast;
         public bool ReducedMotion => reducedMotion;
         public bool HexGridVisible => hexGridVisible;
@@ -34,6 +42,13 @@ namespace SeaOfUncertainty.Prototype
         public FormationState ToolkitPendingEntropyFormation(Side side) => game?.PendingEntropyFormationFor(side);
         public IReadOnlyList<CommandResponseDefinition> ToolkitResponseHand(Side side) => game?.ResponseHand(side) ?? new List<CommandResponseDefinition>();
         public bool ToolkitCanRespondToEntropy(FormationState formation, string cardId) => game != null && game.CanRespondToEntropy(formation, cardId);
+
+#if UNITY_EDITOR
+        public void EditorEnsureInitializedForTests()
+        {
+            if (game == null) Awake();
+        }
+#endif
 
         [Serializable]
         private sealed class OperationSave
@@ -85,6 +100,14 @@ namespace SeaOfUncertainty.Prototype
         private Side handoffSide;
         private bool ageTwoTargetingPenalty = true;
         private bool audioEnabled = true;
+        private float masterVolume = .8f;
+        private float effectsVolume = .7f;
+        private float ambientVolume = .35f;
+        private bool audioDescriptions = true;
+        private float textScale = 1f;
+        private bool controllerNavigation = true;
+        private float controllerDeadZone = .55f;
+        private string lastAudioDescription = "Ambient audio: quiet open-sea wash.";
         private OperationalMissionAudio missionAudio;
         private PrototypeGame audioEventGame;
         private bool highContrast;
@@ -120,6 +143,13 @@ namespace SeaOfUncertainty.Prototype
         {
             ageTwoTargetingPenalty = PlayerPrefs.GetInt("AgeTwoPenalty", 1) == 1;
             audioEnabled = PlayerPrefs.GetInt("AudioEnabled", 1) == 1;
+            masterVolume = PlayerPrefs.GetFloat("MasterVolume", audioEnabled ? .8f : 0f);
+            effectsVolume = PlayerPrefs.GetFloat("EffectsVolume", .7f);
+            ambientVolume = PlayerPrefs.GetFloat("AmbientVolume", .35f);
+            audioDescriptions = PlayerPrefs.GetInt("AudioDescriptions", 1) == 1;
+            textScale = Mathf.Clamp(PlayerPrefs.GetFloat("TextScale", 1f), 1f, 1.5f);
+            controllerNavigation = PlayerPrefs.GetInt("ControllerNavigation", 1) == 1;
+            controllerDeadZone = Mathf.Clamp(PlayerPrefs.GetFloat("ControllerDeadZone", .55f), .3f, .9f);
             highContrast = PlayerPrefs.GetInt("HighContrast", 0) == 1;
             reducedMotion = PlayerPrefs.GetInt("ReducedMotion", 0) == 1;
             hexGridVisible = PlayerPrefs.GetInt("HexGridVisible", 0) == 1;
@@ -137,7 +167,7 @@ namespace SeaOfUncertainty.Prototype
             pixel.Apply();
             Application.targetFrameRate = 60;
             Application.runInBackground = true;
-            AudioListener.volume = audioEnabled ? 1 : 0;
+            ApplyAudioSettings();
             if (Environment.GetCommandLineArgs().Contains("-capturePrototype")) StartCoroutine(CaptureAndQuit());
         }
 
@@ -215,7 +245,7 @@ namespace SeaOfUncertainty.Prototype
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
             AiDecision decision = preparedDecision ?? PrototypeAiCommander.Choose(game);
             if (decision == null) return "AI could not form a legal decision.";
-            telemetry.RecordChoice(game, actor, "AiActionChosen", decision.Action.ToString(), decision.ModeName, alternatives);
+            telemetry.RecordAiDecision(game, actor, decision, alternatives);
             if (!PrototypeAiCommander.Execute(game, decision, selectedReaction, evadeDestination, out string message))
             {
                 var fallback = new AiDecision { Action = ActionKind.Hold, Rationale = "Fallback after the preferred AI action became illegal." };
@@ -301,15 +331,22 @@ namespace SeaOfUncertainty.Prototype
             Toast(message);
             return message;
         }
-        public void ToolkitSetSettings(bool agePenalty, bool audio, bool contrast, bool reduceMotion, bool showHexGrid)
+        public void ToolkitSetSettings(bool agePenalty, float master, float effects, float ambience, bool descriptions, bool contrast, bool reduceMotion, bool showHexGrid, float uiTextScale, bool controller, float deadZone)
         {
             ageTwoTargetingPenalty = agePenalty;
-            audioEnabled = audio;
+            masterVolume = Mathf.Clamp01(master);
+            effectsVolume = Mathf.Clamp01(effects);
+            ambientVolume = Mathf.Clamp01(ambience);
+            audioEnabled = masterVolume > .001f;
+            audioDescriptions = descriptions;
             highContrast = contrast;
             reducedMotion = reduceMotion;
             hexGridVisible = showHexGrid;
+            textScale = Mathf.Clamp(uiTextScale, 1f, 1.5f);
+            controllerNavigation = controller;
+            controllerDeadZone = Mathf.Clamp(deadZone, .3f, .9f);
             game.AgeTwoTargetingPenalty = agePenalty;
-            AudioListener.volume = audio ? 1 : 0;
+            ApplyAudioSettings();
             SaveSettings();
         }
 
@@ -833,6 +870,13 @@ namespace SeaOfUncertainty.Prototype
         {
             PlayerPrefs.SetInt("AgeTwoPenalty", ageTwoTargetingPenalty ? 1 : 0);
             PlayerPrefs.SetInt("AudioEnabled", audioEnabled ? 1 : 0);
+            PlayerPrefs.SetFloat("MasterVolume", masterVolume);
+            PlayerPrefs.SetFloat("EffectsVolume", effectsVolume);
+            PlayerPrefs.SetFloat("AmbientVolume", ambientVolume);
+            PlayerPrefs.SetInt("AudioDescriptions", audioDescriptions ? 1 : 0);
+            PlayerPrefs.SetFloat("TextScale", textScale);
+            PlayerPrefs.SetInt("ControllerNavigation", controllerNavigation ? 1 : 0);
+            PlayerPrefs.SetFloat("ControllerDeadZone", controllerDeadZone);
             PlayerPrefs.SetInt("HighContrast", highContrast ? 1 : 0);
             PlayerPrefs.SetInt("ReducedMotion", reducedMotion ? 1 : 0);
             PlayerPrefs.SetInt("HexGridVisible", hexGridVisible ? 1 : 0);
@@ -850,9 +894,17 @@ namespace SeaOfUncertainty.Prototype
 
         private void OnMissionCompleted(FormationState formation, ActionKind mission)
         {
-            if (!audioEnabled || formation == null) return;
+            if (formation == null) return;
             if (operationMode == OperationMode.SoloVsAi && formation.Side != humanSide) return;
+            lastAudioDescription = OperationalMissionAudio.Description(mission);
+            if (!audioEnabled) return;
             missionAudio?.Play(mission);
+        }
+
+        private void ApplyAudioSettings()
+        {
+            AudioListener.volume = masterVolume;
+            missionAudio?.Configure(masterVolume, effectsVolume, ambientVolume);
         }
 
         private void OnDestroy()
@@ -1528,7 +1580,7 @@ namespace SeaOfUncertainty.Prototype
             if (highContrast) return side == Side.Blue ? new Color(.12f, .78f, 1f) : new Color(1f, .72f, .08f);
             return side == Side.Blue ? new Color(.15f, .65f, .78f) : new Color(.9f, .28f, .24f);
         }
-        private string KindCode(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SG" : kind == FormationKind.Submarine ? "SS" : "AG";
+        private string KindCode(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SG" : kind == FormationKind.Submarine ? "SS" : kind == FormationKind.AirGroup ? "AG" : "LG";
 
         private void DrawRing(Vector2 centerPoint, float radius, Color color, float width)
         {

@@ -9,7 +9,7 @@ namespace SeaOfUncertainty.Core
         [Serializable]
         public sealed class SaveData
         {
-            public int Version = 10;
+            public int Version = 11;
             public string ScenarioId;
             public string OperationalAreaId;
             public int Time;
@@ -27,6 +27,9 @@ namespace SeaOfUncertainty.Core
             public List<SynchronizedStrikeState> SynchronizedStrikes = new List<SynchronizedStrikeState>();
             public List<string> Log = new List<string>();
             public List<OperationalLogEntry> LogEntries = new List<OperationalLogEntry>();
+            public string RuntimeWeather;
+            public int RuntimeWeatherSeverity;
+            public List<string> ResolvedScheduledEventIds = new List<string>();
         }
 
         private readonly Random random;
@@ -40,6 +43,7 @@ namespace SeaOfUncertainty.Core
         public readonly List<SynchronizedStrikeState> SynchronizedStrikes = new List<SynchronizedStrikeState>();
         public readonly List<string> Log = new List<string>();
         public readonly List<OperationalLogEntry> LogEntries = new List<OperationalLogEntry>();
+        public readonly List<string> ResolvedScheduledEventIds = new List<string>();
         public event Action<FormationState, ActionKind> ActionCompleted;
         public event Action<FormationState, string, string> CommandEvent;
         public ScenarioDefinition Scenario { get; }
@@ -47,7 +51,10 @@ namespace SeaOfUncertainty.Core
         public int Time { get; private set; }
         public FormationState Active { get; private set; }
         public Side? LastActingSide => lastActingSide;
+        public int Seed => seed;
         public bool AgeTwoTargetingPenalty = true;
+        public string RuntimeWeather { get; private set; }
+        public int RuntimeWeatherSeverity { get; private set; }
         private Side? lastActingSide;
         private readonly int seed;
         private string resolvingSynchronizedStrikeId;
@@ -56,10 +63,12 @@ namespace SeaOfUncertainty.Core
         {
             this.seed = seed;
             random = new Random(seed);
-            Scenario = OperationalDataMigration.Migrate(scenario ?? ScenarioCatalog.MeridianVeil());
+            Scenario = OperationalDataMigration.Migrate(scenario ?? ScenarioCatalog.Find("meridian-veil"));
+            RuntimeWeather = Scenario.Weather;
+            RuntimeWeatherSeverity = Scenario.WeatherSeverity;
             InitializeEntropyDecks(seed);
-            Sides[Side.Blue] = new SideState { Side = Side.Blue };
-            Sides[Side.Red] = new SideState { Side = Side.Red };
+            Sides[Side.Blue] = new SideState { Side = Side.Blue, Architecture = Scenario.BlueCommandArchitecture };
+            Sides[Side.Red] = new SideState { Side = Side.Red, Architecture = Scenario.RedCommandArchitecture };
             EnsureCommandSlotStates();
             InitializeCommandResponseDecks(seed);
             CreateScenario();
@@ -68,7 +77,8 @@ namespace SeaOfUncertainty.Core
 
         public FormationState Find(string id) => Formations.FirstOrDefault(f => f.Id == id);
         public ContactState ContactFor(Side owner, string targetId) => Contacts.FirstOrDefault(c => c.Owner == owner && c.TargetId == targetId && !c.IsLost);
-        public int SearchModifierFor(FormationState formation, SearchMode mode) => mode == SearchMode.Active && formation != null && formation.HasEffect("D-05") ? 0 : Rules.SearchModifier(mode);
+        public int SearchModifierFor(FormationState formation, SearchMode mode)
+            => (mode == SearchMode.Active && formation != null && formation.HasEffect("D-05") ? 0 : Rules.SearchModifier(mode)) - RuntimeWeatherSeverity;
         public int SearchRangeFor(FormationState formation, SearchMode mode)
         {
             if (formation == null) return Rules.SearchRange(mode);
@@ -244,13 +254,14 @@ namespace SeaOfUncertainty.Core
         }
 
         public bool HasLogisticsAccess(FormationState formation)
-            => formation != null && LogisticsFacilitiesFor(formation).Any(location => location.Hex.Equals(formation.Position));
+            => formation != null && (LogisticsFacilitiesFor(formation).Any(location => location.Hex.Equals(formation.Position)) ||
+                Formations.Any(candidate => candidate != formation && candidate.Side == formation.Side && candidate.Kind == FormationKind.LogisticsGroup && !candidate.IsDestroyed && candidate.Damage < DamageState.Crippled && HexCoord.Distance(candidate.Position, formation.Position) <= 1));
 
         public IReadOnlyList<string> RepairableDestructionCards(FormationState formation)
             => (formation?.ActiveEffectCardIds ?? new List<string>()).Where(id => EntropyEffectCatalog.Find(id)?.Source == EntropySource.Destruction).ToList();
 
         public bool NeedsReplenishment(FormationState formation)
-            => formation != null && !formation.IsDestroyed && (formation.Endurance != Endurance.Ready || formation.WeaponExpended || formation.Damage != DamageState.None || RepairableDestructionCards(formation).Count > 0 || formation.MajorActions > 0);
+            => formation != null && !formation.IsDestroyed && (formation.Endurance != Endurance.Ready || formation.WeaponExpended || formation.Weapons != null && (formation.Weapons.Light < formation.Weapons.MaxLight || formation.Weapons.Standard < formation.Weapons.MaxStandard || formation.Weapons.Heavy < formation.Weapons.MaxHeavy) || formation.Damage != DamageState.None || RepairableDestructionCards(formation).Count > 0 || formation.MajorActions > 0);
 
         public string ReplenishmentPreview(FormationState formation)
         {
@@ -258,6 +269,7 @@ namespace SeaOfUncertainty.Core
             var restores = new List<string>();
             if (formation.Endurance != Endurance.Ready) restores.Add($"Endurance {formation.Endurance} → {(Endurance)((int)formation.Endurance - 1)}");
             if (formation.WeaponExpended) restores.Add("Heavy Salvo reloaded");
+            if (formation.Weapons != null && (formation.Weapons.Light < formation.Weapons.MaxLight || formation.Weapons.Standard < formation.Weapons.MaxStandard || formation.Weapons.Heavy < formation.Weapons.MaxHeavy)) restores.Add("weapon magazines restored");
             if (formation.Damage != DamageState.None) restores.Add($"Damage {formation.Damage} → {PreviousDamage(formation.Damage)}");
             int cards = RepairableDestructionCards(formation).Count;
             if (cards > 0) restores.Add($"repair and discard one of {cards} Destruction card{(cards == 1 ? string.Empty : "s")}");
@@ -277,6 +289,7 @@ namespace SeaOfUncertainty.Core
             int additionalTime = formation.HasEffect("X-10") ? 1 : 0;
             if (formation.Endurance > Endurance.Ready) formation.Endurance--;
             formation.WeaponExpended = false;
+            formation.Weapons?.ReloadAll();
             formation.Damage = PreviousDamage(formation.Damage);
             if (formation.Damage != DamageState.Light) formation.LightDamageExpiresAfterAction = 0;
             formation.MajorActions = 0;
@@ -309,13 +322,16 @@ namespace SeaOfUncertainty.Core
                 CommandResponseDecks = CommandResponseDecks.Select(CloneResponseDeck).ToList(),
                 SynchronizedStrikes = SynchronizedStrikes.Select(CloneSynchronizedStrike).ToList(),
                 Log = new List<string>(Log),
-                LogEntries = LogEntries.Select(entry => new OperationalLogEntry { Text = entry.Text, IsPrivate = entry.IsPrivate, Audience = entry.Audience }).ToList()
+                LogEntries = LogEntries.Select(entry => new OperationalLogEntry { Text = entry.Text, IsPrivate = entry.IsPrivate, Audience = entry.Audience }).ToList(),
+                RuntimeWeather = RuntimeWeather,
+                RuntimeWeatherSeverity = RuntimeWeatherSeverity,
+                ResolvedScheduledEventIds = new List<string>(ResolvedScheduledEventIds)
             };
         }
 
         public void RestoreState(SaveData data)
         {
-            if (data == null || data.Version < 1 || data.Version > 10) throw new ArgumentException("Unsupported or empty save data.");
+            if (data == null || data.Version < 1 || data.Version > 11) throw new ArgumentException("Unsupported or empty save data.");
             if (data.Version >= 2 && !string.IsNullOrEmpty(data.ScenarioId) && !string.Equals(data.ScenarioId, Scenario.Id, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException($"Save scenario {data.ScenarioId} does not match loaded scenario {Scenario.Id}.");
             Formations.Clear();
             Formations.AddRange(data.Formations ?? new List<FormationState>());
@@ -323,6 +339,7 @@ namespace SeaOfUncertainty.Core
             {
                 if (formation.ActiveEffectCardIds == null) formation.ActiveEffectCardIds = new List<string>();
                 if (formation.ResolvedEffectCardIds == null) formation.ResolvedEffectCardIds = new List<string>();
+                if (formation.Weapons == null || data.Version < 11) formation.Weapons = DefaultWeapons(formation.Kind);
                 if (data.Version < 8 && formation.Damage == DamageState.Light) formation.LightDamageExpiresAfterAction = formation.CompletedActions + 1;
             }
             Contacts.Clear();
@@ -331,6 +348,11 @@ namespace SeaOfUncertainty.Core
             foreach (SideState side in data.Sides ?? new List<SideState>()) Sides[side.Side] = side;
             if (!Sides.ContainsKey(Side.Blue)) Sides[Side.Blue] = new SideState { Side = Side.Blue };
             if (!Sides.ContainsKey(Side.Red)) Sides[Side.Red] = new SideState { Side = Side.Red };
+            if (data.Version < 11)
+            {
+                Sides[Side.Blue].Architecture = Scenario.BlueCommandArchitecture;
+                Sides[Side.Red].Architecture = Scenario.RedCommandArchitecture;
+            }
             EnsureCommandSlotStates();
             if (data.Version >= 4 && data.EntropyDecks != null && data.EntropyDecks.Count > 0)
             {
@@ -354,6 +376,10 @@ namespace SeaOfUncertainty.Core
             LogEntries.Clear();
             if (data.Version >= 7 && data.LogEntries != null) LogEntries.AddRange(data.LogEntries.Select(entry => new OperationalLogEntry { Text = entry.Text, IsPrivate = entry.IsPrivate, Audience = entry.Audience }));
             Time = data.Time;
+            RuntimeWeather = data.Version >= 11 && !string.IsNullOrEmpty(data.RuntimeWeather) ? data.RuntimeWeather : Scenario.Weather;
+            RuntimeWeatherSeverity = data.Version >= 11 ? data.RuntimeWeatherSeverity : Scenario.WeatherSeverity;
+            ResolvedScheduledEventIds.Clear();
+            if (data.Version >= 11 && data.ResolvedScheduledEventIds != null) ResolvedScheduledEventIds.AddRange(data.ResolvedScheduledEventIds);
             AgeTwoTargetingPenalty = data.AgeTwoTargetingPenalty;
             lastActingSide = data.Version >= 3 && data.HasLastActingSide ? data.LastActingSide : (Side?)null;
             Active = Find(data.ActiveFormationId) ?? Rules.NextReady(Formations, lastActingSide);
@@ -467,6 +493,7 @@ namespace SeaOfUncertainty.Core
             foreach (ContactState contact in Contacts.Where(contact => contact.Owner != formation.Side && contact.TargetId == formation.Id && !contact.IsLost))
                 contact.MovementUncertainty = Math.Min(2, contact.MovementUncertainty + 1);
             formation.Position = destination;
+            if (formation.Kind == FormationKind.Submarine) formation.SubmarineDepth = mode == MoveMode.Cautious ? SubmarineDepthState.Deep : SubmarineDepthState.Shallow;
             if (formation.HasEffect("F-07")) ResolveAttachedEffect(formation, "F-07");
             if (mode == MoveMode.HighTempo) MarkEntropy(formation, EntropySource.Friction);
             if (mode == MoveMode.HighTempo && formation.HasEffect("F-08")) formation.SupportBlockedUntilRecover = true;
@@ -474,9 +501,10 @@ namespace SeaOfUncertainty.Core
             int distance = path.Count - 1;
             bool crossedLittoral = formation.Kind != FormationKind.AirGroup && path.Skip(1).Any(hex => Area.TerrainAt(hex) == OperationalTerrain.Littoral);
             int terrainTime = crossedLittoral ? 1 : 0;
+            int weatherTime = formation.Kind != FormationKind.AirGroup && RuntimeWeatherSeverity > 0 && mode == MoveMode.HighTempo ? 1 : 0;
             string interception = ResolvePatrolInterception(formation);
             ExpireOutOfRangeSupport(formation);
-            CompleteAction(formation, ActionKind.Move, mode == MoveMode.HighTempo, $"{formation.Name} moved {distance} hexes ({mode}) via {string.Join("-", path)}{(terrainTime > 0 ? " through littoral waters" : string.Empty)}.{interception}", terrainTime, mode == MoveMode.Cautious ? -1 : 0, mode == MoveMode.HighTempo);
+            CompleteAction(formation, ActionKind.Move, mode == MoveMode.HighTempo, $"{formation.Name} moved {distance} hexes ({mode}) via {string.Join("-", path)}{(terrainTime > 0 ? " through littoral waters" : string.Empty)}{(weatherTime > 0 ? " under weather delay" : string.Empty)}.{interception}", terrainTime + weatherTime, mode == MoveMode.Cautious ? -1 : 0, mode == MoveMode.HighTempo);
             message = Log[0];
             return true;
         }
@@ -541,7 +569,7 @@ namespace SeaOfUncertainty.Core
         }
 
         public bool HasControlPresence(Side side, HexCoord objective)
-            => Formations.Any(formation => formation.Side == side && formation.Kind != FormationKind.AirGroup && !formation.IsDestroyed && formation.Damage < DamageState.Crippled && HexCoord.Distance(formation.Position, objective) <= Rules.ControlRadius);
+            => Formations.Any(formation => formation.Side == side && formation.Kind != FormationKind.AirGroup && formation.Kind != FormationKind.LogisticsGroup && !formation.IsDestroyed && formation.Damage < DamageState.Crippled && HexCoord.Distance(formation.Position, objective) <= Rules.ControlRadius);
 
         public bool Controls(Side side, HexCoord objective)
             => HasControlPresence(side, objective) && !HasControlPresence(side == Side.Blue ? Side.Red : Side.Blue, objective);
@@ -602,7 +630,9 @@ namespace SeaOfUncertainty.Core
             {
                 int range = HexCoord.Distance(searcher.Position, target.Position);
                 int modeModifier = SearchModifierFor(searcher, mode);
-                int finalValue = searcher.EffectiveSearch + modeModifier + (target.Kind == FormationKind.Submarine ? Math.Max(searchSupport, aswSupport) : searchSupport) + target.EffectiveSignature - range;
+                int aswModifier = target.Kind == FormationKind.Submarine ? searcher.Ratings.Asw - 2 + Math.Max(searchSupport, aswSupport) : searchSupport;
+                int spectrumModifier = Math.Max(0, searcher.Ratings.Cyber / 2) - Math.Max(0, target.Ratings.ElectronicWarfare);
+                int finalValue = searcher.EffectiveSearch + modeModifier + aswModifier + spectrumModifier + target.EffectiveSignature - range;
                 int required = Rules.SearchTarget(finalValue);
                 int roll = Roll();
                 if (roll < required) continue;
@@ -616,6 +646,7 @@ namespace SeaOfUncertainty.Core
                 else if (priority == SearchPriority.Identity && contact.Identity < IdentityQuality.Identified) contact.Identity++;
                 else if (contact.Location < LocationQuality.High) contact.Location++;
                 else if (contact.Identity < IdentityQuality.Identified) contact.Identity++;
+                if (contact.Identity >= IdentityQuality.General) contact.Domain = DomainFor(target.Kind);
                 contact.LastKnownPosition = target.Position;
                 contact.Age = 0;
                 contact.MovementUncertainty = 0;
@@ -636,6 +667,7 @@ namespace SeaOfUncertainty.Core
             }
 
             string outcome = detected.Count == 0 ? "no detections" : string.Join("; ", detected);
+            if (searcher.Kind == FormationKind.Submarine && mode != SearchMode.Passive) searcher.SubmarineDepth = SubmarineDepthState.Shallow;
             CompleteAction(searcher, ActionKind.Search, false, $"{searcher.Name} searched area {center} (radius {Rules.SearchAreaRadius}, {mode}, {priority} priority) — {outcome}.", loudAfterAction: mode == SearchMode.Active);
             message = Log[0];
             return true;
@@ -658,7 +690,7 @@ namespace SeaOfUncertainty.Core
             if (contact == null || contact.Owner != side || contact.IsLost || !ContactPossibleHexes(contact).Contains(aim)) return new List<FormationState>();
             return Formations.Where(formation => formation.Side == side && !formation.IsDestroyed && string.IsNullOrEmpty(formation.SynchronizedStrikeId))
                 .Where(CanParticipateInSynchronization)
-                .Where(formation => salvo != Salvo.Heavy || formation.CanHeavySalvo)
+                .Where(formation => formation.CanFire(salvo))
                 .Where(formation => HexCoord.Distance(formation.Position, aim) <= Rules.StrikeRange(formation.Kind, salvo))
                 .OrderBy(formation => formation.Id, StringComparer.Ordinal).ToList();
         }
@@ -787,14 +819,15 @@ namespace SeaOfUncertainty.Core
                 if (hit && !target.IsDestroyed)
                 {
                     int reactionDefense = index == 0 && (reaction == Reaction.Defend || reaction == Reaction.Evade) ? 1 : 0;
-                    int defense = Math.Max(0, target.EffectiveDefense - (index == 0 ? 0 : preparedReactionDefense) + reactionDefense + (index == 0 ? defenseSupport + screenDefense : 0) - (target.Destruction ? 1 : 0) - index);
+                    int layeredDefense = MissileDefenseModifier(target, participantSalvo);
+                    int defense = Math.Max(0, target.EffectiveDefense - (index == 0 ? 0 : preparedReactionDefense) + reactionDefense + (index == 0 ? defenseSupport + screenDefense : 0) + layeredDefense - (target.Destruction ? 1 : 0) - index);
                     CombatBand band = Rules.BandFor(attack - defense);
                     int roll = Roll();
                     DamageState damage = Rules.DamageFor(band, roll);
-                    combat.Defense = defense; combat.Difference = attack - defense; combat.Band = band; combat.Roll = roll; combat.Damage = damage; combat.ResultingDamage = ApplyDamage(target, damage);
+                    combat.Defense = defense; combat.Difference = attack - defense; combat.Band = band; combat.Roll = roll; combat.Damage = damage; combat.ResultingDamage = ApplyDamage(target, damage); combat.MissileDefenseModifier = layeredDefense; combat.MissileDefenseLayers = MissileDefenseSummary(target, participantSalvo);
                 }
                 else combat.ResultingDamage = target?.Damage ?? DamageState.None;
-                if (participantSalvo == Salvo.Heavy) attacker.WeaponExpended = true;
+                ExpendWeapon(attacker, participantSalvo);
                 if (attacker.HasEffect("F-04")) DegradeEndurance(attacker);
                 resolved.Attacks.Add(combat);
             }
@@ -836,14 +869,15 @@ namespace SeaOfUncertainty.Core
             if (!ContactPossibleHexes(contact).Contains(aim)) { message = "Choose an aim hex inside the Contact's possible area."; return false; }
             int strikeRange = Rules.StrikeRange(attacker.Kind, salvo);
             if (HexCoord.Distance(attacker.Position, aim) > strikeRange) { message = $"{attacker.Kind} {salvo} Strike range is {strikeRange} hexes ({strikeRange * Area.NauticalMilesPerHex} nm)."; return false; }
-            if (salvo == Salvo.Heavy && !attacker.CanHeavySalvo)
-            { message = "Heavy Salvo is unavailable to this formation."; return false; }
+            if (!attacker.CanFire(salvo)) { message = $"{salvo} weapon inventory is exhausted or unavailable to this formation."; return false; }
             FormationState target = contact.IsFalse ? null : Find(contact.TargetId);
+            if (contact.Domain == ContactDomain.Subsurface && salvo != Salvo.Light && contact.Identity != IdentityQuality.Identified)
+            { message = "Standard and Heavy attacks against a submarine require an Identified ASW datum."; return false; }
             if (target == null || target.IsDestroyed || !target.Position.Equals(aim))
             {
                 if (!AuthorizeAction(attacker, ActionKind.Strike, out message)) return false;
                 int missedAttack = attacker.EffectiveStrike + Rules.SalvoModifier(salvo) + ConsumeSupportBonus(attacker, SupportKind.Strike) + Rules.TargetingModifier(contact, AgeTwoTargetingPenalty);
-                if (salvo == Salvo.Heavy) attacker.WeaponExpended = true;
+                ExpendWeapon(attacker, salvo);
                 if (attacker.HasEffect("F-04")) DegradeEndurance(attacker);
                 result = new CombatResult { Attack = missedAttack, Damage = DamageState.None, ResultingDamage = DamageState.None, Reaction = Reaction.None };
                 CompleteAction(attacker, ActionKind.Strike, false, $"{attacker.Name} struck Contact area {aim}: no confirmed effect.");
@@ -864,14 +898,15 @@ namespace SeaOfUncertainty.Core
             int defenseSupport = ConsumeSupportBonus(target, SupportKind.Defense);
             int screenDefense = ConsumeScreenDefenseBonus(target);
             int attack = attacker.EffectiveStrike + salvoModifier + strikeSupport + Rules.TargetingModifier(contact, AgeTwoTargetingPenalty);
-            int defense = target.EffectiveDefense + (resolvedReaction == Reaction.Defend || resolvedReaction == Reaction.Evade ? 1 : 0) + defenseSupport + screenDefense - (target.Destruction ? 1 : 0);
+            int layeredDefense = MissileDefenseModifier(target, salvo);
+            int defense = target.EffectiveDefense + (resolvedReaction == Reaction.Defend || resolvedReaction == Reaction.Evade ? 1 : 0) + defenseSupport + screenDefense + layeredDefense - (target.Destruction ? 1 : 0);
             int difference = attack - defense;
             CombatBand band = Rules.BandFor(difference);
             int roll = Roll();
             DamageState damage = Rules.DamageFor(band, roll);
             DamageState resultingDamage = ApplyDamage(target, damage);
             target.ReactionDefenseBonus = 0;
-            if (salvo == Salvo.Heavy) attacker.WeaponExpended = true;
+            ExpendWeapon(attacker, salvo);
             if (attacker.HasEffect("F-04")) DegradeEndurance(attacker);
             bool withdrew = false;
             HexCoord withdrawalDestination = target.Position;
@@ -911,7 +946,7 @@ namespace SeaOfUncertainty.Core
                 counterattack = $" Counterattack: {returnAttack} vs {returnDefense}, {returnBand}, rolled {counterattackRoll} — {DamageResolutionText(counterattackDamage, counterattackResultingDamage)}.";
             }
 
-            result = new CombatResult { Attack = attack, Defense = defense, Difference = difference, Band = band, Roll = roll, Damage = damage, ResultingDamage = resultingDamage, Reaction = resolvedReaction, Withdrew = withdrew, WithdrawalDestination = withdrawalDestination, Counterattacked = counterattacked, CounterattackRoll = counterattackRoll, CounterattackDamage = counterattackDamage, CounterattackResultingDamage = counterattackResultingDamage };
+            result = new CombatResult { Attack = attack, Defense = defense, Difference = difference, Band = band, Roll = roll, Damage = damage, ResultingDamage = resultingDamage, Reaction = resolvedReaction, Withdrew = withdrew, WithdrawalDestination = withdrawalDestination, Counterattacked = counterattacked, CounterattackRoll = counterattackRoll, CounterattackDamage = counterattackDamage, CounterattackResultingDamage = counterattackResultingDamage, MissileDefenseModifier = layeredDefense, MissileDefenseLayers = MissileDefenseSummary(target, salvo) };
             string withdrawal = resolvedReaction == Reaction.Evade ? withdrew ? $" Evaded to {withdrawalDestination}." : " Evade had no legal safer destination." : string.Empty;
             string targetLabel = contact.Identity == IdentityQuality.Identified ? target.Name : $"Contact area {aim}";
             CompleteAction(attacker, ActionKind.Strike, false, $"{attacker.Name} struck {targetLabel}: {attack} vs {defense}, {band}, rolled {roll} — {DamageResolutionText(damage, resultingDamage)}. Reaction: {resolvedReaction}.{withdrawal}{counterattack}");
@@ -1028,9 +1063,10 @@ namespace SeaOfUncertainty.Core
         {
             foreach (SideState side in Sides.Values)
             {
+                int capacity = side.Architecture == CommandArchitecture.Centralized ? 4 : side.Architecture == CommandArchitecture.Distributed ? 2 : 3;
                 if (side.SlotStates == null) side.SlotStates = new List<CommandSlotState>();
-                while (side.SlotStates.Count < 3) side.SlotStates.Add(new CommandSlotState { Index = side.SlotStates.Count + 1, Status = CommandSlotStatus.Free });
-                if (side.SlotStates.Count > 3) side.SlotStates.RemoveRange(3, side.SlotStates.Count - 3);
+                while (side.SlotStates.Count < capacity) side.SlotStates.Add(new CommandSlotState { Index = side.SlotStates.Count + 1, Status = CommandSlotStatus.Free });
+                if (side.SlotStates.Count > capacity) side.SlotStates.RemoveRange(capacity, side.SlotStates.Count - capacity);
                 ReconcileStrainedSlots(side);
                 SyncCommandCount(side);
             }
@@ -1204,7 +1240,7 @@ namespace SeaOfUncertainty.Core
             ClearSupport(formation);
             bool acceptedRisk = formation.IgnoreEntropyNextAction;
             bool criticalComplexAction = formation.Endurance == Endurance.Critical;
-            int cost = Rules.ActionTime(ActionKind.Strike) + coordinationDrift + formation.NextReadyTimeBonus;
+            int cost = Rules.ActionTime(ActionKind.Strike) + coordinationDrift + formation.NextReadyTimeBonus + (RuntimeWeatherSeverity > 0 && formation.Kind == FormationKind.AirGroup ? RuntimeWeatherSeverity : 0);
             if (formation.Friction && !acceptedRisk) cost++;
             if (formation.HasEffect("F-01")) cost++;
             if (formation.HasEffect("F-09")) cost++;
@@ -1240,7 +1276,8 @@ namespace SeaOfUncertainty.Core
             if (action != ActionKind.Support) ClearSupport(formation);
             bool acceptedRisk = formation.IgnoreEntropyNextAction;
             bool criticalComplexAction = formation.Endurance == Endurance.Critical && Rules.IsComplexAction(action);
-            int cost = Rules.ActionTime(action) + additionalTime + formation.NextReadyTimeBonus;
+            int weatherDelay = RuntimeWeatherSeverity > 0 && formation.Kind == FormationKind.AirGroup && Rules.IsComplexAction(action) ? RuntimeWeatherSeverity : 0;
+            int cost = Rules.ActionTime(action) + additionalTime + formation.NextReadyTimeBonus + weatherDelay;
             bool complex = Rules.IsComplexAction(action);
             if (formation.Friction && complex && !acceptedRisk) cost++;
             if (formation.HasEffect("F-01")) cost++;
@@ -1288,27 +1325,96 @@ namespace SeaOfUncertainty.Core
 
         private void AdvanceToNextFormation()
         {
-            FormationState next = Rules.NextReady(Formations, lastActingSide);
-            if (next == null) { Active = null; return; }
-            if (next.ReadyTime > Time)
+            while (true)
             {
-                int delta = next.ReadyTime - Time;
-                Time = next.ReadyTime;
-                foreach (ContactState contact in Contacts.Where(c => !c.IsLost))
+                FormationState next = Rules.NextReady(Formations, lastActingSide);
+                if (next == null) { Active = null; return; }
+                int nextEventTime = (Scenario.ScheduledEvents ?? new List<ScheduledScenarioEventDefinition>())
+                    .Where(item => !ResolvedScheduledEventIds.Contains(item.Id) && item.Time >= Time).Select(item => item.Time).DefaultIfEmpty(int.MaxValue).Min();
+                int targetTime = Math.Min(next.ReadyTime, nextEventTime);
+                if (targetTime > Time)
                 {
-                    int previousAge = contact.Age;
-                    contact.Age += delta;
-                    int degradationSteps = Math.Max(0, contact.Age - 2) - Math.Max(0, previousAge - 2);
-                    for (int step = 0; step < degradationSteps && !contact.IsLost; step++)
+                    int delta = targetTime - Time;
+                    Time = targetTime;
+                    foreach (ContactState contact in Contacts.Where(c => !c.IsLost))
                     {
-                        if (contact.Location == LocationQuality.Low) contact.IsLost = true;
-                        else contact.Location--;
+                        int previousAge = contact.Age;
+                        contact.Age += delta;
+                        int degradationSteps = Math.Max(0, contact.Age - 2) - Math.Max(0, previousAge - 2);
+                        for (int step = 0; step < degradationSteps && !contact.IsLost; step++)
+                        {
+                            if (contact.Location == LocationQuality.Low) contact.IsLost = true;
+                            else contact.Location--;
+                        }
                     }
                 }
+                ProcessScheduledEvents();
+                ReleaseTimedCommandAndDeliverMissions();
+                next = Rules.NextReady(Formations, lastActingSide);
+                if (next != null && next.ReadyTime <= Time) break;
             }
-            ReleaseTimedCommandAndDeliverMissions();
             Active = Rules.NextReady(Formations, lastActingSide);
             if (Active != null && Active.Replenishing && Active.ReadyTime <= Time) Active.Replenishing = false;
+        }
+
+        private void ProcessScheduledEvents()
+        {
+            foreach (ScheduledScenarioEventDefinition scheduled in (Scenario.ScheduledEvents ?? new List<ScheduledScenarioEventDefinition>())
+                .Where(item => item.Time <= Time && !ResolvedScheduledEventIds.Contains(item.Id)).OrderBy(item => item.Time).ThenBy(item => item.Id, StringComparer.Ordinal).ToList())
+            {
+                if (scheduled.Kind == ScheduledEventKind.WeatherChange)
+                {
+                    RuntimeWeather = string.IsNullOrWhiteSpace(scheduled.Weather) ? RuntimeWeather : scheduled.Weather;
+                    RuntimeWeatherSeverity = Math.Max(0, scheduled.WeatherSeverity);
+                }
+                else if (scheduled.Kind == ScheduledEventKind.CommandArchitectureChange && Sides.TryGetValue(scheduled.Side, out SideState side))
+                {
+                    side.Architecture = scheduled.CommandArchitecture;
+                    EnsureCommandSlotStates();
+                }
+                else if (scheduled.Kind == ScheduledEventKind.Reinforcement && scheduled.Reinforcement != null)
+                {
+                    OperationalRegionDefinition region = (Scenario.ReinforcementRegions ?? new List<OperationalRegionDefinition>()).Concat(Scenario.Area.Regions ?? new List<OperationalRegionDefinition>()).FirstOrDefault(item => item.Id == scheduled.RegionId);
+                    HexCoord? entry = region?.Hexes.Where(Area.Contains).Where(hex => Area.TerrainAt(hex) != OperationalTerrain.Land && !Formations.Any(item => !item.IsDestroyed && item.Side == scheduled.Side && item.Position.Equals(hex))).OrderBy(hex => hex.Q).ThenBy(hex => hex.R).Cast<HexCoord?>().FirstOrDefault();
+                    if (!entry.HasValue) continue;
+                    FormationDefinition definition = scheduled.Reinforcement;
+                    definition.Q = entry.Value.Q; definition.R = entry.Value.R; definition.ReadyTime = Math.Max(Time, definition.ReadyTime);
+                    Formations.Add(CreateFormationState(definition));
+                }
+                ResolvedScheduledEventIds.Add(scheduled.Id);
+                AddLog($"T{Time:00}  SCHEDULED EVENT — {(string.IsNullOrWhiteSpace(scheduled.Text) ? scheduled.Id : scheduled.Text)}");
+            }
+        }
+
+        public int MissileDefenseModifier(FormationState target, Salvo salvo)
+        {
+            MissileDefenseProfileDefinition profile = Scenario.MissileDefenseProfiles?.FirstOrDefault(item => item.Kind == target.Kind);
+            return Math.Max(0, (profile?.Modifier(salvo) ?? 0) + (target.Ratings.ElectronicWarfare > 0 ? 1 : 0));
+        }
+
+        public string MissileDefenseSummary(FormationState target, Salvo salvo)
+        {
+            MissileDefenseProfileDefinition profile = Scenario.MissileDefenseProfiles?.FirstOrDefault(item => item.Kind == target.Kind);
+            if (profile == null) return "None";
+            return $"Outer {(salvo == Salvo.Light ? profile.OuterLayer : 0)} / Area {(salvo == Salvo.Heavy ? 0 : profile.AreaLayer)} / Point {profile.PointLayer} / EW {(target.Ratings.ElectronicWarfare > 0 ? 1 : 0)}";
+        }
+
+        private static WeaponInventoryState DefaultWeapons(FormationKind kind)
+        {
+            int light = kind == FormationKind.LogisticsGroup ? 1 : kind == FormationKind.Submarine ? 3 : 4;
+            int standard = kind == FormationKind.LogisticsGroup ? 0 : kind == FormationKind.Submarine || kind == FormationKind.AirGroup ? 2 : 3;
+            int heavy = kind == FormationKind.LogisticsGroup ? 0 : 1;
+            return new WeaponInventoryState { Light = light, MaxLight = light, Standard = standard, MaxStandard = standard, Heavy = heavy, MaxHeavy = heavy };
+        }
+
+        private static WeaponInventoryState CloneWeapons(WeaponInventoryState source)
+            => source == null ? null : new WeaponInventoryState { Light = source.Light, Standard = source.Standard, Heavy = source.Heavy, MaxLight = source.MaxLight, MaxStandard = source.MaxStandard, MaxHeavy = source.MaxHeavy };
+
+        private void ExpendWeapon(FormationState formation, Salvo salvo)
+        {
+            formation.Weapons?.Expend(salvo);
+            if (salvo == Salvo.Heavy) formation.WeaponExpended = true;
+            if (formation.Kind == FormationKind.Submarine) formation.SubmarineDepth = SubmarineDepthState.Shallow;
         }
 
         private DamageState ApplyDamage(FormationState target, DamageState damage)
@@ -1829,29 +1935,40 @@ namespace SeaOfUncertainty.Core
             foreach (FormationDefinition definition in Scenario.Formations)
             {
                 if (!Area.Contains(new HexCoord(definition.Q, definition.R))) throw new InvalidOperationException($"Formation {definition.Id} is outside {Area.DisplayName}.");
-                Formations.Add(new FormationState
-                {
-                    Id = definition.Id,
-                    Name = definition.Name,
-                    Side = definition.Side,
-                    Kind = definition.Kind,
-                    Position = new HexCoord(definition.Q, definition.R),
-                    ReadyTime = definition.ReadyTime,
-                    Endurance = Endurance.Ready,
-                    Mission = definition.Kind == FormationKind.CarrierGroup ? ActionKind.Strike : definition.Kind == FormationKind.SurfaceGroup ? ActionKind.Move : ActionKind.Search,
-                    MissionObjective = MissionObjectiveKind.OperationalObjective,
-                    MissionObjectiveHex = Area.Objective,
-                    MissionPosture = MissionPosture.Balanced,
-                    MissionTrigger = definition.Kind == FormationKind.SurfaceGroup ? MissionTrigger.ObjectiveReached : MissionTrigger.ContactLocated,
-                    LastActionFollowedMission = true,
-                    Ratings = definition.Ratings
-                });
+                Formations.Add(CreateFormationState(definition));
             }
             foreach (ContactDefinition definition in Scenario.Contacts)
             {
-                Contacts.Add(new ContactState { Owner = definition.Owner, TargetId = definition.TargetId, LastKnownPosition = new HexCoord(definition.Q, definition.R), Location = definition.Location, Identity = definition.Identity, Age = definition.Age });
+                FormationState target = Find(definition.TargetId);
+                Contacts.Add(new ContactState { Owner = definition.Owner, TargetId = definition.TargetId, LastKnownPosition = new HexCoord(definition.Q, definition.R), Location = definition.Location, Identity = definition.Identity, Domain = definition.Identity >= IdentityQuality.General && target != null ? DomainFor(target.Kind) : ContactDomain.Unknown, Age = definition.Age });
             }
             AddLog($"Exercise {Scenario.DisplayName.ToUpperInvariant()} initialized. {Formations.Count} formations. Central objective: hold {Area.Objective} at T{Scenario.Horizon}.");
         }
+
+        private FormationState CreateFormationState(FormationDefinition definition)
+        {
+            return new FormationState
+            {
+                Id = definition.Id,
+                Name = definition.Name,
+                Side = definition.Side,
+                Kind = definition.Kind,
+                Position = new HexCoord(definition.Q, definition.R),
+                ReadyTime = definition.ReadyTime,
+                Endurance = Endurance.Ready,
+                Mission = definition.Kind == FormationKind.CarrierGroup ? ActionKind.Strike : definition.Kind == FormationKind.SurfaceGroup ? ActionKind.Move : definition.Kind == FormationKind.LogisticsGroup ? ActionKind.Support : ActionKind.Search,
+                MissionObjective = MissionObjectiveKind.OperationalObjective,
+                MissionObjectiveHex = Area.Objective,
+                MissionPosture = MissionPosture.Balanced,
+                MissionTrigger = definition.Kind == FormationKind.SurfaceGroup ? MissionTrigger.ObjectiveReached : definition.Kind == FormationKind.LogisticsGroup ? MissionTrigger.LogisticsRequired : MissionTrigger.ContactLocated,
+                LastActionFollowedMission = true,
+                Ratings = definition.Ratings,
+                Weapons = CloneWeapons(definition.Weapons) ?? DefaultWeapons(definition.Kind),
+                SubmarineDepth = SubmarineDepthState.Deep
+            };
+        }
+
+        private static ContactDomain DomainFor(FormationKind kind)
+            => kind == FormationKind.Submarine ? ContactDomain.Subsurface : kind == FormationKind.AirGroup ? ContactDomain.Air : ContactDomain.Surface;
     }
 }

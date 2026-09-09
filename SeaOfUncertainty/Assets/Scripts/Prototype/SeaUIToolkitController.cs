@@ -10,9 +10,10 @@ namespace SeaOfUncertainty.Prototype
 {
     public sealed class SeaUIToolkitController : MonoBehaviour
     {
-        private enum View { Main, Mode, Scenario, Briefing, Setup, Handoff, AiPlanning, Game, Results }
+        private enum View { Main, Mode, Online, Scenario, Briefing, Setup, Handoff, AiPlanning, Game, Results }
 
         private SeaPrototypeController backend;
+        private OnlineMultiplayerCoordinator online;
         private UIDocument document;
         private VisualElement root;
         private VisualElement app;
@@ -35,6 +36,51 @@ namespace SeaOfUncertainty.Prototype
         private HexCoord pendingStrikeAim;
         private SynchronizedStrikeState pendingSynchronizedStrike;
         private bool pendingSynchronizedBlind;
+        private bool controllerAxisReleased = true;
+        private VisualElement focusBeforeOverlay;
+
+#if UNITY_EDITOR
+        public VisualElement EditorRoot => root;
+        public SeaPrototypeController EditorBackend => backend;
+        public string EditorView => view.ToString();
+        public bool EditorOverlayOpen => root?.Q<VisualElement>("overlay") != null;
+
+        public void EditorEnsureInitializedForTests()
+        {
+            backend = GetComponent<SeaPrototypeController>();
+            backend?.EditorEnsureInitializedForTests();
+            if (root == null) Awake();
+        }
+
+        public void EditorShowGame() { backend.ToolkitBeginDecision(); ShowGame(); }
+        public void EditorShowHandoff() => ShowHandoff();
+        public void EditorShowSettings() => ShowSettings();
+        public void EditorShowRules() => ShowRules();
+        public void EditorShowResponseHand() => ShowResponseHand();
+        public void EditorShowStrikeAim(ContactState contact) => ShowStrikeAim(contact);
+
+        public bool EditorInvokeButton(string text)
+        {
+            Button button = root?.Query<Button>().ToList().FirstOrDefault(item => string.Equals(item.text, text, StringComparison.Ordinal));
+            if (button?.userData is Action action && button.enabledInHierarchy) { action(); return true; }
+            return false;
+        }
+
+        public Toggle EditorToggle(string label)
+            => root?.Query<Toggle>().ToList().FirstOrDefault(item => string.Equals(item.label, label, StringComparison.Ordinal));
+
+        public Slider EditorSlider(string label)
+            => root?.Query<Slider>().ToList().FirstOrDefault(item => string.Equals(item.label, label, StringComparison.Ordinal));
+
+        public DropdownField EditorDropdown(string label)
+            => root?.Query<DropdownField>().ToList().FirstOrDefault(item => string.Equals(item.label, label, StringComparison.Ordinal));
+
+        public static FullScreenMode EditorRequestedFullscreenMode(bool currentlyFullscreen)
+            => RequestedFullscreenMode(currentlyFullscreen);
+#endif
+
+        private static FullScreenMode RequestedFullscreenMode(bool currentlyFullscreen)
+            => currentlyFullscreen ? FullScreenMode.Windowed : FullScreenMode.FullScreenWindow;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -50,6 +96,9 @@ namespace SeaOfUncertainty.Prototype
         private void Awake()
         {
             backend = GetComponent<SeaPrototypeController>();
+            online = GetComponent<OnlineMultiplayerCoordinator>() ?? gameObject.AddComponent<OnlineMultiplayerCoordinator>();
+            online.Changed -= OnOnlineChanged;
+            online.Changed += OnOnlineChanged;
             PanelSettings panelSettings = Resources.Load<PanelSettings>("UI/SeaRuntimePanelSettings");
             if (panelSettings == null || panelSettings.themeStyleSheet == null)
             {
@@ -98,6 +147,30 @@ namespace SeaOfUncertainty.Prototype
             else ShowMain();
         }
 
+        private void Update()
+        {
+            if (root == null || !backend.ControllerNavigation || !Input.GetJoystickNames().Any(name => !string.IsNullOrEmpty(name))) return;
+            float horizontal = Input.GetAxisRaw("ControllerHorizontal");
+            float vertical = Input.GetAxisRaw("ControllerVertical");
+            float magnitude = Mathf.Max(Mathf.Abs(horizontal), Mathf.Abs(vertical));
+            if (magnitude < backend.ControllerDeadZone * .65f) controllerAxisReleased = true;
+            else if (controllerAxisReleased && magnitude >= backend.ControllerDeadZone)
+            {
+                controllerAxisReleased = false;
+                VisualElement focused = root.panel?.focusController?.focusedElement as VisualElement;
+                if (focused is Slider focusedSlider && Mathf.Abs(horizontal) >= Mathf.Abs(vertical))
+                    focusedSlider.value = Mathf.Clamp(focusedSlider.value + (horizontal > 0f ? 5f : -5f), focusedSlider.lowValue, focusedSlider.highValue);
+                else if (focused == map)
+                {
+                    if (Mathf.Abs(horizontal) >= Mathf.Abs(vertical)) map.MoveCursor(horizontal > 0f ? 1 : -1, 0);
+                    else map.MoveCursor(0, vertical > 0f ? -1 : 1);
+                }
+                else MoveFocus(horizontal < 0f || vertical > 0f ? -1 : 1);
+            }
+            if (Input.GetKeyDown(KeyCode.JoystickButton0)) SubmitFocused();
+            if (Input.GetKeyDown(KeyCode.JoystickButton1)) CancelNavigation();
+        }
+
         private void ShowMain()
         {
             view = View.Main;
@@ -114,7 +187,9 @@ namespace SeaOfUncertainty.Prototype
             row.Add(ActionButton("FIELD MANUAL", ShowRules));
             row.Add(ActionButton("EXIT GAME", ShowExitConfirmation, "danger-button"));
             card.Add(row);
-            card.Add(Text("Solo vs AI • Local pass-and-play • Online multiplayer intentionally deferred", "muted"));
+            card.Add(Text(OnlineMultiplayerCoordinator.IsDeveloperPreviewEnabled()
+                ? "Solo vs AI • Local pass-and-play • Developer-gated online preview available"
+                : "Solo vs AI • Local pass-and-play • Online multiplayer remains gated for validation", "muted"));
             page.Add(card);
             app.Add(page);
         }
@@ -131,9 +206,115 @@ namespace SeaOfUncertainty.Prototype
             card.Add(Text("The deterministic OPFOR commander controls Red using only its own Contacts, formations, public terrain, and objective information.", "muted"));
             card.Add(ActionButton("LOCAL HOTSEAT  •  BLUE VS RED", () => { backend.ToolkitSetOperationMode(OperationMode.LocalHotseat); ShowScenario(); }));
             card.Add(Text("Two players share this device with secure information-handoff screens whenever command changes sides.", "muted"));
+            if (OnlineMultiplayerCoordinator.IsDeveloperPreviewEnabled())
+            {
+                card.Add(ActionButton("ONLINE PREVIEW  •  PRIVATE RELAY", ShowOnline));
+                card.Add(Text("Developer gate: private lobby, readiness, DTLS Relay startup, reconnect foundation, and latency diagnostics. Gameplay activation remains blocked until privacy QA passes.", "muted"));
+            }
             card.Add(ActionButton("BACK", ShowMain));
             page.Add(card);
             app.Add(page);
+        }
+
+        private void ShowOnline()
+        {
+            view = View.Online;
+            BeginScreen("ONLINE MULTIPLAYER  •  DEVELOPER PREVIEW");
+            VisualElement page = El("front-page");
+            VisualElement card = Panel("hero-card");
+            card.Add(Text("PRIVATE TWO-COMMANDER SESSION", "heading"));
+            card.Add(Text("Direct IP works without an account or Cloud project. Unity Relay adds managed join codes, NAT traversal, encrypted transport, and host-migration coordination. This remains hidden in release builds unless launched with -enableOnlinePreview.", "body-copy"));
+
+            if (online.Session == null && !online.IsDirect)
+            {
+                TextField name = new TextField("COMMANDER NAME") { value = PlayerPrefs.GetString("OnlineCommanderName", "Commander") };
+                name.name = "online-commander-name";
+                TextField code = new TextField("JOIN CODE") { value = string.Empty };
+                code.name = "online-join-code";
+                code.maxLength = 12;
+                TextField address = new TextField("HOST IP") { value = PlayerPrefs.GetString("DirectHostAddress", "127.0.0.1") };
+                address.name = "direct-host-address";
+                IntegerField port = new IntegerField("UDP PORT") { value = PlayerPrefs.GetInt("DirectHostPort", 7978) };
+                port.name = "direct-host-port";
+                card.Add(name);
+                card.Add(Text("DIRECT IP  •  NO CLOUD REQUIRED", "eyebrow"));
+                card.Add(address);
+                card.Add(port);
+                card.Add(code);
+                VisualElement row = El("row");
+                row.Add(ActionButton("HOST DIRECT", () => HostDirect(name.value, port.value), "primary"));
+                row.Add(ActionButton("JOIN DIRECT", () => JoinDirect(address.value, port.value, code.value, name.value)));
+                card.Add(row);
+                card.Add(Text("Direct traffic uses reliable Unity Transport over UDP. Use LAN/VPN, or configure firewall and UDP port forwarding. Direct transport does not conceal the host IP and is not DTLS-encrypted.", "muted"));
+                card.Add(Text("UNITY RELAY  •  OPTIONAL CLOUD PATH", "eyebrow"));
+                VisualElement relayRow = El("row");
+                relayRow.Add(ActionButton("HOST RELAY LOBBY", () => HostOnline(name.value)));
+                relayRow.Add(ActionButton("JOIN RELAY CODE", () => JoinOnline(code.value, name.value)));
+                card.Add(relayRow);
+            }
+            else
+            {
+                string joinCode = online.IsDirect ? online.DirectJoinCode : online.JoinCode;
+                card.Add(Text($"{(online.IsDirect ? "DIRECT" : "RELAY")} JOIN CODE  •  {joinCode.ToUpperInvariant()}", "front-title"));
+                card.Add(Text(online.PlayerSummary(), "body-copy"));
+                VisualElement row = El("row");
+                row.Add(ActionButton(online.IsReady ? "CLEAR READY" : "MARK READY", ToggleOnlineReady, online.IsReady ? "warning" : "primary"));
+                if (!online.IsDirect) row.Add(ActionButton("REFRESH LOBBY", RefreshOnline));
+                card.Add(row);
+                if (online.IsHost)
+                {
+                    Button start = ActionButton(online.IsDirect ? "START DIRECT MATCH" : "START DTLS RELAY", StartOnlineRelay, "primary");
+                    start.SetEnabled(online.CanStart && online.State != OnlinePreviewState.Working && online.State != OnlinePreviewState.Starting);
+                    card.Add(start);
+                }
+                if (online.State == OnlinePreviewState.Connected)
+                    card.Add(ActionButton("MEASURE AUTHORITY RTT", online.SendPing));
+                card.Add(ActionButton("LEAVE SESSION", LeaveOnline, "danger-button"));
+            }
+
+            card.Add(Text("STATUS", "eyebrow"));
+            card.Add(Text(online.Status + (online.LastRoundTripMilliseconds >= 0 ? $"\nLAST RTT  •  {online.LastRoundTripMilliseconds} MS" : string.Empty), "muted"));
+            card.Add(Text("PUBLIC ACTIVATION GATES\n1. Full Local Hotseat privacy playtest\n2. Two authenticated builds over separate networks\n3. Latency, reconnect, host-migration, and adversarial leak evidence", "body-copy"));
+            card.Add(ActionButton("BACK", ShowMode));
+            page.Add(card);
+            app.Add(page);
+        }
+
+        private async void HostOnline(string commanderName)
+        {
+            PlayerPrefs.SetString("OnlineCommanderName", commanderName ?? "Commander");
+            await online.HostAsync(commanderName, "meridian-veil");
+        }
+
+        private async void JoinOnline(string code, string commanderName)
+        {
+            PlayerPrefs.SetString("OnlineCommanderName", commanderName ?? "Commander");
+            await online.JoinAsync(code, commanderName);
+        }
+
+        private async void HostDirect(string commanderName, int port)
+        {
+            PlayerPrefs.SetString("OnlineCommanderName", commanderName ?? "Commander");
+            PlayerPrefs.SetInt("DirectHostPort", Mathf.Clamp(port, 1, ushort.MaxValue));
+            await online.HostDirectAsync(commanderName, (ushort)Mathf.Clamp(port, 1, ushort.MaxValue));
+        }
+
+        private async void JoinDirect(string address, int port, string code, string commanderName)
+        {
+            PlayerPrefs.SetString("OnlineCommanderName", commanderName ?? "Commander");
+            PlayerPrefs.SetString("DirectHostAddress", address ?? "127.0.0.1");
+            PlayerPrefs.SetInt("DirectHostPort", Mathf.Clamp(port, 1, ushort.MaxValue));
+            await online.JoinDirectAsync(address, (ushort)Mathf.Clamp(port, 1, ushort.MaxValue), code, commanderName);
+        }
+
+        private async void ToggleOnlineReady() => await online.SetReadyAsync(!online.IsReady);
+        private async void RefreshOnline() => await online.RefreshAsync();
+        private async void StartOnlineRelay() => await online.StartAsync();
+        private async void LeaveOnline() => await online.LeaveAsync();
+
+        private void OnOnlineChanged()
+        {
+            if (view == View.Online && root != null) ShowOnline();
         }
 
         private void ShowScenario()
@@ -319,9 +500,15 @@ namespace SeaOfUncertainty.Prototype
             mapColumn.Add(map);
             mapColumn.Add(Text($"3D COMMAND MAP  •  {backend.Game.Area.NauticalMilesPerHex} NM / HEX  •  WASD MOVE  •  C ACTIVE  •  O OBJECTIVE  •  V EDGE PAN  •  F9/F10 SAVE/RECALL VIEW  •  HOME RESET", "muted"));
             workspace.Add(mapColumn);
-            dossier = Panel("dossier");
+            VisualElement dossierPanel = Panel("dossier");
+            var dossierScroll = new ScrollView();
+            dossierScroll.AddToClassList("dossier-scroll");
+            dossierScroll.verticalScrollerVisibility = ScrollerVisibility.Auto;
+            dossierScroll.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
+            dossier = dossierScroll;
             UpdateDossier(null);
-            workspace.Add(dossier);
+            dossierPanel.Add(dossierScroll);
+            workspace.Add(dossierPanel);
             app.Add(workspace);
 
             VisualElement bottom = El("bottom-deck");
@@ -329,6 +516,12 @@ namespace SeaOfUncertainty.Prototype
             bottom.Add(BuildCardHand());
             bottom.Add(BuildEventFeed());
             app.Add(bottom);
+            if (backend.AudioDescriptions)
+            {
+                Label audioDescription = Text("AUDIO DESCRIPTION  •  " + backend.LastAudioDescription, "audio-description");
+                audioDescription.name = "audio-description-status";
+                app.Add(audioDescription);
+            }
             map.schedule.Execute(() => { map.Refresh(); map.Focus(); });
             if (backend.ToolkitPendingEntropyEffect(active.Side) != null && backend.ToolkitPendingEntropyFormation(active.Side) != null)
             {
@@ -358,14 +551,12 @@ namespace SeaOfUncertainty.Prototype
             foreach (FormationState formation in backend.Game.ActivationQueue())
             {
                 string queueLabel = queuePosition++ == 0 ? "NOW" : $"NEXT {queuePosition - 1}";
-                string reactionState = formation.Replenishing ? "REPLENISHING • R UNAVAILABLE" : formation.HasReacted ? "R SPENT" : "R READY";
-                Button row = ActionButton($"{queueLabel}  •  READY T{formation.ReadyTime:00}\n{formation.Name}\n{formation.Kind}  •  {formation.Cohesion}  •  {reactionState}", () => UpdateDossier(null));
-                row.text += $"\nENDURANCE {formation.Endurance.ToString().ToUpperInvariant()}  •  {formation.EnduranceProgress.ToUpperInvariant()}";
+                string reactionState = formation.Replenishing ? "LOCKED" : formation.HasReacted ? "SPENT" : "READY";
+                string assignment = formation.PatrolActive ? $" • Screen {formation.PatrolPosture}" : formation.SupportActive ? $" • Support {formation.SupportKind}" : string.Empty;
+                Button row = ActionButton($"{queueLabel}  •  T{formation.ReadyTime:00}\n{formation.Name}\n{KindTag(formation.Kind)}  •  R:{reactionState}  •  E:{formation.Endurance.ToString().ToUpperInvariant()} {Math.Min(formation.MajorActions, 2)}/3", () => UpdateDossier(null));
                 row.AddToClassList("timeline-row");
-                if (formation.PatrolActive) row.text += $"\nSCREEN {formation.PatrolPosture.ToString().ToUpperInvariant()} • INTERCEPT {(formation.PatrolInterceptionAvailable ? "READY" : "SPENT")}";
-                else if (formation.SupportActive) row.text += $"\nSUPPORT {formation.SupportKind.ToString().ToUpperInvariant()} → {backend.Game.Find(formation.SupportRecipientId)?.Name ?? formation.SupportRecipientId}";
                 if (formation == backend.Game.Active) row.AddToClassList("active");
-                row.tooltip = $"Activation queue position {queuePosition} • {formation.Side} • Ready T{formation.ReadyTime:00} • Entropy {formation.EntropySources} • Command {formation.EffectiveCommand} • {reactionState}";
+                row.tooltip = $"Activation queue position {queuePosition} • {formation.Side} • Ready T{formation.ReadyTime:00} • {formation.Kind} • {formation.Cohesion} • Reaction {reactionState} • Endurance {formation.EnduranceProgress} • Entropy {formation.EntropySources} • Command {formation.EffectiveCommand}{assignment}";
                 scroll.Add(row);
             }
             panel.Add(scroll);
@@ -393,27 +584,32 @@ namespace SeaOfUncertainty.Prototype
             VisualElement actionHeader = El("row");
             actionHeader.Add(Text("CHOOSE AN ACTION", "subheading"));
             actionHeader.Add(El("spacer"));
-            actionHeader.Add(ActionButton("EDIT MISSION", ShowMissionFormationChoices));
+            actionHeader.Add(ActionButton("MISSION", ShowMissionFormationChoices));
             if (backend.Game.Active.EntropySources >= 3) actionHeader.Add(ActionButton("PUSH THROUGH • +1 STRAIN", () => { backend.ToolkitPushThrough(); ShowGame(); }, "warning"));
             if (backend.Game.Active.Kind == FormationKind.CarrierGroup && backend.Game.HasLogisticsAccess(backend.Game.Active) && commandSide.CommandStrain > 0)
                 actionHeader.Add(ActionButton("HQ RECOVERY • 2", () => ResolveAction(() => backend.ToolkitRestoreCommand()), "primary"));
             panel.Add(actionHeader);
             string slotSummary = string.Join("  ", backend.Game.CommandSlotsFor(commandSide.Side).Select(slot => $"◆{slot.Index} {slot.Status.ToString().ToUpperInvariant()}{(string.IsNullOrEmpty(slot.Purpose) ? string.Empty : " " + slot.Purpose)}"));
-            panel.Add(Text($"COMMAND ATTENTION • {commandSide.CommandSlots}/3 FREE • STRAIN {commandSide.CommandStrain}\n{slotSummary}", "muted"));
-            VisualElement actions = El("row");
-            actions.Add(ActionButton("1  MOVE • 2", () => SelectAction(ToolkitActionMode.Move), actionMode == ToolkitActionMode.Move ? "selected" : null));
-            actions.Add(ActionButton("2  SEARCH • 2", () => SelectAction(ToolkitActionMode.Search), actionMode == ToolkitActionMode.Search ? "selected" : null));
-            actions.Add(ActionButton("3  STRIKE • 2", () => SelectAction(ToolkitActionMode.Strike), actionMode == ToolkitActionMode.Strike ? "selected" : null));
-            actions.Add(ActionButton("4  RECOVER • 2", () => ResolveAction(() => backend.ToolkitRecover())));
-            actions.Add(ActionButton("5  HOLD • 1", () => ResolveAction(() => backend.ToolkitHold())));
+            Label commandSummary = Text($"COMMAND {commandSide.CommandSlots}/3 FREE  •  STRAIN {commandSide.CommandStrain}", "muted", "command-summary");
+            commandSummary.tooltip = slotSummary;
+            panel.Add(commandSummary);
+            VisualElement actions = El("row", "action-row");
+            actions.Add(ActionButton("1  ⇢ MOVE  •2", () => SelectAction(ToolkitActionMode.Move), actionMode == ToolkitActionMode.Move ? "selected" : null));
+            actions.Add(ActionButton("2  ◎ SEARCH  •2", () => SelectAction(ToolkitActionMode.Search), actionMode == ToolkitActionMode.Search ? "selected" : null));
+            actions.Add(ActionButton("3  ✦ STRIKE  •2", () => SelectAction(ToolkitActionMode.Strike), actionMode == ToolkitActionMode.Strike ? "selected" : null));
+            actions.Add(ActionButton("4  ↻ RECOVER  •2", () => ResolveAction(() => backend.ToolkitRecover())));
+            actions.Add(ActionButton("5  ■ HOLD  •1", () => ResolveAction(() => backend.ToolkitHold())));
             panel.Add(actions);
-            VisualElement assignments = El("row");
-            assignments.Add(ActionButton("6  PATROL / SCREEN • 1", ShowPatrolSetup));
-            assignments.Add(ActionButton("7  SUPPORT • 1", ShowSupportSetup));
-            assignments.Add(ActionButton("8  REPLENISH • 3", () => { SelectAction(ToolkitActionMode.Replenish); ShowReplenishmentSetup(); }));
-            assignments.Add(ActionButton("9  SYNC STRIKE", ShowSynchronizedStrikeContacts));
-            panel.Add(assignments);
-            VisualElement modes = El("row");
+            if (actionMode == ToolkitActionMode.None)
+            {
+                VisualElement assignments = El("row", "action-row");
+                assignments.Add(ActionButton("6  ◉ SCREEN  •1", ShowPatrolSetup));
+                assignments.Add(ActionButton("7  + SUPPORT  •1", ShowSupportSetup));
+                assignments.Add(ActionButton("8  ⟳ REPLENISH  •3", () => { SelectAction(ToolkitActionMode.Replenish); ShowReplenishmentSetup(); }));
+                assignments.Add(ActionButton("9  ✦✦ SYNC STRIKE", ShowSynchronizedStrikeContacts));
+                panel.Add(assignments);
+            }
+            VisualElement modes = El("row", "action-row");
             if (actionMode == ToolkitActionMode.Move)
             {
                 FormationState active = backend.Game.Active;
@@ -432,11 +628,17 @@ namespace SeaOfUncertainty.Prototype
             {
                 FormationKind kind = backend.Game.Active.Kind;
                 int scale = backend.Game.Area.NauticalMilesPerHex;
-                modes.Add(ModeButton($"LIGHT • +0 / {Rules.StrikeRange(kind, Salvo.Light) * scale} NM", Salvo.Light)); modes.Add(ModeButton($"STANDARD • +1 / {Rules.StrikeRange(kind, Salvo.Standard) * scale} NM", Salvo.Standard)); modes.Add(ModeButton($"HEAVY • +2 / {Rules.StrikeRange(kind, Salvo.Heavy) * scale} NM / EXP", Salvo.Heavy));
+                foreach (Salvo option in Enum.GetValues(typeof(Salvo)))
+                {
+                    int remaining = backend.Game.Active.Weapons?.Available(option) ?? -1;
+                    Button weapon = ModeButton($"{option.ToString().ToUpperInvariant()} • +{Rules.SalvoModifier(option)} / {Rules.StrikeRange(kind, option) * scale} NM • {(remaining < 0 ? "LEGACY" : remaining.ToString())} LEFT", option);
+                    weapon.SetEnabled(backend.Game.Active.CanFire(option));
+                    modes.Add(weapon);
+                }
             }
             panel.Add(modes);
-            panel.Add(Text(ActionPreview(), "body-copy", "amber"));
-            panel.Add(Text(backend.LastMessage, "muted"));
+            panel.Add(Text(ActionPreview(), "body-copy", "amber", "action-preview"));
+            if (actionMode == ToolkitActionMode.None) panel.Add(Text(backend.LastMessage, "muted"));
             return panel;
         }
 
@@ -448,7 +650,7 @@ namespace SeaOfUncertainty.Prototype
             header.Add(El("spacer"));
             header.Add(ActionButton("INSPECT", ShowEventInspector));
             panel.Add(header);
-            foreach (string entry in backend.Game.VisibleLog(backend.Game.Active.Side).Take(4)) panel.Add(Text(entry, "muted"));
+            foreach (string entry in backend.Game.VisibleLog(backend.Game.Active.Side).Take(2)) panel.Add(Text(entry, "muted"));
             return panel;
         }
 
@@ -483,9 +685,9 @@ namespace SeaOfUncertainty.Prototype
                 card.AddToClassList(effect.Source.ToString().ToLowerInvariant());
                 card.Add(Text(effect.Id + "  •  " + effect.Source.ToString().ToUpperInvariant(), "hand-card-id"));
                 card.Add(Text(effect.Title.ToUpperInvariant(), "hand-card-title"));
-                card.Add(Text(effect.Effect, "hand-card-effect"));
                 card.Add(Text("ATTACHED  •  " + formation.Name.ToUpperInvariant(), "hand-card-footer"));
                 if (formation.ResolvedEffectCardIds != null && formation.ResolvedEffectCardIds.Contains(effect.Id)) card.Add(Text("RESOLVED", "hand-card-footer", "amber"));
+                card.tooltip = effect.Effect;
                 scroll.Add(card);
             }
             foreach (CommandResponseDefinition response in responses)
@@ -500,8 +702,8 @@ namespace SeaOfUncertainty.Prototype
                 card.AddToClassList("response");
                 card.Add(Text(cardDefinition.Id + "  •  RESPONSE", "hand-card-id"));
                 card.Add(Text(cardDefinition.Title.ToUpperInvariant(), "hand-card-title"));
-                card.Add(Text(cardDefinition.Play, "hand-card-effect"));
                 card.Add(Text(cardDefinition.MechanicallySupported ? "CLICK TO PLAY" : "PARENT SYSTEM PENDING", "hand-card-footer"));
+                card.tooltip = cardDefinition.Play;
                 scroll.Add(card);
             }
             if (heldEntropy.Count == 0 && responses.Count == 0) scroll.Add(Text("No cards currently held.", "muted"));
@@ -567,10 +769,16 @@ namespace SeaOfUncertainty.Prototype
             stats.Add(Stat("DEFENSE", formation.EffectiveDefense, "Survivability before Reaction and attached effects."));
             stats.Add(Stat("SIGNATURE", formation.EffectiveSignature, "Higher is easier to detect."));
             stats.Add(Stat("COMMAND", formation.EffectiveCommand, "Same-Time initiative and autonomy after attached effects."));
+            stats.Add(Stat("EW", formation.Ratings.ElectronicWarfare, "Reduces detectability and strengthens layered missile defense."));
+            stats.Add(Stat("CYBER", formation.Ratings.Cyber, "Improves spectrum exploitation during Search resolution."));
             dossier.Add(stats);
             string reactionStatus = formation.Replenishing ? "UNAVAILABLE" : formation.HasReacted ? "SPENT" : "AVAILABLE";
-            dossier.Add(Text($"MISSION TASK {formation.Mission.ToString().ToUpperInvariant()}\nOBJECTIVE {formation.MissionObjective.ToString().ToUpperInvariant()} {(string.IsNullOrEmpty(formation.MissionObjectiveId) ? formation.MissionObjectiveHex.ToString() : formation.MissionObjectiveId)}\nPOSTURE {formation.MissionPosture.ToString().ToUpperInvariant()}\nTRIGGER {formation.MissionTrigger.ToString().ToUpperInvariant()}{(formation.PendingMissionChange ? $"\nPENDING MISSION DELIVERY T{formation.MissionDeliveryTime:00}" : string.Empty)}\nLAST ACTION {(formation.LastActionFollowedMission ? "FOLLOWED MISSION" : "IMMEDIATE RETASK")}\nREACTION {reactionStatus}\nREADY T{formation.ReadyTime:00}\nENDURANCE {formation.Endurance}\nDAMAGE {formation.Damage}\nCOHESION {formation.Cohesion}\nFRICTION {(formation.Friction ? "MARKED" : "CLEAR")}\nDISRUPTION {(formation.Disruption ? "MARKED" : "CLEAR")}\nDESTRUCTION {(formation.Destruction ? "MARKED" : "CLEAR")}{(formation.OrderlyWithdrawalReady ? "\nORDERLY WITHDRAWAL PREPARED" : string.Empty)}", "body-copy"));
-            dossier.Add(Text($"ENDURANCE TRACK  •  {formation.EnduranceProgress.ToUpperInvariant()}\n{Rules.EnduranceEffect(formation.Endurance).ToUpperInvariant()}", "muted", formation.Endurance == Endurance.Critical ? "amber" : null));
+            string objective = string.IsNullOrEmpty(formation.MissionObjectiveId) ? formation.MissionObjectiveHex.ToString() : formation.MissionObjectiveId;
+            dossier.Add(Text($"MISSION  {formation.Mission.ToString().ToUpperInvariant()}  •  {Words(formation.MissionObjective.ToString())} {objective}\n{formation.MissionPosture.ToString().ToUpperInvariant()}  •  TRIGGER {Words(formation.MissionTrigger.ToString())}\nLAST  {(formation.LastActionFollowedMission ? "FOLLOWED MISSION" : "IMMEDIATE RETASK")}{(formation.PendingMissionChange ? $"  •  DELIVERY T{formation.MissionDeliveryTime:00}" : string.Empty)}", "body-copy", "dossier-summary"));
+            dossier.Add(Text($"READY T{formation.ReadyTime:00}  •  REACTION {reactionStatus}\nENDURANCE {formation.Endurance.ToString().ToUpperInvariant()}  •  {formation.EnduranceProgress.ToUpperInvariant()}\nDAMAGE {formation.Damage.ToString().ToUpperInvariant()}  •  {formation.Cohesion.ToUpperInvariant()}", "body-copy", "dossier-summary"));
+            dossier.Add(Text($"ENTROPY  •  F {(formation.Friction ? "MARKED" : "CLEAR")}  •  D {(formation.Disruption ? "MARKED" : "CLEAR")}  •  X {(formation.Destruction ? "MARKED" : "CLEAR")}{(formation.OrderlyWithdrawalReady ? "\nORDERLY WITHDRAWAL PREPARED" : string.Empty)}", "muted", formation.EntropySources > 0 ? "amber" : null));
+            dossier.Add(Text($"MAGAZINES  •  {formation.Weapons?.Summary ?? "LEGACY LOADOUT"}\nCOMMAND  •  {backend.Game.Sides[formation.Side].Architecture.ToString().ToUpperInvariant()}  •  {backend.Game.Sides[formation.Side].CommandSlots} FREE{(formation.Kind == FormationKind.Submarine ? "\nDEPTH  •  " + formation.SubmarineDepth.ToString().ToUpperInvariant() : string.Empty)}\nWEATHER  •  {backend.Game.RuntimeWeather.ToUpperInvariant()}  •  SEVERITY {backend.Game.RuntimeWeatherSeverity}", "muted"));
+            dossier.Add(Text(Rules.EnduranceEffect(formation.Endurance).ToUpperInvariant(), "muted", formation.Endurance == Endurance.Critical ? "amber" : null));
             if (formation.PatrolActive)
                 dossier.Add(Text($"SCREEN {formation.PatrolPosture.ToString().ToUpperInvariant()} • CENTER {formation.PatrolCenter} • RADIUS {Rules.PatrolRadius}\nINTERCEPTION {(formation.PatrolInterceptionAvailable ? "READY" : "SPENT")}{(string.IsNullOrEmpty(formation.PatrolProtectedFormationId) ? string.Empty : " • PROTECTING " + (backend.Game.Find(formation.PatrolProtectedFormationId)?.Name ?? formation.PatrolProtectedFormationId))}", "body-copy", "amber"));
             if (formation.SupportActive)
@@ -578,7 +786,7 @@ namespace SeaOfUncertainty.Prototype
             if (formation.SupportBlockedUntilRecover) dossier.Add(Text("SUPPORT BLOCKED UNTIL RECOVER", "body-copy", "amber"));
             IReadOnlyList<OperationalLocationDefinition> logistics = backend.Game.LogisticsFacilitiesFor(formation);
             string logisticsStatus = backend.Game.HasLogisticsAccess(formation) ? "LOGISTICS ACCESS AVAILABLE HERE" : logistics.Count == 0 ? "NO COMPATIBLE SCENARIO LOGISTICS FACILITY" : $"NEAREST LOGISTICS • {logistics[0].Name.ToUpperInvariant()} AT {logistics[0].Hex} • {HexCoord.Distance(formation.Position, logistics[0].Hex)} HEX";
-            dossier.Add(Text(logisticsStatus + "\n" + backend.Game.ReplenishmentPreview(formation), "muted"));
+            dossier.Add(Text(logisticsStatus + (backend.Game.NeedsReplenishment(formation) ? "\n" + backend.Game.ReplenishmentPreview(formation) : string.Empty), "muted"));
             foreach (string cardId in formation.ActiveEffectCardIds ?? new List<string>())
             {
                 EntropyEffectDefinition card = EntropyEffectCatalog.Find(cardId);
@@ -917,7 +1125,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void SelectAction(ToolkitActionMode mode)
         {
-            actionMode = mode;
+            actionMode = actionMode == mode ? ToolkitActionMode.None : mode;
             backend.ToolkitRecordChoice(mode.ToString(), mode == ToolkitActionMode.Move ? moveMode.ToString() : mode == ToolkitActionMode.Search ? searchMode.ToString() : salvo.ToString());
             ShowGame();
         }
@@ -1191,16 +1399,36 @@ namespace SeaOfUncertainty.Prototype
         private void ShowSettings()
         {
             VisualElement modal = Modal("SETTINGS");
+            ScrollView settings = new ScrollView();
+            settings.AddToClassList("settings-scroll");
             Toggle age = new Toggle("Age-2 Contacts receive −1 targeting") { value = backend.AgeTwoPenalty };
-            Toggle audio = new Toggle("Master audio enabled") { value = backend.AudioEnabled };
+            Slider master = new Slider("Master volume", 0f, 100f) { value = backend.MasterVolume * 100f, showInputField = true };
+            Slider effects = new Slider("Effects volume", 0f, 100f) { value = backend.EffectsVolume * 100f, showInputField = true };
+            Slider ambience = new Slider("Music / ambient volume", 0f, 100f) { value = backend.AmbientVolume * 100f, showInputField = true };
+            Toggle descriptions = new Toggle("Show text descriptions for audio cues") { value = backend.AudioDescriptions };
             Toggle contrast = new Toggle("High-contrast side colors") { value = backend.HighContrast };
             Toggle motion = new Toggle("Reduced motion") { value = backend.ReducedMotion };
             Toggle grid = new Toggle("Show hex grid on the map") { value = backend.HexGridVisible };
-            modal.Add(age); modal.Add(audio); modal.Add(contrast); modal.Add(motion); modal.Add(grid);
-            modal.Add(Text($"CURRENT {Screen.width} × {Screen.height}  •  DESKTOP {Display.main.systemWidth} × {Display.main.systemHeight}", "muted"));
-            modal.Add(ActionButton(Screen.fullScreen ? "SWITCH TO WINDOWED" : "SWITCH TO NATIVE FULLSCREEN", ToggleFullscreen));
-            modal.Add(ActionButton("APPLY", () => { backend.ToolkitSetSettings(age.value, audio.value, contrast.value, motion.value, grid.value); CloseOverlay(); if (view == View.Game) ShowGame(); }, "primary"));
-            modal.Add(ActionButton("CANCEL", CloseOverlay));
+            var textSizes = new List<string> { "100%", "125%", "150%" };
+            int textSizeIndex = backend.TextScale >= 1.4f ? 2 : backend.TextScale >= 1.15f ? 1 : 0;
+            DropdownField textScale = new DropdownField("Text size", textSizes, textSizeIndex);
+            Toggle controller = new Toggle("Controller navigation") { value = backend.ControllerNavigation };
+            Slider deadZone = new Slider("Controller stick dead zone", 30f, 90f) { value = backend.ControllerDeadZone * 100f, showInputField = true };
+            settings.Add(Text("GAMEPLAY", "eyebrow")); settings.Add(age);
+            settings.Add(Text("AUDIO", "eyebrow")); settings.Add(master); settings.Add(effects); settings.Add(ambience); settings.Add(descriptions);
+            settings.Add(Text("DISPLAY & ACCESSIBILITY", "eyebrow")); settings.Add(contrast); settings.Add(motion); settings.Add(grid); settings.Add(textScale); settings.Add(controller); settings.Add(deadZone);
+            settings.Add(Text("Audio descriptions identify each operational cue. Controller sticks must return below the dead zone before another focus step, preventing accidental repeated movement.", "muted"));
+            settings.Add(Text($"CURRENT {Screen.width} × {Screen.height}  •  DESKTOP {Display.main.systemWidth} × {Display.main.systemHeight}", "muted"));
+            settings.Add(ActionButton(Screen.fullScreen ? "SWITCH TO WINDOWED" : "SWITCH TO NATIVE FULLSCREEN", ToggleFullscreen));
+            settings.Add(ActionButton("APPLY", () =>
+            {
+                float selectedTextScale = textScale.index == 2 ? 1.5f : textScale.index == 1 ? 1.25f : 1f;
+                backend.ToolkitSetSettings(age.value, master.value / 100f, effects.value / 100f, ambience.value / 100f, descriptions.value, contrast.value, motion.value, grid.value, selectedTextScale, controller.value, deadZone.value / 100f);
+                CloseOverlay();
+                if (view == View.Game) ShowGame(); else ApplyAccessibilityClasses();
+            }, "primary"));
+            settings.Add(ActionButton("CANCEL", CloseOverlay));
+            modal.Add(settings);
         }
 
         private void ShowRules()
@@ -1388,12 +1616,8 @@ namespace SeaOfUncertainty.Prototype
         {
             root.Clear();
             app = El("app");
-            if (!gameHeader)
-            {
-                Texture2D backdrop = Resources.Load<Texture2D>("Art/tactical-archipelago-v1");
-                if (backdrop != null) app.style.backgroundImage = new StyleBackground(backdrop);
-            }
             if (backend.HighContrast) app.AddToClassList("high-contrast");
+            ApplyAccessibilityClasses();
             root.Add(app);
             VisualElement top = El("topbar");
             VisualElement brand = new VisualElement();
@@ -1415,15 +1639,18 @@ namespace SeaOfUncertainty.Prototype
                 top.Add(ActionButton("MENU", ShowPause));
             }
             app.Add(top);
-            ApplyResponsiveClass(root.resolvedStyle.width);
+            ApplyResponsiveClass(root.resolvedStyle.width, root.resolvedStyle.height);
         }
 
         private VisualElement Modal(string title)
         {
+            VisualElement previousFocus = root?.panel?.focusController?.focusedElement as VisualElement;
             CloseOverlay();
+            focusBeforeOverlay = previousFocus;
             VisualElement shade = El("overlay-shade");
             shade.name = "overlay";
             VisualElement modal = Panel("modal");
+            modal.name = "dialog-" + AccessibleId(title);
             modal.Add(Text(title, "heading"));
             shade.Add(modal);
             root.Add(shade);
@@ -1431,7 +1658,13 @@ namespace SeaOfUncertainty.Prototype
             return modal;
         }
 
-        private void CloseOverlay() => root?.Q<VisualElement>("overlay")?.RemoveFromHierarchy();
+        private void CloseOverlay()
+        {
+            root?.Q<VisualElement>("overlay")?.RemoveFromHierarchy();
+            VisualElement restore = focusBeforeOverlay;
+            focusBeforeOverlay = null;
+            if (restore != null && restore.panel != null) restore.schedule.Execute(restore.Focus);
+        }
 
         private void OnGlobalKeyDown(KeyDownEvent evt)
         {
@@ -1439,6 +1672,15 @@ namespace SeaOfUncertainty.Prototype
             {
                 if (entropyRevealBlocking) { evt.StopPropagation(); return; }
                 if (root.Q<VisualElement>("overlay") != null) CloseOverlay(); else if (view == View.Game) ShowPause();
+                return;
+            }
+            VisualElement focused = root.panel?.focusController?.focusedElement as VisualElement;
+            bool editing = focused is TextField || focused is IntegerField || focused is Slider || focused is DropdownField;
+            if (!editing && (root.Q<VisualElement>("overlay") != null || view != View.Game || focused != map) &&
+                (evt.keyCode == KeyCode.LeftArrow || evt.keyCode == KeyCode.UpArrow || evt.keyCode == KeyCode.RightArrow || evt.keyCode == KeyCode.DownArrow))
+            {
+                MoveFocus(evt.keyCode == KeyCode.LeftArrow || evt.keyCode == KeyCode.UpArrow ? -1 : 1);
+                evt.StopPropagation();
                 return;
             }
             if (view != View.Game || root.Q<VisualElement>("overlay") != null) return;
@@ -1468,13 +1710,13 @@ namespace SeaOfUncertainty.Prototype
 
         private void OnGeometryChanged(GeometryChangedEvent evt)
         {
-            ApplyResponsiveClass(evt.newRect.width);
+            ApplyResponsiveClass(evt.newRect.width, evt.newRect.height);
             EnsureNativeFullscreenResolution();
         }
 
         private void ToggleFullscreen()
         {
-            if (Screen.fullScreen)
+            if (RequestedFullscreenMode(Screen.fullScreen) == FullScreenMode.Windowed)
             {
                 int width = Mathf.Min(1600, Display.main.systemWidth);
                 int height = Mathf.Min(900, Display.main.systemHeight);
@@ -1490,11 +1732,71 @@ namespace SeaOfUncertainty.Prototype
             if (Screen.width != Display.main.systemWidth || Screen.height != Display.main.systemHeight || Screen.fullScreenMode != FullScreenMode.FullScreenWindow)
                 Screen.SetResolution(Display.main.systemWidth, Display.main.systemHeight, FullScreenMode.FullScreenWindow);
         }
-        private void ApplyResponsiveClass(float width)
+        private void ApplyResponsiveClass(float width, float height)
         {
             if (app == null) return;
             app.EnableInClassList("compact", width > 0 && width < 1250);
+            app.EnableInClassList("short", height > 0 && height < 900);
         }
+
+        private void ApplyAccessibilityClasses()
+        {
+            if (app == null || backend == null) return;
+            app.EnableInClassList("large-text", backend.TextScale >= 1.15f && backend.TextScale < 1.4f);
+            app.EnableInClassList("extra-large-text", backend.TextScale >= 1.4f);
+        }
+
+        private void MoveFocus(int direction)
+        {
+            VisualElement scope = root?.Q<VisualElement>("overlay") ?? app;
+            if (scope == null) return;
+            var focusables = new List<VisualElement>();
+            CollectFocusables(scope, focusables);
+            if (focusables.Count == 0) return;
+            VisualElement focused = root.panel?.focusController?.focusedElement as VisualElement;
+            int index = focusables.IndexOf(focused);
+            index = index < 0 ? (direction > 0 ? 0 : focusables.Count - 1) : (index + direction + focusables.Count) % focusables.Count;
+            focusables[index].Focus();
+        }
+
+        private static void CollectFocusables(VisualElement parent, List<VisualElement> result)
+        {
+            if (parent.focusable && parent.enabledInHierarchy && parent.resolvedStyle.display != DisplayStyle.None) result.Add(parent);
+            foreach (VisualElement child in parent.Children()) CollectFocusables(child, result);
+        }
+
+        private void SubmitFocused()
+        {
+            VisualElement focused = root?.panel?.focusController?.focusedElement as VisualElement;
+            if (focused == null) { MoveFocus(1); return; }
+            using (NavigationSubmitEvent submit = NavigationSubmitEvent.GetPooled())
+            {
+                submit.target = focused;
+                focused.SendEvent(submit);
+            }
+        }
+
+        private void CancelNavigation()
+        {
+            if (entropyRevealBlocking) return;
+            if (root?.Q<VisualElement>("overlay") != null) CloseOverlay();
+            else if (view == View.Game) ShowPause();
+        }
+
+        private static string Words(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            var words = new System.Text.StringBuilder(value.Length + 4);
+            for (int i = 0; i < value.Length; i++)
+            {
+                if (i > 0 && char.IsUpper(value[i]) && !char.IsUpper(value[i - 1])) words.Append(' ');
+                words.Append(char.ToUpperInvariant(value[i]));
+            }
+            return words.ToString();
+        }
+
+        private static string KindTag(FormationKind kind)
+            => kind == FormationKind.CarrierGroup ? "CVG" : kind == FormationKind.SurfaceGroup ? "SAG" : kind == FormationKind.Submarine ? "SSN" : kind == FormationKind.AirGroup ? "AIR" : "LOG";
 
         private VisualElement Stat(string name, int value, string tooltip)
         {
@@ -1503,15 +1805,22 @@ namespace SeaOfUncertainty.Prototype
 
         private IntegerField Rating(string label, int value) { var field = new IntegerField(label) { value = value }; field.tooltip = "Enter a rating from 1 to 5."; return field; }
         private TextField Area(string label, string value) { var field = new TextField(label) { value = value, multiline = true }; field.AddToClassList("feedback-field"); return field; }
-        private VisualElement Panel(params string[] classes) { VisualElement panel = El("panel"); foreach (string className in classes.Where(c => !string.IsNullOrEmpty(c))) panel.AddToClassList(className); return panel; }
+        private VisualElement Panel(params string[] classes) { VisualElement panel = El("panel"); foreach (string className in classes.Where(c => !string.IsNullOrEmpty(c))) panel.AddToClassList(className); panel.name = "region-" + AccessibleId(classes.FirstOrDefault(c => !string.IsNullOrEmpty(c)) ?? "panel"); return panel; }
         private VisualElement El(params string[] classes) { var element = new VisualElement(); foreach (string className in classes.Where(c => !string.IsNullOrEmpty(c))) element.AddToClassList(className); return element; }
-        private Label Text(string value, params string[] classes) { var label = new Label(value); foreach (string className in classes.Where(c => !string.IsNullOrEmpty(c))) label.AddToClassList(className); return label; }
+        private Label Text(string value, params string[] classes) { var label = new Label(value) { name = "text-" + AccessibleId(value) }; foreach (string className in classes.Where(c => !string.IsNullOrEmpty(c))) label.AddToClassList(className); return label; }
         private Button ActionButton(string text, Action action, params string[] classes)
         {
-            var button = new Button(action) { text = text, focusable = true, tabIndex = 0 };
+            var button = new Button(action) { text = text, focusable = true, tabIndex = 0, name = "action-" + AccessibleId(text), tooltip = text };
+            button.userData = action;
             button.AddToClassList("button");
             foreach (string className in classes.Where(c => !string.IsNullOrEmpty(c))) button.AddToClassList(className);
             return button;
+        }
+
+        private static string AccessibleId(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "unnamed";
+            return new string(value.ToLowerInvariant().Where(character => char.IsLetterOrDigit(character) || character == '-').Take(48).ToArray());
         }
 
         private static string Odds(CombatBand band)

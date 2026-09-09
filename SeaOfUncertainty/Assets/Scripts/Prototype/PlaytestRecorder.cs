@@ -35,6 +35,10 @@ namespace SeaOfUncertainty.Prototype
         public int BlueObjectiveRange;
         public int RedObjectiveRange;
         public int ConsecutiveSideActivations;
+        public string FormationKind;
+        public string OperationalPhase;
+        public string Situation;
+        public string AiProfile;
     }
 
     [Serializable]
@@ -56,7 +60,7 @@ namespace SeaOfUncertainty.Prototype
     [Serializable]
     public sealed class PlaytestSession
     {
-        public int Version = 1;
+        public int Version = 2;
         public string SessionId;
         public string Scenario = "Meridian Veil";
         public string StartedUtc;
@@ -96,7 +100,7 @@ namespace SeaOfUncertainty.Prototype
                 SessionId = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture),
                 StartedUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
                 Scenario = game.Scenario.DisplayName,
-                Build = "3D Operational Map Foundation"
+                Build = "Production Presentation and AI Evaluation"
             };
             previousActingSide = null;
             consecutiveSideActivations = 0;
@@ -126,6 +130,12 @@ namespace SeaOfUncertainty.Prototype
         public void RecordChoice(PrototypeGame game, FormationState actor, string category, string action, string mode, string legalAlternatives)
         {
             Record(game, category, actor, action, mode, null, legalAlternatives, 0, "", "Selection changed before commitment.", null);
+        }
+
+        public void RecordAiDecision(PrototypeGame game, FormationState actor, AiDecision decision, string legalAlternatives)
+        {
+            Record(game, "AiDecision", actor, decision?.Action.ToString(), decision?.ModeName, decision?.TargetId, legalAlternatives, 0, decision?.Rationale, "AI selected a legal candidate action.", null,
+                formationKind: actor?.Kind.ToString(), operationalPhase: decision?.Phase, situation: decision?.Situation, aiProfile: decision?.Profile.ToString());
         }
 
         public void RecordCommandEvent(PrototypeGame game, FormationState actor, string category, string detail)
@@ -168,7 +178,7 @@ namespace SeaOfUncertainty.Prototype
             return directory;
         }
 
-        private void Record(PrototypeGame game, string category, FormationState actor, string action, string mode, string targetId, string alternatives, float decisionSeconds, string calculation, string outcome, int[] state, string contactChanges = "", string entropyChanges = "")
+        private void Record(PrototypeGame game, string category, FormationState actor, string action, string mode, string targetId, string alternatives, float decisionSeconds, string calculation, string outcome, int[] state, string contactChanges = "", string entropyChanges = "", string formationKind = "", string operationalPhase = "", string situation = "", string aiProfile = "")
         {
             if (session == null) StartNew(game);
             ObjectiveRanges(game, out int blueRange, out int redRange);
@@ -196,7 +206,11 @@ namespace SeaOfUncertainty.Prototype
                 EntropyChanges = entropyChanges ?? string.Empty,
                 BlueObjectiveRange = blueRange,
                 RedObjectiveRange = redRange,
-                ConsecutiveSideActivations = consecutiveSideActivations
+                ConsecutiveSideActivations = consecutiveSideActivations,
+                FormationKind = formationKind ?? string.Empty,
+                OperationalPhase = operationalPhase ?? string.Empty,
+                Situation = situation ?? string.Empty,
+                AiProfile = aiProfile ?? string.Empty
             });
         }
 
@@ -253,10 +267,10 @@ namespace SeaOfUncertainty.Prototype
         private string ToCsv()
         {
             var csv = new StringBuilder();
-            csv.AppendLine("Sequence,RecordedUtc,SessionSeconds,OperationalTime,Category,Side,FormationId,Action,Mode,TargetId,LegalAlternatives,DecisionSeconds,Calculation,Outcome,ReadyBefore,ReadyAfter,CommandBefore,CommandAfter,ContactChanges,EntropyChanges,BlueObjectiveRange,RedObjectiveRange,ConsecutiveSideActivations");
+            csv.AppendLine("Sequence,RecordedUtc,SessionSeconds,OperationalTime,Category,Side,FormationId,FormationKind,OperationalPhase,Situation,AiProfile,Action,Mode,TargetId,LegalAlternatives,DecisionSeconds,Calculation,Outcome,ReadyBefore,ReadyAfter,CommandBefore,CommandAfter,ContactChanges,EntropyChanges,BlueObjectiveRange,RedObjectiveRange,ConsecutiveSideActivations");
             foreach (PlaytestEvent e in session.Events)
             {
-                string[] values = { e.Sequence.ToString(), e.RecordedUtc, e.SessionSeconds.ToString("0.000", CultureInfo.InvariantCulture), e.OperationalTime.ToString(), e.Category, e.Side, e.FormationId, e.Action, e.Mode, e.TargetId, e.LegalAlternatives, e.DecisionSeconds.ToString("0.000", CultureInfo.InvariantCulture), e.Calculation, e.Outcome, e.ReadyBefore.ToString(), e.ReadyAfter.ToString(), e.CommandBefore.ToString(), e.CommandAfter.ToString(), e.ContactChanges, e.EntropyChanges, e.BlueObjectiveRange.ToString(), e.RedObjectiveRange.ToString(), e.ConsecutiveSideActivations.ToString() };
+                string[] values = { e.Sequence.ToString(), e.RecordedUtc, e.SessionSeconds.ToString("0.000", CultureInfo.InvariantCulture), e.OperationalTime.ToString(), e.Category, e.Side, e.FormationId, e.FormationKind, e.OperationalPhase, e.Situation, e.AiProfile, e.Action, e.Mode, e.TargetId, e.LegalAlternatives, e.DecisionSeconds.ToString("0.000", CultureInfo.InvariantCulture), e.Calculation, e.Outcome, e.ReadyBefore.ToString(), e.ReadyAfter.ToString(), e.CommandBefore.ToString(), e.CommandAfter.ToString(), e.ContactChanges, e.EntropyChanges, e.BlueObjectiveRange.ToString(), e.RedObjectiveRange.ToString(), e.ConsecutiveSideActivations.ToString() };
                 csv.AppendLine(string.Join(",", values.Select(Csv)));
             }
             return csv.ToString();

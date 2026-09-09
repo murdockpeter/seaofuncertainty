@@ -19,6 +19,8 @@ During action selection, the 3D command map highlights legal destinations, Searc
 
 The current baseline uses 20 nautical miles between adjacent hex centers and two hours per Ready-Time point. These physical-scale values are provisional until dedicated movement, sensor, and weapon-range playtests are complete.
 
+Post-alpha simulation uses finite Light/Standard/Heavy magazines, salvo-dependent outer/area/point missile defense, printed EW/Cyber ratings, submarine deep/shallow state and ASW datum requirements, fixed and mobile logistics, authoritative weather severity, scenario-specific command architectures, and deterministic scheduled events. These values are externally authored and remain balance candidates.
+
 Entropy uses complete 12-card Friction, Disruption, and Destruction decks. Universal source penalties stack with attached card effects. Recover discards one selected Friction or Disruption card; Replenishment handles damage and Destruction repair. Printed Entropy responses cost one Command Slot and must be used before the affected formation completes its next own Action.
 
 Each side's 24-card Command Response deck starts with three cards, has a five-card hand limit, and draws after every three completed Major Actions. Synchronized Strikes reserve two to four formations at a future Strike Time, hold one Command Slot, and resolve a single defender Reaction followed by sequential Defense erosion.
@@ -53,6 +55,16 @@ The prototype is deliberately pass-and-play for now. Each side sees only its own
 - three Command Slots per side.
 
 The implementation is data-oriented: game rules live in `Assets/Scripts/Core`, while the prototype presentation lives in `Assets/Scripts/Prototype`. This separation is intentional so numerical changes stay cheap.
+
+Authoritative actions can also be represented as versioned, stable-ID commands independent of the UI. Replay documents store the scenario ID, initial seed, ordered commands, and before/after state digests so a fresh simulation can reproduce a session or identify the first divergence. The contract is documented in `design/AUTHORITATIVE_REPLAY_AND_PRINT.md`.
+
+Online matches use Unity Multiplayer Services Sessions for lobby membership and reconnect, DTLS-encrypted Relay for Internet traversal, and Unity Transport directly for reliable, fragmented command/receipt payloads. The listen-server authority sends each commander only a side-scoped snapshot; signed replay checkpoints support interrupted-match recovery. Production activation still requires a linked Unity cloud project and two-client privacy, latency, reconnect, and host-migration validation. See `design/MULTIPLAYER_PRODUCTION_ARCHITECTURE.md`.
+
+The developer online validation screen appears automatically in the Unity Editor and development builds. For a non-development build, launch with `-enableOnlinePreview`. **Direct IP** host/join works without Unity Cloud over a configurable UDP port (LAN/VPN recommended; public hosts may need UDP port forwarding). **Unity Relay** remains available for managed join codes, NAT traversal, DTLS encryption, IP concealment, and migration coordination. Both paths exercise authenticated seats, readiness, host-only authority start, clean leave, and live RTT measurement; playable online command routing remains intentionally gated pending the required human privacy and two-build evidence.
+
+Scenario metadata and formation definitions live in `Assets/Resources/Data/scenario-catalog.json`. Open **Sea of Uncertainty → Scenario Catalog Editor** to edit and validate that catalog in Unity; operational-area terrain remains in its validated area definition.
+
+Use **Sea of Uncertainty → Generate Print-and-Play Proofs** to regenerate formation cards, counters and Contacts, operational tracks, both complete card decks, and scenario/player aids beneath `SeaOfUncertainty/generated/print-and-play`. These HTML files are content proofs; final bleed, safe-area, licensing, and imposition work remains open.
 
 The runtime presentation now uses Unity UI Toolkit. Shared component styling and design tokens live in `Assets/Resources/UI/SeaTheme.uss`; the old immediate-mode controller remains disabled as a development fallback. The retained-mode layout scales at smaller desktop resolutions, expands its map on ultrawide displays, and responds to live window-size changes.
 
@@ -91,13 +103,11 @@ The 3D theater uses multi-scale procedural surface normals, sun glint, shallow-w
 
 The command bar's **HEXES OFF / HEXES ON** control provides the same persistent grid toggle, and the preference is saved between sessions.
 
-Gamepad and joystick polling is intentionally disabled while robust dead-zone and one-step focus handling are developed.
+Gamepad and joystick UI navigation uses dedicated axes, configurable dead-zone filtering, and one-step focus movement after the stick recenters.
 
 ## Visual direction
 
-The first generated project asset is `Assets/Resources/Art/tactical-archipelago-v1.png`. It contains no UI, hexes, text, or pieces, allowing every gameplay layer to stay dynamic and accessible. The palette uses midnight navy, sonar cyan, command amber, disruption violet, and damage red.
-
-Generated art is provisional and should be tracked in an asset ledger before public release. Later production art can replace it without changing the game model.
+The public-prototype presentation is code-owned: procedural formation models, materials, markings, wakes, environmental textures, effects, and labeled UI glyphs keep gameplay layers dynamic and accessible. The palette uses midnight navy, sonar cyan, command amber, disruption violet, and damage red. Asset approval and provenance are recorded in `design/PRODUCTION_ART_DIRECTION.md` and `design/3D_ASSET_LEDGER.md`.
 
 ## Design documents
 
@@ -121,5 +131,10 @@ The generated Unity resource is `Assets/Resources/Geography/luzon-strait-coastli
 - Command Response and Synchronized Strike rulings: `design/COMMAND_RESPONSE_AND_SYNCHRONIZED_STRIKE_RULES.md`
 - Movement, terrain, stacking, and control rulings: `design/MOVEMENT_TERRAIN_CONTROL_RULES.md`
 - Search and spatial uncertainty rulings and information audit: `design/SEARCH_SPATIAL_UNCERTAINTY_RULES.md`
+- Content/simulation role decisions and connected-theater contract: `design/CONTENT_SIMULATION_FOUNDATION.md`
+- Authoritative command/replay and print generator contract: `design/AUTHORITATIVE_REPLAY_AND_PRINT.md`
+- Automated unit, integration, presentation, and build-validation suites: `design/TEST_SUITE_ARCHITECTURE.md`
+- Server-authoritative multiplayer Phase 1 and loopback fault model: `design/MULTIPLAYER_PHASE1.md`
+- Production multiplayer Sessions, Relay, transport, lobby, and recovery architecture: `design/MULTIPLAYER_PRODUCTION_ARCHITECTURE.md`
 - Playtest protocol: `design/PLAYTEST_PROTOCOL.md`
 - 3D implementation constitution: `design/3D_DESIGN_CONSTITUTION.md`

@@ -106,6 +106,7 @@ namespace SeaOfUncertainty.Prototype
         public bool HasCoastlineDrivenShelf { get; private set; }
         public string WeatherPreset => string.IsNullOrWhiteSpace(area.Presentation.WeatherPreset) ? "Clear" : area.Presentation.WeatherPreset;
         public int PrecipitationStreakCount { get; private set; }
+        public int PersistentWakeCount { get; private set; }
         public bool CameraIsSettling => cameraPanVelocity.sqrMagnitude > .0001f || Mathf.Abs(cameraYawVelocity) > .01f || Mathf.Abs(cameraPitchVelocity) > .01f || Mathf.Abs(cameraZoomVelocity) > .01f;
         public bool UsesProceduralSurfaceTextures => generatedTextures.Count >= 3;
         public bool PermanentGridVisible => hexLines.Any(pair => pair.Value != null && pair.Value.enabled && !pair.Key.Equals(area.Objective));
@@ -893,6 +894,7 @@ namespace SeaOfUncertainty.Prototype
             lodPairs.Clear();
             VisibleFormationCount = 0;
             VisibleContactCount = 0;
+            PersistentWakeCount = 0;
             if (game?.Active == null) return;
             Side viewer = game.Active.Side;
             foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed && f.Side == viewer))
@@ -947,16 +949,24 @@ namespace SeaOfUncertainty.Prototype
             if (start != destination) motions.Add(new Motion { Transform = marker.transform, Start = start, End = destination });
             presentedPositions[formation.Id] = formation.Position;
             Material material = formation.Side == Side.Blue ? blueMaterial : redMaterial;
-            GameObject detail = Child("Close 3D Model", marker.transform);
+            GameObject detail = Child("Production Formation Model", marker.transform);
             switch (formation.Kind)
             {
                 case FormationKind.CarrierGroup: BuildCarrierGroup(detail.transform, material); break;
                 case FormationKind.SurfaceGroup: BuildSurfaceGroup(detail.transform, material); break;
                 case FormationKind.Submarine: BuildSubmarine(detail.transform, material); break;
                 case FormationKind.AirGroup: BuildAircraft(detail.transform, material); break;
+                case FormationKind.LogisticsGroup: BuildLogisticsGroup(detail.transform, material); break;
             }
-            GameObject symbol = Primitive(PrimitiveType.Cylinder, "Distant Operational Symbol", marker.transform, material);
-            symbol.transform.localScale = new Vector3(.3f, .025f, .3f);
+            AddRecognitionMarking(detail.transform, formation.Kind, material);
+            AddPersistentWake(marker.transform, formation.Kind, destination);
+            PrimitiveType symbolType = formation.Kind == FormationKind.Submarine ? PrimitiveType.Sphere : formation.Kind == FormationKind.AirGroup ? PrimitiveType.Cylinder : PrimitiveType.Cube;
+            GameObject symbol = Primitive(symbolType, formation.Kind + " Distant Operational Symbol", marker.transform, material);
+            symbol.transform.localScale = formation.Kind == FormationKind.CarrierGroup ? new Vector3(.24f, .025f, .42f)
+                : formation.Kind == FormationKind.SurfaceGroup ? new Vector3(.17f, .025f, .34f)
+                : formation.Kind == FormationKind.Submarine ? new Vector3(.17f, .06f, .29f)
+                : formation.Kind == FormationKind.AirGroup ? new Vector3(.28f, .025f, .28f) : new Vector3(.24f, .025f, .30f);
+            if (formation.Kind == FormationKind.AirGroup) symbol.transform.localRotation = Quaternion.Euler(0f, 0f, 45f);
             lodPairs.Add(new LodPair { Detail = detail, Symbol = symbol });
             bool active = formation == game.Active;
             LineRenderer ring = Ring(active ? "Active Formation Pulse" : "Formation Selection", formation.Position, active ? .58f : .48f, active ? new Color(1f, .68f, .14f, 1f) : material.color, active ? .12f : .045f);
@@ -972,6 +982,34 @@ namespace SeaOfUncertainty.Prototype
             AddFormationStatusCues(marker, formation);
             UpdateLod();
             return marker;
+        }
+
+        private void AddRecognitionMarking(Transform parent, FormationKind kind, Material sideMaterial)
+        {
+            GameObject marking = Primitive(PrimitiveType.Cube, kind + " Side Recognition Marking", parent, sideMaterial);
+            marking.transform.localPosition = kind == FormationKind.AirGroup ? new Vector3(0f, .035f, -.05f) : new Vector3(0f, .18f, 0f);
+            marking.transform.localScale = kind == FormationKind.CarrierGroup ? new Vector3(.035f, .008f, .62f)
+                : kind == FormationKind.SurfaceGroup ? new Vector3(.035f, .008f, .38f)
+                : kind == FormationKind.Submarine ? new Vector3(.035f, .035f, .26f)
+                : kind == FormationKind.AirGroup ? new Vector3(.52f, .008f, .035f) : new Vector3(.24f, .008f, .30f);
+        }
+
+        private void AddPersistentWake(Transform parent, FormationKind kind, Vector3 position)
+        {
+            if (kind == FormationKind.Submarine) return;
+            float height = kind == FormationKind.AirGroup ? 1.05f : .025f;
+            float length = kind == FormationKind.AirGroup ? 1.0f : .72f;
+            float spread = kind == FormationKind.CarrierGroup ? .22f : .13f;
+            Color wakeColor = kind == FormationKind.AirGroup ? new Color(.72f, .82f, .88f, .3f) : new Color(.72f, .94f, .94f, .48f);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Vector3 start = position + new Vector3(side * spread, height, -.22f);
+                Vector3 end = position + new Vector3(side * spread * 2.2f, height, -.22f - length);
+                LineRenderer wake = Segment(kind == FormationKind.AirGroup ? "Persistent Contrail" : "Persistent Formation Wake", start, end, wakeColor, kind == FormationKind.AirGroup ? .025f : .045f);
+                wake.sharedMaterial = foamMaterial;
+                wake.transform.SetParent(parent, true);
+                PersistentWakeCount++;
+            }
         }
 
         private void BuildCarrierGroup(Transform parent, Material sideMaterial)
@@ -1019,6 +1057,22 @@ namespace SeaOfUncertainty.Prototype
             Mesh escortMesh = FormationHull("Surface Escort Hull", .47f, .15f, .09f, .66f);
             AddEscort(parent, escortMesh, new Vector3(-.42f, -.025f, -.22f), Quaternion.Euler(0f, -18f, 0f), sideMaterial);
             AddEscort(parent, escortMesh, new Vector3(.42f, -.025f, .20f), Quaternion.Euler(0f, 17f, 0f), sideMaterial);
+        }
+
+        private void BuildLogisticsGroup(Transform parent, Material sideMaterial)
+        {
+            Mesh oilerMesh = FormationHull("Fleet Oiler Hull", .72f, .31f, .17f, .75f);
+            MeshObject("Fleet Oiler Hull", parent, navalHullMaterial, oilerMesh);
+            GameObject deckhouse = Primitive(PrimitiveType.Cube, "Fleet Oiler Deckhouse", parent, sideMaterial);
+            deckhouse.transform.localPosition = new Vector3(0f, .18f, .18f);
+            deckhouse.transform.localScale = new Vector3(.20f, .16f, .18f);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                GameObject tank = Primitive(PrimitiveType.Cylinder, "Replenishment Tank", parent, navalDeckMaterial);
+                tank.transform.localPosition = new Vector3(side * .08f, .15f, -.12f);
+                tank.transform.localScale = new Vector3(.055f, .13f, .055f);
+                tank.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            }
         }
 
         private void BuildSubmarine(Transform parent, Material sideMaterial)

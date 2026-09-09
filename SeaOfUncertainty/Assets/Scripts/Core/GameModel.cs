@@ -6,7 +6,7 @@ namespace SeaOfUncertainty.Core
 {
     public enum Side { Blue, Red }
     public enum OperationMode { LocalHotseat, SoloVsAi }
-    public enum FormationKind { CarrierGroup, SurfaceGroup, Submarine, AirGroup }
+    public enum FormationKind { CarrierGroup, SurfaceGroup, Submarine, AirGroup, LogisticsGroup }
     public enum ActionKind { Move, Search, Strike, Patrol, Support, Recover, Replenish, Hold }
     public enum MoveMode { Cautious, Normal, HighTempo }
     public enum SearchMode { Passive, Active, Focused }
@@ -22,9 +22,29 @@ namespace SeaOfUncertainty.Core
     public enum MissionTrigger { OnReady, ContactLocated, EntropyMarked, LogisticsRequired, ObjectiveReached }
     public enum LocationQuality { Low, Medium, High }
     public enum IdentityQuality { Unknown, General, Identified }
+    public enum ContactDomain { Unknown, Surface, Subsurface, Air }
     public enum Endurance { Ready, Extended, Critical }
     public enum DamageState { None, Light, Heavy, Crippled, Destroyed }
     public enum CombatBand { Poor, Even, Favorable, Dominant }
+    public enum SubmarineDepthState { Deep, Shallow }
+    public enum CommandArchitecture { Centralized, MissionCommand, Distributed }
+
+    [Serializable]
+    public sealed class WeaponInventoryState
+    {
+        public int Light;
+        public int Standard;
+        public int Heavy;
+        public int MaxLight;
+        public int MaxStandard;
+        public int MaxHeavy;
+
+        public int Available(Salvo salvo) => salvo == Salvo.Light ? Light : salvo == Salvo.Standard ? Standard : Heavy;
+        public bool CanFire(Salvo salvo) => Available(salvo) > 0;
+        public void Expend(Salvo salvo) { if (salvo == Salvo.Light) Light = Math.Max(0, Light - 1); else if (salvo == Salvo.Standard) Standard = Math.Max(0, Standard - 1); else Heavy = Math.Max(0, Heavy - 1); }
+        public void ReloadAll() { Light = MaxLight; Standard = MaxStandard; Heavy = MaxHeavy; }
+        public string Summary => $"L {Light}/{MaxLight}  S {Standard}/{MaxStandard}  H {Heavy}/{MaxHeavy}";
+    }
 
     [Serializable]
     public struct HexCoord : IEquatable<HexCoord>
@@ -60,6 +80,8 @@ namespace SeaOfUncertainty.Core
         public int Defense;
         public int Asw;
         public int Command;
+        public int ElectronicWarfare;
+        public int Cyber;
     }
 
     [Serializable]
@@ -125,6 +147,8 @@ namespace SeaOfUncertainty.Core
         public int LightDamageExpiresAfterAction;
         public string SynchronizedStrikeId;
         public bool IsSynchronizedStrikeLeader;
+        public WeaponInventoryState Weapons = new WeaponInventoryState();
+        public SubmarineDepthState SubmarineDepth = SubmarineDepthState.Deep;
 
         public int EntropySources => (Friction ? 1 : 0) + (Disruption ? 1 : 0) + (Destruction ? 1 : 0);
         public string EnduranceProgress => $"{Math.Min(MajorActions, 2)}/3 Major Actions";
@@ -134,9 +158,10 @@ namespace SeaOfUncertainty.Core
         public int EffectiveStrike => Ratings.Strike - (Destruction && !IgnoreEntropyNextAction && !SuppressDestructionNextAction ? 1 : 0) - (HasEffect("X-01") && (Kind == FormationKind.CarrierGroup || Kind == FormationKind.AirGroup) ? 1 : 0);
         public int EffectiveSearch => Ratings.Search - (Disruption && !IgnoreEntropyNextAction ? 1 : 0) - (HasEffect("X-02") ? 1 : 0);
         public int EffectiveDefense => Math.Max(0, Ratings.Defense - (Damage == DamageState.Light ? 1 : 0) - (HasEffect("X-06") ? 1 : 0) - (HasEffect("X-07") ? 1 : 0) + ReactionDefenseBonus);
-        public int EffectiveSignature => Ratings.Signature + (Loud ? 1 : 0) + SignatureBonus + MovementSignatureModifier;
+        public int EffectiveSignature => Ratings.Signature + (Loud ? 1 : 0) + SignatureBonus + MovementSignatureModifier - Math.Max(0, Ratings.ElectronicWarfare / 2) - (Kind == FormationKind.Submarine && SubmarineDepth == SubmarineDepthState.Deep ? 1 : 0);
         public int EffectiveCommand => Math.Max(0, Ratings.Command + CommandBonus - (HasEffect("X-05") ? 1 : 0) - (HasEffect("X-12") ? 1 : 0));
-        public bool CanHeavySalvo => !WeaponExpended && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect("X-04") && !HasEffect("X-11");
+        public bool CanHeavySalvo => !WeaponExpended && (Weapons == null || Weapons.MaxHeavy == 0 || Weapons.Heavy > 0) && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect("X-04") && !HasEffect("X-11");
+        public bool CanFire(Salvo salvo) => salvo == Salvo.Heavy ? CanHeavySalvo : Weapons == null || (salvo == Salvo.Light ? Weapons.MaxLight == 0 : Weapons.MaxStandard == 0) || Weapons.CanFire(salvo);
         public bool HasEffect(string id)
         {
             if (ActiveEffectCardIds == null || !ActiveEffectCardIds.Contains(id) || ResolvedEffectCardIds != null && ResolvedEffectCardIds.Contains(id)) return false;
@@ -154,6 +179,7 @@ namespace SeaOfUncertainty.Core
         public HexCoord LastKnownPosition;
         public LocationQuality Location;
         public IdentityQuality Identity;
+        public ContactDomain Domain;
         public int Age;
         public int MovementUncertainty;
         public bool IsFalse;
@@ -161,7 +187,7 @@ namespace SeaOfUncertainty.Core
         public bool HasContradictoryPosition;
         public HexCoord ContradictoryPosition;
 
-        public string Summary => IsLost ? "LOST" : $"{Location} / {Identity} / AGE {Math.Min(Age, 3)}{(Age >= 3 ? "+" : string.Empty)} / AREA R{Rules.ContactUncertaintyRadius(this)}{(HasContradictoryPosition ? " / CONTRADICTORY" : string.Empty)}";
+        public string Summary => IsLost ? "LOST" : $"{Location} / {Identity}{(Domain == ContactDomain.Unknown ? string.Empty : " / " + Domain)} / AGE {Math.Min(Age, 3)}{(Age >= 3 ? "+" : string.Empty)} / AREA R{Rules.ContactUncertaintyRadius(this)}{(HasContradictoryPosition ? " / CONTRADICTORY" : string.Empty)}";
     }
 
     [Serializable]
@@ -180,6 +206,7 @@ namespace SeaOfUncertainty.Core
         public Side Side;
         public int CommandSlots = 3;
         public int CommandStrain;
+        public CommandArchitecture Architecture = CommandArchitecture.MissionCommand;
         public List<CommandSlotState> SlotStates = new List<CommandSlotState>();
     }
 
@@ -208,6 +235,8 @@ namespace SeaOfUncertainty.Core
         public int CounterattackRoll;
         public DamageState CounterattackDamage;
         public DamageState CounterattackResultingDamage;
+        public int MissileDefenseModifier;
+        public string MissileDefenseLayers;
     }
 
     public static class Rules
@@ -224,7 +253,7 @@ namespace SeaOfUncertainty.Core
         public static int MoveDistance(MoveMode mode) => mode == MoveMode.Cautious ? 1 : mode == MoveMode.Normal ? 2 : 3;
         public static int MoveDistance(FormationKind kind, MoveMode mode)
         {
-            if (kind != FormationKind.AirGroup) return MoveDistance(mode);
+            if (kind != FormationKind.AirGroup) return kind == FormationKind.LogisticsGroup ? (mode == MoveMode.HighTempo ? 2 : 1) : MoveDistance(mode);
             return mode == MoveMode.Cautious ? 4 : mode == MoveMode.Normal ? 6 : 8;
         }
         public static int MoveAllowance(FormationState formation, MoveMode mode)
@@ -246,9 +275,9 @@ namespace SeaOfUncertainty.Core
         public static int SalvoModifier(Salvo salvo) => salvo == Salvo.Light ? 0 : salvo == Salvo.Standard ? 1 : 2;
         public static int StrikeRange(FormationKind kind, Salvo salvo)
         {
-            int light = kind == FormationKind.AirGroup ? 6 : kind == FormationKind.CarrierGroup ? 4 : 3;
-            int standard = kind == FormationKind.AirGroup ? 10 : kind == FormationKind.CarrierGroup ? 8 : kind == FormationKind.Submarine ? 5 : 6;
-            int heavy = kind == FormationKind.AirGroup ? 14 : kind == FormationKind.CarrierGroup ? 12 : kind == FormationKind.Submarine ? 7 : 9;
+            int light = kind == FormationKind.AirGroup ? 6 : kind == FormationKind.CarrierGroup ? 4 : kind == FormationKind.LogisticsGroup ? 1 : 3;
+            int standard = kind == FormationKind.AirGroup ? 10 : kind == FormationKind.CarrierGroup ? 8 : kind == FormationKind.Submarine ? 5 : kind == FormationKind.LogisticsGroup ? 1 : 6;
+            int heavy = kind == FormationKind.AirGroup ? 14 : kind == FormationKind.CarrierGroup ? 12 : kind == FormationKind.Submarine ? 7 : kind == FormationKind.LogisticsGroup ? 1 : 9;
             return salvo == Salvo.Light ? light : salvo == Salvo.Standard ? standard : heavy;
         }
         public static int InterceptionRange => 1;

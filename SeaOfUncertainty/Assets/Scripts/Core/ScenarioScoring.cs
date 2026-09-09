@@ -99,7 +99,7 @@ namespace SeaOfUncertainty.Core
         public static ScenarioSideScore ScoreSide(PrototypeGame game, Side side)
         {
             List<FormationState> friendly = game.Formations.Where(item => item.Side == side).ToList();
-            List<FormationState> capable = friendly.Where(IsCombatCapable).ToList();
+            List<FormationState> capable = friendly.Where(IsCombatCapable).Where(item => item.Kind != FormationKind.LogisticsGroup).ToList();
             List<ScenarioObjectiveResult> objectives = (game.Scenario.Objectives ?? new List<ScenarioObjectiveDefinition>())
                 .Select(definition => new ScenarioObjectiveResult
                 {
@@ -112,7 +112,7 @@ namespace SeaOfUncertainty.Core
                 OperationalPoints = objectives.Where(item => item.Achieved).Sum(item => item.Points),
                 CombatCapableFormations = capable.Count,
                 DamageBurden = friendly.Sum(item => (int)item.Damage),
-                ClosestObjectiveRange = capable.Where(item => item.Kind != FormationKind.AirGroup).Select(item => HexCoord.Distance(item.Position, game.Area.Objective)).DefaultIfEmpty(int.MaxValue).Min(),
+                ClosestObjectiveRange = capable.Where(IsOperationalCombatant).Select(item => HexCoord.Distance(item.Position, game.Area.Objective)).DefaultIfEmpty(int.MaxValue).Min(),
                 Eliminated = capable.Count == 0,
                 Objectives = objectives
             };
@@ -129,12 +129,12 @@ namespace SeaOfUncertainty.Core
                     return game.Controls(side, game.Area.Objective);
                 case ScenarioObjectiveKind.Transit:
                     OperationalRegionDefinition transit = FindRegion(game.Scenario, side == Side.Blue ? objective.BlueRegionId : objective.RedRegionId);
-                    return transit != null && friendly.Any(item => item.Kind != FormationKind.AirGroup && transit.Hexes.Contains(item.Position));
+                    return transit != null && friendly.Any(item => IsOperationalCombatant(item) && transit.Hexes.Contains(item.Position));
                 case ScenarioObjectiveKind.Escort:
                     FormationState carrier = friendly.FirstOrDefault(item => item.Kind == FormationKind.CarrierGroup);
-                    return carrier != null && friendly.Any(item => item != carrier && item.Kind != FormationKind.AirGroup && HexCoord.Distance(item.Position, carrier.Position) <= Math.Max(1, objective.Radius));
+                    return carrier != null && friendly.Any(item => item != carrier && IsOperationalCombatant(item) && HexCoord.Distance(item.Position, carrier.Position) <= Math.Max(1, objective.Radius));
                 case ScenarioObjectiveKind.Denial:
-                    return !game.Formations.Any(item => item.Side == enemySide && IsCombatCapable(item) && item.Kind != FormationKind.AirGroup && HexCoord.Distance(item.Position, game.Area.Objective) <= Math.Max(1, objective.Radius));
+                    return !game.Formations.Any(item => item.Side == enemySide && IsCombatCapable(item) && IsOperationalCombatant(item) && HexCoord.Distance(item.Position, game.Area.Objective) <= Math.Max(1, objective.Radius));
                 case ScenarioObjectiveKind.Withdrawal:
                     FormationState protectedCarrier = friendly.FirstOrDefault(item => item.Kind == FormationKind.CarrierGroup);
                     if (protectedCarrier == null) return false;
@@ -147,6 +147,9 @@ namespace SeaOfUncertainty.Core
 
         private static bool IsCombatCapable(FormationState formation)
             => formation != null && !formation.IsDestroyed && formation.Damage < DamageState.Crippled;
+
+        private static bool IsOperationalCombatant(FormationState formation)
+            => formation != null && formation.Kind != FormationKind.AirGroup && formation.Kind != FormationKind.LogisticsGroup;
 
         private static OperationalRegionDefinition FindRegion(ScenarioDefinition scenario, string id)
         {

@@ -4,6 +4,8 @@ using System.Linq;
 
 namespace SeaOfUncertainty.Core
 {
+    public enum AiStrategyProfile { Baseline, Aggressive, Cautious, Adaptive }
+
     public sealed class AiDecision
     {
         public ActionKind Action;
@@ -20,13 +22,30 @@ namespace SeaOfUncertainty.Core
         public bool UsePriorPlanning;
         public string DeconflictedFormationId;
         public string Rationale;
+        public AiStrategyProfile Profile;
+        public string Phase;
+        public string Situation;
 
         public string ModeName => DeclareSynchronizedStrike ? "Synchronized Declaration" : !string.IsNullOrEmpty(SynchronizedStrikeId) ? "Synchronized Resolution" : Action == ActionKind.Move ? MoveMode.ToString() : Action == ActionKind.Search ? SearchMode.ToString() : Action == ActionKind.Strike ? Salvo.ToString() : Action == ActionKind.Patrol ? PatrolPosture.ToString() : Action == ActionKind.Support ? SupportKind.ToString() : "Default";
     }
 
     public static class PrototypeAiCommander
     {
-        public static AiDecision Choose(PrototypeGame game)
+        public static AiDecision Choose(PrototypeGame game) => Choose(game, AiStrategyProfile.Adaptive);
+
+        public static AiDecision Choose(PrototypeGame game, AiStrategyProfile requestedProfile)
+        {
+            if (game?.Active == null) return null;
+            AiStrategyProfile profile = ResolveProfile(game, game.Active, requestedProfile);
+            AiDecision decision = ChooseCore(game, profile);
+            if (decision == null) return null;
+            decision.Profile = profile;
+            decision.Phase = Phase(game);
+            decision.Situation = Situation(game, game.Active, decision);
+            return decision;
+        }
+
+        private static AiDecision ChooseCore(PrototypeGame game, AiStrategyProfile profile)
         {
             if (game?.Active == null) return null;
             FormationState actor = game.Active;
@@ -43,12 +62,15 @@ namespace SeaOfUncertainty.Core
 
             if (game.Sides[actor.Side].CommandSlots == 0)
             {
-                AiDecision standingMission = ChooseStandingMission(game, actor, contacts);
+                AiDecision standingMission = ChooseStandingMission(game, actor, contacts, profile);
                 if (standingMission != null) return standingMission;
             }
 
+            if (profile == AiStrategyProfile.Cautious && (actor.Friction || actor.Disruption))
+                return new AiDecision { Action = ActionKind.Recover, Rationale = "Cautious profile clears recoverable Entropy before accepting combat risk." };
+
             ContactState strikeContact = contacts
-                .Where(contact => SelectSalvo(actor, contact).HasValue)
+                .Where(contact => SelectSalvo(actor, contact, profile).HasValue)
                 .OrderByDescending(contact => contact.Identity)
                 .ThenByDescending(contact => contact.Location)
                 .ThenBy(contact => contact.Age)
@@ -73,7 +95,7 @@ namespace SeaOfUncertainty.Core
             }
             if (strikeContact != null)
             {
-                Salvo selectedSalvo = SelectSalvo(actor, strikeContact).Value;
+                Salvo selectedSalvo = SelectSalvo(actor, strikeContact, profile).Value;
                 return new AiDecision { Action = ActionKind.Strike, TargetId = strikeContact.TargetId, Hex = strikeContact.LastKnownPosition, Salvo = selectedSalvo, Rationale = selectedSalvo == Salvo.Heavy ? "Commit the expendable Heavy capability to a high-quality identified Contact inside extended range." : "Engage the strongest usable owned Contact area already inside weapon range." };
             }
 
@@ -96,24 +118,28 @@ namespace SeaOfUncertainty.Core
                 return new AiDecision { Action = ActionKind.Search, Hex = searchContact.LastKnownPosition, SearchMode = mode, Rationale = needsFocused ? "Use available Command to improve a stale or low-quality owned Contact." : "Refresh the best available Contact without consulting hidden enemy state." };
             }
 
-            AiDecision movement = ChooseObjectiveMove(game, actor);
+            AiDecision movement = ChooseObjectiveMove(game, actor, profile);
             if (movement != null) return movement;
 
             if (!actor.PatrolActive)
-                return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = PatrolPosture.Balanced, Rationale = "Screen the objective area with a persistent interception." };
+                return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = profile == AiStrategyProfile.Aggressive ? PatrolPosture.Aggressive : profile == AiStrategyProfile.Cautious ? PatrolPosture.Defensive : PatrolPosture.Balanced, Rationale = "Screen the objective area with a profile-appropriate persistent interception." };
 
-            SearchMode fallbackMode = actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active;
+            SearchMode fallbackMode = actor.Kind == FormationKind.Submarine || profile == AiStrategyProfile.Cautious ? SearchMode.Passive : SearchMode.Active;
             HexCoord searchCenter = HexCoord.Distance(actor.Position, game.Area.Objective) <= game.SearchRangeFor(actor, fallbackMode) ? game.Area.Objective : actor.Position;
             return new AiDecision { Action = ActionKind.Search, Hex = searchCenter, SearchMode = fallbackMode, Rationale = "Search the operational objective when no stronger Contact or movement opportunity exists." };
         }
 
         public static Reaction ChooseReaction(PrototypeGame game, FormationState attacker, FormationState defender)
+            => ChooseReaction(game, attacker, defender, AiStrategyProfile.Adaptive);
+
+        public static Reaction ChooseReaction(PrototypeGame game, FormationState attacker, FormationState defender, AiStrategyProfile requestedProfile)
         {
+            AiStrategyProfile profile = ResolveProfile(game, defender, requestedProfile);
             IReadOnlyList<Reaction> legal = game.AvailableReactions(attacker, defender);
             if (legal.Contains(Reaction.None)) return Reaction.None;
             if (defender.OrderlyWithdrawalReady && legal.Contains(Reaction.Evade)) return Reaction.Evade;
             if ((defender.Damage >= DamageState.Heavy || defender.Endurance == Endurance.Critical) && legal.Contains(Reaction.Evade)) return Reaction.Evade;
-            if (legal.Contains(Reaction.Counterattack) && defender.EffectiveStrike >= attacker.EffectiveDefense) return Reaction.Counterattack;
+            if (profile != AiStrategyProfile.Cautious && legal.Contains(Reaction.Counterattack) && (profile == AiStrategyProfile.Aggressive || defender.EffectiveStrike >= attacker.EffectiveDefense)) return Reaction.Counterattack;
             return legal.Contains(Reaction.Defend) ? Reaction.Defend : legal[0];
         }
 
@@ -199,11 +225,11 @@ namespace SeaOfUncertainty.Core
             return false;
         }
 
-        private static AiDecision ChooseObjectiveMove(PrototypeGame game, FormationState actor)
+        private static AiDecision ChooseObjectiveMove(PrototypeGame game, FormationState actor, AiStrategyProfile profile)
         {
             int currentDistance = HexCoord.Distance(actor.Position, game.Area.Objective);
             if (currentDistance <= 1) return null;
-            MoveMode mode = MoveMode.Normal;
+            MoveMode mode = profile == AiStrategyProfile.Aggressive ? MoveMode.HighTempo : profile == AiStrategyProfile.Cautious ? MoveMode.Cautious : MoveMode.Normal;
             List<HexCoord> candidates = game.LegalMoveDestinations(actor, mode).ToList();
             HexCoord destination = candidates
                 .OrderBy(candidate => HexCoord.Distance(candidate, game.Area.Objective))
@@ -212,22 +238,22 @@ namespace SeaOfUncertainty.Core
                 .ThenBy(candidate => candidate.R)
                 .FirstOrDefault();
             if (candidates.Count == 0 || HexCoord.Distance(destination, game.Area.Objective) >= currentDistance) return null;
-            return new AiDecision { Action = ActionKind.Move, Hex = destination, MoveMode = mode, Rationale = "Improve position toward the public operational objective." };
+            return new AiDecision { Action = ActionKind.Move, Hex = destination, MoveMode = mode, Rationale = $"Improve position toward the public operational objective using the {profile} tempo profile." };
         }
 
-        private static AiDecision ChooseStandingMission(PrototypeGame game, FormationState actor, List<ContactState> contacts)
+        private static AiDecision ChooseStandingMission(PrototypeGame game, FormationState actor, List<ContactState> contacts, AiStrategyProfile profile)
         {
             switch (actor.Mission)
             {
-                case ActionKind.Move: return ChooseObjectiveMove(game, actor);
+                case ActionKind.Move: return ChooseObjectiveMove(game, actor, profile);
                 case ActionKind.Search:
                     SearchMode searchMode = actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active;
                     HexCoord center = HexCoord.Distance(actor.Position, actor.MissionObjectiveHex) <= game.SearchRangeFor(actor, searchMode) ? actor.MissionObjectiveHex : actor.Position;
                     return new AiDecision { Action = ActionKind.Search, Hex = center, SearchMode = searchMode, Rationale = "No Command Attention is free; continue the assigned Standing Mission." };
                 case ActionKind.Strike:
-                    ContactState target = contacts.FirstOrDefault(contact => SelectSalvo(actor, contact).HasValue);
-                    return target == null ? null : new AiDecision { Action = ActionKind.Strike, TargetId = target.TargetId, Hex = target.LastKnownPosition, Salvo = SelectSalvo(actor, target).Value, Rationale = "No Command Attention is free; execute the assigned Strike Mission." };
-                case ActionKind.Patrol: return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = PatrolPosture.Balanced, Rationale = "No Command Attention is free; establish the assigned Screen." };
+                    ContactState target = contacts.FirstOrDefault(contact => SelectSalvo(actor, contact, profile).HasValue);
+                    return target == null ? null : new AiDecision { Action = ActionKind.Strike, TargetId = target.TargetId, Hex = target.LastKnownPosition, Salvo = SelectSalvo(actor, target, profile).Value, Rationale = "No Command Attention is free; execute the assigned Strike Mission." };
+                case ActionKind.Patrol: return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = profile == AiStrategyProfile.Aggressive ? PatrolPosture.Aggressive : profile == AiStrategyProfile.Cautious ? PatrolPosture.Defensive : PatrolPosture.Balanced, Rationale = "No Command Attention is free; establish the assigned Screen." };
                 case ActionKind.Support:
                     FormationState recipient = game.Formations.Where(candidate => candidate.Side == actor.Side && candidate != actor && !candidate.IsDestroyed && HexCoord.Distance(actor.Position, candidate.Position) <= Rules.SupportRange).OrderBy(candidate => candidate.Id).FirstOrDefault();
                     return recipient == null ? null : new AiDecision { Action = ActionKind.Support, TargetId = recipient.Id, SupportKind = SupportKind.Strike, Rationale = "No Command Attention is free; execute the assigned Support Mission." };
@@ -238,15 +264,41 @@ namespace SeaOfUncertainty.Core
             }
         }
 
-        private static Salvo? SelectSalvo(FormationState actor, ContactState contact)
+        private static Salvo? SelectSalvo(FormationState actor, ContactState contact, AiStrategyProfile profile)
         {
             if (contact == null) return null;
             int distance = HexCoord.Distance(actor.Position, contact.LastKnownPosition);
-            bool heavyAvailable = contact.Identity == IdentityQuality.Identified && contact.Location == LocationQuality.High && actor.CanHeavySalvo;
-            if (heavyAvailable && distance <= Rules.StrikeRange(actor.Kind, Salvo.Heavy)) return Salvo.Heavy;
-            if (distance <= Rules.StrikeRange(actor.Kind, Salvo.Standard)) return Salvo.Standard;
-            if (distance <= Rules.StrikeRange(actor.Kind, Salvo.Light)) return Salvo.Light;
+            bool heavyAvailable = contact.Identity == IdentityQuality.Identified && contact.Location == LocationQuality.High && actor.CanFire(Salvo.Heavy);
+            if (heavyAvailable && distance <= Rules.StrikeRange(actor.Kind, Salvo.Heavy) &&
+                (profile != AiStrategyProfile.Cautious || distance > Rules.StrikeRange(actor.Kind, Salvo.Standard))) return Salvo.Heavy;
+            if (actor.CanFire(Salvo.Standard) && (contact.Domain != ContactDomain.Subsurface || contact.Identity == IdentityQuality.Identified) && distance <= Rules.StrikeRange(actor.Kind, Salvo.Standard)) return Salvo.Standard;
+            if (actor.CanFire(Salvo.Light) && distance <= Rules.StrikeRange(actor.Kind, Salvo.Light)) return Salvo.Light;
             return null;
+        }
+
+        private static AiStrategyProfile ResolveProfile(PrototypeGame game, FormationState actor, AiStrategyProfile requested)
+        {
+            if (requested != AiStrategyProfile.Adaptive || actor == null) return requested == AiStrategyProfile.Adaptive ? AiStrategyProfile.Baseline : requested;
+            int stable = game.Time / 4;
+            foreach (char character in actor.Id ?? string.Empty) stable = unchecked(stable * 31 + character);
+            int selection = (stable & int.MaxValue) % 3;
+            return selection == 0 ? AiStrategyProfile.Baseline : selection == 1 ? AiStrategyProfile.Aggressive : AiStrategyProfile.Cautious;
+        }
+
+        private static string Phase(PrototypeGame game)
+        {
+            float progress = game.Scenario.Horizon <= 0 ? 0f : game.Time / (float)game.Scenario.Horizon;
+            return progress < .34f ? "Opening" : progress < .67f ? "Midgame" : "Endgame";
+        }
+
+        private static string Situation(PrototypeGame game, FormationState actor, AiDecision decision)
+        {
+            if (decision.Action == ActionKind.Recover || decision.Action == ActionKind.Replenish) return "CapabilityRecovery";
+            if (decision.Action == ActionKind.Strike) return decision.DeclareSynchronizedStrike ? "CoordinatedProsecution" : "ContactProsecution";
+            if (decision.Action == ActionKind.Search) return game.Contacts.Any(contact => contact.Owner == actor.Side && !contact.IsLost) ? "ContactRefinement" : "AreaSurveillance";
+            if (decision.Action == ActionKind.Move) return HexCoord.Distance(actor.Position, game.Area.Objective) <= 2 ? "ObjectiveContest" : "ObjectiveApproach";
+            if (decision.Action == ActionKind.Patrol || decision.Action == ActionKind.Support) return "ForceProtection";
+            return "NoHigherValueAction";
         }
     }
 }

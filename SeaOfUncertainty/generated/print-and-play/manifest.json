@@ -1,0 +1,18 @@
+{
+    "Version": 1,
+    "ScenarioIds": [
+        "meridian-veil",
+        "northern-gateway"
+    ],
+    "FormationCardCount": 20,
+    "EntropyCardCount": 36,
+    "ResponseCardCount": 24,
+    "Files": [
+        "formation-cards.html",
+        "counters-and-contacts.html",
+        "tracks.html",
+        "entropy-deck.html",
+        "response-deck.html",
+        "scenario-aids.html"
+    ]
+}

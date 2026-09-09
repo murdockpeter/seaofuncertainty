@@ -110,6 +110,7 @@ namespace SeaOfUncertainty.Core
         public int R;
         public int ReadyTime;
         public Ratings Ratings;
+        public WeaponInventoryState Weapons = new WeaponInventoryState();
     }
 
     [Serializable]
@@ -136,6 +137,35 @@ namespace SeaOfUncertainty.Core
     }
 
     [Serializable]
+    public sealed class MissileDefenseProfileDefinition
+    {
+        public FormationKind Kind;
+        public int OuterLayer;
+        public int AreaLayer;
+        public int PointLayer;
+
+        public int Modifier(Salvo salvo)
+            => PointLayer + (salvo == Salvo.Heavy ? 0 : AreaLayer) + (salvo == Salvo.Light ? OuterLayer : 0);
+    }
+
+    public enum ScheduledEventKind { Reinforcement, WeatherChange, CommandArchitectureChange }
+
+    [Serializable]
+    public sealed class ScheduledScenarioEventDefinition
+    {
+        public string Id;
+        public int Time;
+        public ScheduledEventKind Kind;
+        public Side Side;
+        public string RegionId;
+        public string Text;
+        public string Weather;
+        public int WeatherSeverity;
+        public CommandArchitecture CommandArchitecture;
+        public FormationDefinition Reinforcement;
+    }
+
+    [Serializable]
     public sealed class ScenarioDefinition
     {
         public int SchemaVersion = 4;
@@ -151,6 +181,10 @@ namespace SeaOfUncertainty.Core
         public List<FormationDefinition> Formations = new List<FormationDefinition>();
         public List<ContactDefinition> Contacts = new List<ContactDefinition>();
         public List<SensorRangeDefinition> SensorRanges = new List<SensorRangeDefinition>();
+        public List<MissileDefenseProfileDefinition> MissileDefenseProfiles = new List<MissileDefenseProfileDefinition>();
+        public List<ScheduledScenarioEventDefinition> ScheduledEvents = new List<ScheduledScenarioEventDefinition>();
+        public CommandArchitecture BlueCommandArchitecture = CommandArchitecture.MissionCommand;
+        public CommandArchitecture RedCommandArchitecture = CommandArchitecture.MissionCommand;
         public List<OperationalRegionDefinition> DeploymentRegions = new List<OperationalRegionDefinition>();
         public List<OperationalRegionDefinition> ReinforcementRegions = new List<OperationalRegionDefinition>();
         public List<OperationalRegionDefinition> ExitRegions = new List<OperationalRegionDefinition>();
@@ -215,13 +249,16 @@ namespace SeaOfUncertainty.Core
             AddFormation(scenario, "R-SG", "Surface Action Two", Side.Red, FormationKind.SurfaceGroup, 9, 2, 0, 2, 2, 2, 3, 3, 2);
             AddFormation(scenario, "R-SS", "Hunter Submarine", Side.Red, FormationKind.Submarine, 11, 2, 0, 2, 3, -1, 3, 2, 3);
             AddFormation(scenario, "R-AG", "Air Group Ember", Side.Red, FormationKind.AirGroup, 8, 8, 1, 3, 3, 2, 3, 2, 2);
+            AddFormation(scenario, "B-LG", "Fleet Train Haven", Side.Blue, FormationKind.LogisticsGroup, 1, 3, 2, 1, 1, 3, 1, 2, 1);
+            AddFormation(scenario, "R-LG", "Fleet Train Harbor", Side.Red, FormationKind.LogisticsGroup, 10, 6, 2, 1, 1, 3, 1, 2, 1);
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Blue, TargetId = "R-SG", Q = 8, R = 3, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 2 });
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Red, TargetId = "B-CV", Q = 2, R = 4, Location = LocationQuality.Medium, Identity = IdentityQuality.General, Age = 1 });
             AddPrototypeSensorRanges(scenario);
+            AddPrototypeMissileDefenseProfiles(scenario);
             return scenario;
         }
 
-        public static IReadOnlyList<ScenarioDefinition> All() => new[] { MeridianVeil(), LuzonStrait() };
+        public static IReadOnlyList<ScenarioDefinition> All() => ScenarioAuthoringCatalog.Apply(new[] { MeridianVeil(), LuzonStrait() });
 
         public static ScenarioDefinition Find(string id) => All().FirstOrDefault(scenario => string.Equals(scenario.Id, id, StringComparison.OrdinalIgnoreCase)) ?? MeridianVeil();
 
@@ -295,9 +332,25 @@ namespace SeaOfUncertainty.Core
             AddFormation(scenario, "R-SG-L", "SAG Monsoon", Side.Red, FormationKind.SurfaceGroup, 20, 12, 0, 2, 2, 2, 3, 3, 2);
             AddFormation(scenario, "R-SS-L", "Submarine Shade", Side.Red, FormationKind.Submarine, 18, 6, 0, 2, 3, -1, 3, 2, 3);
             AddFormation(scenario, "R-AG-L", "Air Group Squall", Side.Red, FormationKind.AirGroup, 19, 10, 1, 3, 3, 2, 3, 2, 2);
+            AddFormation(scenario, "B-LG-L", "Fleet Train West", Side.Blue, FormationKind.LogisticsGroup, 2, 12, 2, 1, 1, 3, 1, 2, 1);
+            AddFormation(scenario, "R-LG-L", "Fleet Train East", Side.Red, FormationKind.LogisticsGroup, 21, 10, 2, 1, 1, 3, 1, 2, 1);
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Blue, TargetId = "R-SG-L", Q = 17, R = 11, Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 2 });
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Red, TargetId = "B-CV-L", Q = 6, R = 10, Location = LocationQuality.Low, Identity = IdentityQuality.General, Age = 2 });
             AddPrototypeSensorRanges(scenario);
+            AddPrototypeMissileDefenseProfiles(scenario);
+            scenario.BlueCommandArchitecture = CommandArchitecture.Distributed;
+            scenario.RedCommandArchitecture = CommandArchitecture.Centralized;
+            scenario.ReinforcementRegions.Add(area.Regions[0]);
+            scenario.ReinforcementRegions.Add(area.Regions[1]);
+            scenario.ScheduledEvents.Add(new ScheduledScenarioEventDefinition
+            {
+                Id = "weather-clears", Time = 12, Kind = ScheduledEventKind.WeatherChange, Text = "The maritime haze begins to clear.", Weather = "Clear", WeatherSeverity = 0
+            });
+            scenario.ScheduledEvents.Add(new ScheduledScenarioEventDefinition
+            {
+                Id = "blue-reinforcement", Time = 8, Kind = ScheduledEventKind.Reinforcement, Side = Side.Blue, RegionId = "blue-west", Text = "Blue reinforcement enters from the western approach.",
+                Reinforcement = CreateFormation("B-SG-R1", "SAG Relay", Side.Blue, FormationKind.SurfaceGroup, 0, 7, 8, 2, 2, 2, 3, 3, 2)
+            });
             return scenario;
         }
 
@@ -334,11 +387,23 @@ namespace SeaOfUncertainty.Core
 
         private static void AddFormation(ScenarioDefinition scenario, string id, string name, Side side, FormationKind kind, int q, int r, int ready, int move, int search, int signature, int strike, int defense, int command)
         {
-            scenario.Formations.Add(new FormationDefinition
+            scenario.Formations.Add(CreateFormation(id, name, side, kind, q, r, ready, move, search, signature, strike, defense, command));
+        }
+
+        private static FormationDefinition CreateFormation(string id, string name, Side side, FormationKind kind, int q, int r, int ready, int move, int search, int signature, int strike, int defense, int command)
+        {
+            int asw = kind == FormationKind.SurfaceGroup || kind == FormationKind.Submarine ? 3 : kind == FormationKind.LogisticsGroup ? 0 : kind == FormationKind.CarrierGroup ? 1 : 2;
+            int ew = kind == FormationKind.CarrierGroup || kind == FormationKind.AirGroup ? 2 : kind == FormationKind.LogisticsGroup ? 0 : 1;
+            int cyber = kind == FormationKind.CarrierGroup ? 2 : kind == FormationKind.LogisticsGroup ? 0 : 1;
+            int light = kind == FormationKind.LogisticsGroup ? 1 : kind == FormationKind.Submarine ? 3 : 4;
+            int standard = kind == FormationKind.LogisticsGroup ? 0 : kind == FormationKind.Submarine || kind == FormationKind.AirGroup ? 2 : 3;
+            int heavy = kind == FormationKind.LogisticsGroup ? 0 : 1;
+            return new FormationDefinition
             {
                 Id = id, Name = name, Side = side, Kind = kind, Q = q, R = r, ReadyTime = ready,
-                Ratings = new Ratings { Move = move, Search = search, Signature = signature, Strike = strike, Defense = defense, Asw = 2, Command = command }
-            });
+                Ratings = new Ratings { Move = move, Search = search, Signature = signature, Strike = strike, Defense = defense, Asw = asw, Command = command, ElectronicWarfare = ew, Cyber = cyber },
+                Weapons = new WeaponInventoryState { Light = light, MaxLight = light, Standard = standard, MaxStandard = standard, Heavy = heavy, MaxHeavy = heavy }
+            };
         }
 
         public static void AddPrototypeSensorRanges(ScenarioDefinition scenario)
@@ -349,6 +414,18 @@ namespace SeaOfUncertainty.Core
             scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.SurfaceGroup, Passive = 7, Active = 9, Focused = 11 });
             scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.Submarine, Passive = 6, Active = 8, Focused = 10 });
             scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.AirGroup, Passive = 10, Active = 12, Focused = 14 });
+            scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.LogisticsGroup, Passive = 4, Active = 6, Focused = 8 });
+        }
+
+        public static void AddPrototypeMissileDefenseProfiles(ScenarioDefinition scenario)
+        {
+            if (scenario.MissileDefenseProfiles == null) scenario.MissileDefenseProfiles = new List<MissileDefenseProfileDefinition>();
+            if (scenario.MissileDefenseProfiles.Count > 0) return;
+            scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.CarrierGroup, OuterLayer = 1, AreaLayer = 1, PointLayer = 1 });
+            scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.SurfaceGroup, OuterLayer = 1, AreaLayer = 1, PointLayer = 1 });
+            scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.Submarine, OuterLayer = 0, AreaLayer = 0, PointLayer = 0 });
+            scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.AirGroup, OuterLayer = 0, AreaLayer = 1, PointLayer = 1 });
+            scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.LogisticsGroup, OuterLayer = 0, AreaLayer = 0, PointLayer = 1 });
         }
     }
 
@@ -414,6 +491,14 @@ namespace SeaOfUncertainty.Core
                     if (scenario.SensorRanges.Count(range => range.Kind == kind) != 1) errors.Add("Sensor-range profile is missing or duplicated: " + kind);
                 foreach (SensorRangeDefinition range in scenario.SensorRanges.Where(range => range.Passive < 1 || range.Active < range.Passive || range.Focused < range.Active)) errors.Add("Sensor ranges must be positive and ordered Passive <= Active <= Focused: " + range.Kind);
             }
+            if (scenario.MissileDefenseProfiles == null || scenario.MissileDefenseProfiles.Count != Enum.GetValues(typeof(FormationKind)).Length) errors.Add("One missile-defense profile is required for every Formation kind.");
+            else foreach (FormationKind kind in Enum.GetValues(typeof(FormationKind)))
+                if (scenario.MissileDefenseProfiles.Count(profile => profile.Kind == kind) != 1) errors.Add("Missile-defense profile is missing or duplicated: " + kind);
+            foreach (ScheduledScenarioEventDefinition scheduled in scenario.ScheduledEvents ?? new List<ScheduledScenarioEventDefinition>())
+            {
+                if (string.IsNullOrWhiteSpace(scheduled.Id) || scheduled.Time < 0 || scheduled.Time > scenario.Horizon) errors.Add("Scheduled event requires a stable ID and in-horizon time.");
+                if (scheduled.Kind == ScheduledEventKind.Reinforcement && (scheduled.Reinforcement == null || !allScenarioRegions.Any(region => region.Id == scheduled.RegionId))) errors.Add("Reinforcement event requires a formation and valid entry region: " + scheduled.Id);
+            }
             return errors;
         }
 
@@ -443,7 +528,7 @@ namespace SeaOfUncertainty.Core
 
     public static class OperationalDataMigration
     {
-        public const int CurrentSchemaVersion = 4;
+        public const int CurrentSchemaVersion = 5;
 
         public static ScenarioDefinition Migrate(ScenarioDefinition scenario)
         {
@@ -456,8 +541,11 @@ namespace SeaOfUncertainty.Core
             if (scenario.ExitRegions == null) scenario.ExitRegions = new List<OperationalRegionDefinition>();
             if (scenario.LogisticsRegions == null) scenario.LogisticsRegions = new List<OperationalRegionDefinition>();
             if (scenario.SensorRanges == null) scenario.SensorRanges = new List<SensorRangeDefinition>();
+            if (scenario.MissileDefenseProfiles == null) scenario.MissileDefenseProfiles = new List<MissileDefenseProfileDefinition>();
+            if (scenario.ScheduledEvents == null) scenario.ScheduledEvents = new List<ScheduledScenarioEventDefinition>();
             if (scenario.Objectives == null) scenario.Objectives = new List<ScenarioObjectiveDefinition>();
             ScenarioCatalog.AddPrototypeSensorRanges(scenario);
+            ScenarioCatalog.AddPrototypeMissileDefenseProfiles(scenario);
             if (scenario.Area.RestrictedAreas == null) scenario.Area.RestrictedAreas = new List<OperationalRegionDefinition>();
             scenario.SchemaVersion = CurrentSchemaVersion;
             scenario.Area.SchemaVersion = CurrentSchemaVersion;

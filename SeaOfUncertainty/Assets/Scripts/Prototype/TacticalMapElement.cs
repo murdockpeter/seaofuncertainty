@@ -115,7 +115,8 @@ namespace SeaOfUncertainty.Prototype
             {
                 bool eligible = actionMode == ToolkitActionMode.Search ? SearchEligible(contact) : actionMode == ToolkitActionMode.Strike && StrikeEligible(contact);
                 FormationState target = game.Find(contact.TargetId);
-                Label marker = Marker(contact.LastKnownPosition, contact.Identity == IdentityQuality.Identified && target != null ? Code(target.Kind) : "?", "map-marker", "contact");
+                string contactCode = contact.Identity == IdentityQuality.Identified && target != null ? Code(target.Kind) : "?";
+                Label marker = Marker(contact.LastKnownPosition, $"◇ {contactCode}\n{contact.Location.ToString()[0]} A{contact.Age}", "map-marker", "contact");
                 if (eligible) marker.AddToClassList("eligible");
                 int radius = Rules.ContactUncertaintyRadius(contact);
                 int possibleHexes = game.ContactPossibleHexes(contact).Count;
@@ -372,6 +373,6 @@ namespace SeaOfUncertainty.Prototype
 
         private bool SearchEligible(ContactState contact) => game?.Active != null && contact != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= game.SearchRangeFor(game.Active, searchMode);
 
-        private static string Code(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SG" : kind == FormationKind.Submarine ? "SS" : "AG";
+        private static string Code(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SG" : kind == FormationKind.Submarine ? "SS" : kind == FormationKind.AirGroup ? "AG" : "LG";
     }
 }

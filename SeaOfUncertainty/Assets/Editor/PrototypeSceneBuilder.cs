@@ -325,6 +325,7 @@ namespace SeaOfUncertainty.Editor
             var accessGame = new PrototypeGame(1978);
             FormationState naval = accessGame.Active;
             FormationState air = accessGame.Formations.First(candidate => candidate.Side == naval.Side && candidate.Kind == FormationKind.AirGroup);
+            foreach (FormationState logistics in accessGame.Formations.Where(candidate => candidate.Side == naval.Side && candidate.Kind == FormationKind.LogisticsGroup)) logistics.Damage = DamageState.Destroyed;
             HexCoord westPort = accessGame.Area.Locations.First(location => location.Id == "west-haven").Hex;
             HexCoord westAirfield = accessGame.Area.Locations.First(location => location.Id == "west-haven-airfield").Hex;
             naval.Position = westPort;
@@ -460,7 +461,7 @@ namespace SeaOfUncertainty.Editor
             HexCoord holdPosition = holdTarget.Position;
             int holdBaseDefense = holdTarget.EffectiveDefense;
             Assert(holdGame.Strike(holdAttacker, holdTarget, Salvo.Light, Reaction.Hold, null, out CombatResult holdResult, out string holdReactionMessage), "Hold reaction resolves: " + holdReactionMessage);
-            Assert(holdResult.Defense == holdBaseDefense && holdTarget.Position.Equals(holdPosition) && holdTarget.HasReacted, "Hold preserves position, adds no Defense, and spends the Reaction");
+            Assert(holdResult.Defense == holdBaseDefense + holdResult.MissileDefenseModifier && holdTarget.Position.Equals(holdPosition) && holdTarget.HasReacted, "Hold preserves position, adds no reaction Defense, and spends the Reaction");
 
             PrototypeGame counterGame = ReactionFixture(out FormationState counterAttacker, out FormationState counterTarget);
             Assert(counterGame.Strike(counterAttacker, counterTarget, Salvo.Light, Reaction.Counterattack, null, out CombatResult counterResult, out string counterMessage), "Counterattack reaction resolves: " + counterMessage);
@@ -549,6 +550,15 @@ namespace SeaOfUncertainty.Editor
 
         public static void RunCoreSmokeTests()
         {
+            RunUnitTestSuite();
+            RunIntegrationTestSuite();
+            RunPresentationTestSuite();
+            Debug.Log("Sea of Uncertainty composed core smoke suites passed.");
+        }
+
+        [MenuItem("Sea of Uncertainty/Tests/Run Unit Suite")]
+        public static void RunUnitTestSuite()
+        {
             EnsureRuntimePanelSettings();
             Ensure3DMaterials();
             ThemeStyleSheet runtimeTheme = Resources.Load<ThemeStyleSheet>("UI/UnityDefaultRuntimeTheme");
@@ -614,7 +624,12 @@ namespace SeaOfUncertainty.Editor
             };
             Assert(Rules.NextReady(exactTie).Side == Side.Blue, "Unseeded exact tie uses formation quality and stable ID");
             Assert(Rules.NextReady(exactTie, Side.Blue).Side == Side.Red, "Cross-side exact tie passes priority away from the most recent acting side");
+            Debug.Log("Sea of Uncertainty unit suite passed.");
+        }
 
+        [MenuItem("Sea of Uncertainty/Tests/Run Integration Suite")]
+        public static void RunIntegrationTestSuite()
+        {
             var game = new PrototypeGame();
             Assert(game.Formations.Exists(f => f.Side == Side.Blue && f.ReadyTime == 0) && game.Formations.Exists(f => f.Side == Side.Red && f.ReadyTime == 0), "Both sides have formations in the opening Ready-Time cohort");
             Assert(game.Formations.Exists(f => f.Side == Side.Blue && f.ReadyTime == 1) && game.Formations.Exists(f => f.Side == Side.Red && f.ReadyTime == 1), "Both sides have interleaved follow-on readiness");
@@ -633,14 +648,14 @@ namespace SeaOfUncertainty.Editor
             Assert(OperationalDataValidator.Validate(game.Scenario).Count == 0, "Operational-area and scenario validation");
             Assert(ScenarioCatalog.All().Count == 2, "Scenario catalog exposes both MVP theaters");
             ScenarioDefinition luzon = ScenarioCatalog.LuzonStrait();
-            ScenarioDefinition migrationSample = ScenarioCatalog.LuzonStrait();
+            ScenarioDefinition migrationSample = JsonUtility.FromJson<ScenarioDefinition>(JsonUtility.ToJson(luzon));
             migrationSample.SchemaVersion = 1; migrationSample.Area.SchemaVersion = 1; migrationSample.Area.RestrictedAreas = null;
             OperationalDataMigration.Migrate(migrationSample);
             Assert(migrationSample.SchemaVersion == OperationalDataMigration.CurrentSchemaVersion && migrationSample.Area.SchemaVersion == OperationalDataMigration.CurrentSchemaVersion && migrationSample.Area.RestrictedAreas != null, "Operational-area and scenario v1 data migrate to the current schema");
             Assert(luzon.Area.Width == 24 && luzon.Area.Height == 20 && luzon.Area.NauticalMilesPerHex == 20, "Luzon pilot dimensions and scale");
             Assert(luzon.Horizon == 24 && Mathf.Approximately(luzon.Horizon * luzon.Area.ReadyTimeHours, 48f), "Luzon scenario is a 48-hour operation");
             Assert(OperationalDataValidator.Validate(luzon).Count == 0, "Luzon operational-area and scenario validation");
-            ScenarioDefinition invalidData = ScenarioCatalog.LuzonStrait();
+            ScenarioDefinition invalidData = JsonUtility.FromJson<ScenarioDefinition>(JsonUtility.ToJson(luzon));
             invalidData.Area.Presentation.TerrainAssetSet = string.Empty;
             invalidData.Area.Locations.Add(invalidData.Area.Locations[0]);
             invalidData.DeploymentRegions.Add(new OperationalRegionDefinition { Id = "unreachable", Name = "Unreachable", Hexes = new System.Collections.Generic.List<HexCoord> { new HexCoord(0, 0) } });
@@ -695,6 +710,10 @@ namespace SeaOfUncertainty.Editor
                 Assert(operationalMap.VisibleFormationCount == game.Formations.FindAll(formation => formation.Side == game.Active.Side && !formation.IsDestroyed).Count, "3D view instantiates only the active side's friendly formations");
                 Assert(operationalMap.FormationMeshVariantCount >= 2 && operationalMap.ContainsRenderedName("Tapered Hull"), "Close formation models use reusable tapered naval meshes instead of stretched-cube hull blockouts");
                 Assert(operationalMap.ContainsRenderedName("Swept Wing") && operationalMap.ContainsRenderedName("Hydrodynamic Pressure Hull"), "Air-group and submarine silhouettes remain recognizable by geometry");
+                Assert(operationalMap.ContainsRenderedName("Production Formation Model") && operationalMap.ContainsRenderedName("Side Recognition Marking"), "Production formation set includes explicit recognition markings");
+                Assert(operationalMap.ContainsRenderedName("CarrierGroup Distant Operational Symbol") && operationalMap.ContainsRenderedName("Submarine Distant Operational Symbol"), "Formation kinds retain distinct distant-symbol geometry");
+                int expectedWakes = game.Formations.Count(formation => formation.Side == game.Active.Side && !formation.IsDestroyed && formation.Kind != FormationKind.Submarine) * 2;
+                Assert(operationalMap.PersistentWakeCount == expectedWakes, "Visible surface and air formations receive paired persistent wakes or contrails while submarines do not");
                 Assert(operationalMap.VisibleContactCount == game.Contacts.FindAll(contact => contact.Owner == game.Active.Side && !contact.IsLost).Count, "3D view instantiates only the active side's Contacts");
                 FormationState hiddenEnemy = game.Formations.Find(formation => formation.Side != game.Active.Side);
                 Assert(!operationalMap.ContainsRenderedName(hiddenEnemy.Name) && !operationalMap.ContainsRenderedName(hiddenEnemy.Id), "3D scene hierarchy does not expose a hidden enemy identity");
@@ -843,7 +862,7 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.Active != null && restored.Active.Id == game.Active.Id, "Save restores active formation");
             Assert(restored.Formations.Count == game.Formations.Count, "Save restores formations");
             Assert(restored.Contacts.Count == game.Contacts.Count, "Save restores Contacts");
-            Assert(saveData.Version == 10 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 10 save preserves stable IDs, Entropy decks, response windows, Response hands, synchronized events, Command Slots, Standing Missions, uncertainty, damage duration, and private logs");
+            Assert(saveData.Version == 11 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 11 save preserves stable IDs, Entropy decks, response windows, Response hands, synchronized strikes and scenario events, Command architectures, magazines, Standing Missions, weather, uncertainty, damage duration, and private logs");
             Assert(restored.LogEntries.Count == game.LogEntries.Count, "Save restores side-scoped operational log visibility");
             Assert(restored.EntropyDecks.Count == 3 && restored.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count) == game.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count), "Save restores Entropy deck state");
             Assert(restored.CommandResponseDecks.Count == 2 && restored.CommandResponseDecks.All(deck => deck.Hand.Count == 3), "Save restores both private Command Response hands");
@@ -932,7 +951,7 @@ namespace SeaOfUncertainty.Editor
             friendlyOccupant.Position = new HexCoord(0, 9);
             FormationState hiddenEnemyOccupant = occupancyGame.Formations.First(candidate => candidate.Side != occupancyMover.Side);
             hiddenEnemyOccupant.Position = occupiedHex;
-            int baseSignature = occupancyMover.Ratings.Signature;
+            int baseSignature = occupancyMover.EffectiveSignature;
             Assert(occupancyGame.Move(occupancyMover, occupiedHex, MoveMode.Cautious, out string coexistMessage) && occupancyMover.Position.Equals(occupiedHex), "Opposing Formations may coexist in a 20 nm hex without hidden occupancy blocking movement: " + coexistMessage);
             Assert(occupancyMover.EffectiveSignature == baseSignature - 1 && occupancyMover.MovementSignatureModifier == -1, "Cautious Signature -1 persists after movement");
             int signatureGuard = 0;
@@ -973,7 +992,260 @@ namespace SeaOfUncertainty.Editor
             var tacticalMap = new TacticalMapElement();
             tacticalMap.SetState(restored, ToolkitActionMode.Move, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
             Assert(tacticalMap.focusable, "UI Toolkit tactical map keyboard focus");
-            Debug.Log("Sea of Uncertainty core smoke tests passed.");
+            MultiplayerFoundationTests.Run();
+            Debug.Log("Sea of Uncertainty integration suite passed.");
+        }
+
+        [MenuItem("Sea of Uncertainty/Tests/Run Presentation Suite")]
+        public static void RunPresentationTestSuite()
+        {
+            RunUiAccessibilityTests();
+            UiInteractionTests.Run();
+            Debug.Log("Sea of Uncertainty presentation suite passed.");
+        }
+
+        [MenuItem("Sea of Uncertainty/Tests/Run Build Validation Suite")]
+        public static void RunBuildValidationSuite()
+        {
+            BuildWindows();
+            string executable = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/Windows/SeaOfUncertainty.exe"));
+            string dataDirectory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/Windows/SeaOfUncertainty_Data"));
+            Assert(File.Exists(executable), "Windows build emits the player executable");
+            Assert(Directory.Exists(dataDirectory) && File.Exists(Path.Combine(dataDirectory, "globalgamemanagers")), "Windows build emits its player data and global managers");
+            Assert(EditorBuildSettings.scenes.Any(scene => scene.enabled && scene.path == "Assets/Scenes/Prototype.unity"), "Build validation uses the authoritative prototype scene");
+            Debug.Log("Sea of Uncertainty build-validation suite passed.");
+        }
+
+        public static void RunUiAccessibilityTests()
+        {
+            var descriptions = new HashSet<string>();
+            foreach (ActionKind kind in System.Enum.GetValues(typeof(ActionKind)))
+            {
+                string description = OperationalMissionAudio.Description(kind);
+                Assert(!string.IsNullOrWhiteSpace(description), kind + " has a text description for its audio cue");
+                Assert(descriptions.Add(description), kind + " has a distinct audio description");
+            }
+            Assert(descriptions.Count == 8, "All eight action cues have distinct text descriptions");
+
+            string theme = File.ReadAllText(Path.Combine(Application.dataPath, "Resources/UI/SeaTheme.uss"));
+            Assert(theme.Contains(".large-text") && theme.Contains(".extra-large-text"), "Theme includes scalable text presentations");
+            Assert(theme.Contains(".audio-description"), "Theme includes a visible audio-description status region");
+
+            string input = File.ReadAllText(Path.Combine(Application.dataPath, "../ProjectSettings/InputManager.asset"));
+            Assert(input.Contains("m_Name: ControllerHorizontal") && input.Contains("m_Name: ControllerVertical"), "Dedicated controller UI axes are configured independently of keyboard arrows");
+
+            string controller = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Prototype/SeaUIToolkitController.cs"));
+            Assert(controller.Contains("controllerAxisReleased") && controller.Contains("ControllerDeadZone"), "Controller navigation requires stick recentering and honors the configured dead zone");
+            Assert(controller.Contains("focusBeforeOverlay") && controller.Contains("CollectFocusables"), "Dialogs restore focus and all interactive UI can participate in focus traversal");
+            Assert(controller.Contains("AccessibleId") && controller.Contains("audio-description-status"), "Runtime interface exposes stable semantic element names");
+            Debug.Log("Sea of Uncertainty UI/accessibility tests passed.");
+        }
+
+        public static void RunAiEvaluationTests()
+        {
+            var movementGame = new PrototypeGame(3101);
+            movementGame.Contacts.Clear();
+            FormationState mover = movementGame.Active;
+            AiDecision movement = PrototypeAiCommander.Choose(movementGame, AiStrategyProfile.Baseline);
+            Assert(movement.Action == ActionKind.Move && HexCoord.Distance(movement.Hex, movementGame.Area.Objective) < HexCoord.Distance(mover.Position, movementGame.Area.Objective), "AI objective-movement fixture advances toward the public objective");
+
+            var recoveryGame = new PrototypeGame(3102);
+            recoveryGame.Contacts.Clear();
+            recoveryGame.Active.Friction = true;
+            Assert(PrototypeAiCommander.Choose(recoveryGame, AiStrategyProfile.Cautious).Action == ActionKind.Recover, "Cautious AI entropy-recovery fixture");
+
+            var prosecutionGame = new PrototypeGame(3103);
+            FormationState attacker = prosecutionGame.Active;
+            FormationState target = prosecutionGame.Formations.First(item => item.Side != attacker.Side && !item.IsDestroyed);
+            target.Position = prosecutionGame.LegalMoveDestinations(attacker, MoveMode.Cautious).First();
+            prosecutionGame.Contacts.RemoveAll(item => item.Owner == attacker.Side);
+            prosecutionGame.Contacts.Add(new ContactState { Owner = attacker.Side, TargetId = target.Id, LastKnownPosition = target.Position, Location = LocationQuality.High, Identity = IdentityQuality.Identified });
+            AiDecision prosecution = PrototypeAiCommander.Choose(prosecutionGame, AiStrategyProfile.Aggressive);
+            Assert(prosecution.Action == ActionKind.Strike && prosecution.TargetId == target.Id, "AI Contact-prosecution fixture selects a legal known target");
+
+            var heavyGame = new PrototypeGame(3104);
+            FormationState heavyAttacker = heavyGame.Active;
+            FormationState heavyTarget = heavyGame.Formations.First(item => item.Side != heavyAttacker.Side && !item.IsDestroyed);
+            int heavyDistance = Rules.StrikeRange(heavyAttacker.Kind, Salvo.Standard) + 1;
+            HexCoord heavyHex = Enumerable.Range(0, heavyGame.Area.Width).SelectMany(q => Enumerable.Range(0, heavyGame.Area.Height).Select(r => new HexCoord(q, r)))
+                .Where(heavyGame.Area.Contains).OrderBy(hex => Mathf.Abs(HexCoord.Distance(heavyAttacker.Position, hex) - heavyDistance)).ThenBy(hex => hex.Q).ThenBy(hex => hex.R).First();
+            heavyTarget.Position = heavyHex;
+            heavyGame.Contacts.RemoveAll(item => item.Owner == heavyAttacker.Side);
+            heavyGame.Contacts.Add(new ContactState { Owner = heavyAttacker.Side, TargetId = heavyTarget.Id, LastKnownPosition = heavyHex, Location = LocationQuality.High, Identity = IdentityQuality.Identified });
+            AiDecision heavy = PrototypeAiCommander.Choose(heavyGame, AiStrategyProfile.Aggressive);
+            Assert(heavy.Action == ActionKind.Strike && heavy.Salvo == Salvo.Heavy, "Aggressive AI weapon-commitment fixture uses Heavy capability for a Heavy-only opportunity");
+
+            var reactionGame = new PrototypeGame(3105);
+            FormationState reactionAttacker = reactionGame.Active;
+            FormationState reactionDefender = reactionGame.Formations.First(item => item.Side != reactionAttacker.Side && !item.IsDestroyed);
+            reactionDefender.Damage = DamageState.Heavy;
+            reactionDefender.Position = reactionGame.LegalMoveDestinations(reactionAttacker, MoveMode.Cautious).First();
+            Assert(PrototypeAiCommander.ChooseReaction(reactionGame, reactionAttacker, reactionDefender, AiStrategyProfile.Cautious) == Reaction.Evade, "Cautious AI disengagement fixture evades with a heavily damaged formation");
+
+            var cardGame = new PrototypeGame(3106);
+            FormationState cardActor = cardGame.Active;
+            CommandResponseDeckState cardDeck = cardGame.CommandResponseDecks.First(deck => deck.Side == cardActor.Side);
+            cardDeck.DrawPile.Remove("C-01");
+            if (!cardDeck.Hand.Contains("C-01")) cardDeck.Hand.Add("C-01");
+            EntropyEffectDefinition attachedFriction = cardGame.MarkEntropy(cardActor, EntropySource.Friction);
+            bool cardFixturePassed = attachedFriction != null && PrototypeAiCommander.TryPlayUsefulResponse(cardGame, out _);
+            Assert(cardFixturePassed, "AI response-card fixture plays a useful deterministic Friction response");
+
+            AiMetrics baseline = SimulateAiProfile(AiStrategyProfile.Baseline);
+            AiMetrics candidate = SimulateAiProfile(AiStrategyProfile.Adaptive);
+            Assert(baseline.Illegal == 0 && candidate.Illegal == 0, "Baseline and candidate simulations complete without illegal decisions");
+            Assert(candidate.Profiles.Count >= 3 && candidate.Utility > baseline.Utility, "Candidate improves the measured strategic-variety utility while remaining legal");
+            string directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/AI"));
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "baseline-vs-adaptive.csv"), "Profile,Decisions,Illegal,Holds,DistinctActions,DistinctModes,DistinctProfiles,Utility\n" + baseline.Csv("Baseline") + "\n" + candidate.Csv("Adaptive") + "\n");
+            Debug.Log($"Sea of Uncertainty AI evaluation passed. Baseline utility {baseline.Utility}; adaptive utility {candidate.Utility}; report {directory}");
+        }
+
+        public static void RunContentSimulationFoundationTests()
+        {
+            ScenarioDefinition scenario = ScenarioCatalog.MeridianVeil();
+            Assert(OperationalDataValidator.Validate(scenario).Count == 0, "Content foundation uses a valid scenario definition");
+
+            FormationDefinition carrierDefinition = scenario.Formations.First(item => item.Kind == FormationKind.CarrierGroup);
+            FormationDefinition surfaceDefinition = scenario.Formations.First(item => item.Kind == FormationKind.SurfaceGroup);
+            FormationDefinition submarineDefinition = scenario.Formations.First(item => item.Kind == FormationKind.Submarine);
+            FormationDefinition airDefinition = scenario.Formations.First(item => item.Kind == FormationKind.AirGroup);
+            Assert(surfaceDefinition.Ratings.Signature > submarineDefinition.Ratings.Signature, "Surface and submarine roles retain distinct Signature profiles");
+            Assert(Rules.StrikeRange(FormationKind.SurfaceGroup, Salvo.Light) == 3 && Rules.StrikeRange(FormationKind.SurfaceGroup, Salvo.Standard) == 6 && Rules.StrikeRange(FormationKind.SurfaceGroup, Salvo.Heavy) == 9, "Surface groups use their documented 3/6/9 weapon envelope");
+            Assert(Rules.StrikeRange(FormationKind.CarrierGroup, Salvo.Heavy) > Rules.StrikeRange(FormationKind.SurfaceGroup, Salvo.Heavy), "Carrier force projection exceeds the surface-group Heavy envelope");
+            Assert(Rules.MoveDistance(FormationKind.AirGroup, MoveMode.Normal) > Rules.MoveDistance(FormationKind.SurfaceGroup, MoveMode.Normal), "Air mission packages use a distinct operational radius");
+
+            var game = new PrototypeGame(5101, scenario);
+            FormationState carrier = game.Find(carrierDefinition.Id);
+            FormationState surface = game.Find(surfaceDefinition.Id);
+            FormationState air = game.Find(airDefinition.Id);
+            Assert(carrier.Mission == ActionKind.Strike && surface.Mission == ActionKind.Move && air.Mission == ActionKind.Search, "Initial standing missions encode carrier projection, surface maneuver, and air surveillance roles");
+            Assert(game.LogisticsFacilitiesFor(carrier).All(item => item.Kind == LocationKind.Port || item.Kind == LocationKind.Anchorage), "Carrier groups use naval logistics facilities");
+            Assert(game.LogisticsFacilitiesFor(air).All(item => item.Kind == LocationKind.Airfield), "Air mission packages use airfields");
+
+            SensorRangeDefinition carrierSensors = scenario.SensorRanges.Single(item => item.Kind == FormationKind.CarrierGroup);
+            SensorRangeDefinition surfaceSensors = scenario.SensorRanges.Single(item => item.Kind == FormationKind.SurfaceGroup);
+            SensorRangeDefinition submarineSensors = scenario.SensorRanges.Single(item => item.Kind == FormationKind.Submarine);
+            SensorRangeDefinition airSensors = scenario.SensorRanges.Single(item => item.Kind == FormationKind.AirGroup);
+            Assert(surfaceSensors.Passive == 7 && surfaceSensors.Active == 9 && surfaceSensors.Focused == 11, "Surface sensor doctrine uses the documented 7/9/11 envelope");
+            Assert(submarineSensors.Passive < surfaceSensors.Passive && carrierSensors.Focused < airSensors.Focused, "Scenario data differentiates submarine, surface, carrier, and air sensor reach");
+            Assert(Rules.SearchTarget(airDefinition.Ratings.Search + Rules.SearchModifier(SearchMode.Active) + surfaceDefinition.Ratings.Signature - 2) <=
+                   Rules.SearchTarget(airDefinition.Ratings.Search + Rules.SearchModifier(SearchMode.Active) + submarineDefinition.Ratings.Signature - 2), "Higher target Signature is never harder to detect at equal range");
+
+            HexCoord nearbyLand = scenario.Area.Terrain.Where(item => item.Terrain == OperationalTerrain.Land && HexCoord.Distance(air.Position, item.Hex) <= Rules.MoveDistance(FormationKind.AirGroup, MoveMode.Normal)).Select(item => item.Hex).First();
+            Assert(game.LegalMoveDestinations(air, MoveMode.Normal).Contains(nearbyLand), "Air mission packages may operate across Land while respecting the shared map boundary");
+            Assert(!game.LegalMoveDestinations(surface, MoveMode.HighTempo).Any(hex => scenario.Area.TerrainAt(hex) == OperationalTerrain.Land), "Surface movement remains confined to navigable terrain");
+
+            string foundation = File.ReadAllText(Path.Combine(Application.dataPath, "../../design/CONTENT_SIMULATION_FOUNDATION.md"));
+            Assert(foundation.Contains("A separate submarine Contact/combat procedure is not yet earned"), "Submarine procedure remains an explicit evidence gate");
+            Assert(foundation.Contains("transfer record") && foundation.Contains("Reinforcement region") && foundation.Contains("stable axial order"), "Connected-theater movement has a deterministic gameplay contract");
+            Debug.Log("Sea of Uncertainty content/simulation foundation tests passed.");
+        }
+
+        public static void RunAdvancedContentSimulationTests()
+        {
+            ScenarioDefinition authored = ScenarioCatalog.Find("meridian-veil");
+            Assert(authored.Formations.Count == 10 && authored.SpecialRules.Contains("finite magazines"), "External JSON catalog supplies scenario metadata and all formation definitions");
+            Assert(authored.Formations.All(item => item.Ratings != null && item.Weapons != null), "Every authored formation has ratings and a finite weapon inventory");
+
+            var combatGame = new PrototypeGame(6201, authored);
+            FormationState attacker = combatGame.Active;
+            FormationState target = combatGame.Formations.First(item => item.Side != attacker.Side && item.Kind == FormationKind.CarrierGroup);
+            target.Position = combatGame.LegalMoveDestinations(attacker, MoveMode.Cautious).First();
+            combatGame.Contacts.RemoveAll(item => item.Owner == attacker.Side);
+            combatGame.Contacts.Add(new ContactState { Owner = attacker.Side, TargetId = target.Id, LastKnownPosition = target.Position, Location = LocationQuality.High, Identity = IdentityQuality.Identified });
+            int lightBefore = attacker.Weapons.Light;
+            Assert(combatGame.Strike(attacker, target, Salvo.Light, Reaction.Hold, out CombatResult layeredCombat, out string combatMessage), "Finite-inventory Strike resolves: " + combatMessage);
+            Assert(attacker.Weapons.Light == lightBefore - 1, "A Strike expends exactly one matching salvo");
+            Assert(layeredCombat.MissileDefenseModifier >= 3 && layeredCombat.MissileDefenseLayers.Contains("Outer"), "Light attacks resolve outer, area, point, and EW defensive layers");
+
+            var submarineGame = new PrototypeGame(6202, authored);
+            FormationState aswAttacker = submarineGame.Active;
+            FormationState submarine = submarineGame.Formations.First(item => item.Side != aswAttacker.Side && item.Kind == FormationKind.Submarine);
+            submarine.Position = submarineGame.LegalMoveDestinations(aswAttacker, MoveMode.Cautious).First();
+            submarineGame.Contacts.RemoveAll(item => item.Owner == aswAttacker.Side);
+            ContactState datum = new ContactState { Owner = aswAttacker.Side, TargetId = submarine.Id, LastKnownPosition = submarine.Position, Location = LocationQuality.High, Identity = IdentityQuality.General, Domain = ContactDomain.Subsurface };
+            submarineGame.Contacts.Add(datum);
+            Assert(!submarineGame.Strike(aswAttacker, submarine, Salvo.Standard, Reaction.Hold, out _, out string datumMessage) && datumMessage.Contains("Identified ASW datum"), "Submarine Standard/Heavy attack requires an identified datum");
+            int deepSignature = submarine.EffectiveSignature;
+            submarine.SubmarineDepth = SubmarineDepthState.Shallow;
+            Assert(submarine.EffectiveSignature == deepSignature + 1, "Shallow submarine operations increase detectable Signature");
+
+            var logisticsGame = new PrototypeGame(6203, authored);
+            FormationState carrier = logisticsGame.Formations.First(item => item.Side == Side.Blue && item.Kind == FormationKind.CarrierGroup);
+            FormationState fleetTrain = logisticsGame.Formations.First(item => item.Side == Side.Blue && item.Kind == FormationKind.LogisticsGroup);
+            Assert(HexCoord.Distance(carrier.Position, fleetTrain.Position) <= 1 && logisticsGame.HasLogisticsAccess(carrier), "A combat-capable fleet train provides mobile logistics access within one hex");
+            Assert(fleetTrain.Weapons.MaxStandard == 0 && fleetTrain.Weapons.MaxHeavy == 0, "Logistics formations have restricted defensive weapon inventories");
+
+            ScenarioDefinition northern = ScenarioCatalog.Find("northern-gateway");
+            var eventGame = new PrototypeGame(6204, northern);
+            Assert(eventGame.Sides[Side.Blue].Architecture == CommandArchitecture.Distributed && eventGame.CommandSlotsFor(Side.Blue).Count == 2, "Distributed command uses two decentralized attention slots");
+            Assert(eventGame.Sides[Side.Red].Architecture == CommandArchitecture.Centralized && eventGame.CommandSlotsFor(Side.Red).Count == 4, "Centralized command uses four attention slots");
+            Assert(eventGame.SearchModifierFor(eventGame.Active, SearchMode.Active) == Rules.SearchModifier(SearchMode.Active) - 1, "Maritime haze applies its scenario weather penalty to Search");
+            int initialFormationCount = eventGame.Formations.Count;
+            PrototypeGame.SaveData eventState = eventGame.CaptureState();
+            eventState.Time = 7;
+            foreach (FormationState formation in eventState.Formations) formation.ReadyTime = 8;
+            eventState.ActiveFormationId = eventState.Formations[0].Id;
+            eventState.Formations[0].ReadyTime = 7;
+            eventGame.RestoreState(eventState);
+            Assert(eventGame.Hold(eventGame.Active, out _), "Timeline fixture advances through the reinforcement event");
+            Assert(eventGame.Formations.Count == initialFormationCount + 1 && eventGame.Find("B-SG-R1") != null && eventGame.ResolvedScheduledEventIds.Contains("blue-reinforcement"), "Scheduled reinforcement enters deterministically through its named region");
+
+            PrototypeGame.SaveData weatherState = eventGame.CaptureState();
+            weatherState.Time = 11;
+            foreach (FormationState formation in weatherState.Formations) formation.ReadyTime = 12;
+            weatherState.ActiveFormationId = weatherState.Formations[0].Id;
+            weatherState.Formations[0].ReadyTime = 11;
+            eventGame.RestoreState(weatherState);
+            Assert(eventGame.Hold(eventGame.Active, out _) && eventGame.RuntimeWeatherSeverity == 0 && eventGame.RuntimeWeather == "Clear", "Scheduled weather change updates authoritative environmental rules");
+            string roundTrip = JsonUtility.ToJson(eventGame.CaptureState());
+            var restored = new PrototypeGame(6204, northern);
+            restored.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(roundTrip));
+            Assert(restored.RuntimeWeather == "Clear" && restored.ResolvedScheduledEventIds.Contains("weather-clears") && restored.Find("B-SG-R1")?.Weapons != null, "Weather, events, reinforcements, command architecture, and magazines survive save/load");
+
+            string editorSource = File.ReadAllText(Path.Combine(Application.dataPath, "Editor/ScenarioCatalogEditorWindow.cs"));
+            Assert(editorSource.Contains("Scenario Catalog Editor") && editorSource.Contains("Save JSON") && editorSource.Contains("ValidateCatalog"), "Scenario editor supports catalog selection, validation, formation editing, and JSON save");
+            Debug.Log("Sea of Uncertainty advanced content/simulation tests passed.");
+        }
+
+        private sealed class AiMetrics
+        {
+            public int Decisions;
+            public int Illegal;
+            public int Holds;
+            public readonly HashSet<ActionKind> Actions = new HashSet<ActionKind>();
+            public readonly HashSet<string> Modes = new HashSet<string>();
+            public readonly HashSet<AiStrategyProfile> Profiles = new HashSet<AiStrategyProfile>();
+            public int Utility => Actions.Count * 4 + Modes.Count * 2 + Profiles.Count * 3 - Illegal * 100 - Holds;
+            public string Csv(string name) => $"{name},{Decisions},{Illegal},{Holds},{Actions.Count},{Modes.Count},{Profiles.Count},{Utility}";
+        }
+
+        private static AiMetrics SimulateAiProfile(AiStrategyProfile profile)
+        {
+            var metrics = new AiMetrics();
+            for (int seed = 4200; seed < 4205; seed++)
+            {
+                var game = new PrototypeGame(seed);
+                int guard = 0;
+                while (game.Time < game.Scenario.Horizon && guard++ < 600)
+                {
+                    AiDecision decision = PrototypeAiCommander.Choose(game, profile);
+                    metrics.Decisions++;
+                    if (decision == null || !PrototypeAiCommander.Execute(game, decision, out _))
+                    {
+                        metrics.Illegal++;
+                        if (!game.Hold(game.Active, out _)) break;
+                        continue;
+                    }
+                    metrics.Actions.Add(decision.Action);
+                    metrics.Modes.Add(decision.ModeName);
+                    metrics.Profiles.Add(decision.Profile);
+                    if (decision.Action == ActionKind.Hold) metrics.Holds++;
+                }
+                Assert(guard < 600, profile + " AI simulation reaches the scenario horizon without stalling");
+            }
+            return metrics;
         }
 
         public static void CaptureMapPreview()

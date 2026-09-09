@@ -9,28 +9,81 @@ namespace SeaOfUncertainty.Prototype
     {
         private const int SampleRate = 44100;
         private readonly Dictionary<ActionKind, AudioClip> clips = new Dictionary<ActionKind, AudioClip>();
-        private AudioSource source;
+        private AudioSource effectsSource;
+        private AudioSource ambienceSource;
+        private AudioClip ambienceClip;
 
         private void Awake()
         {
-            source = gameObject.AddComponent<AudioSource>();
-            source.playOnAwake = false;
-            source.loop = false;
-            source.spatialBlend = 0f;
-            source.volume = .42f;
+            effectsSource = gameObject.AddComponent<AudioSource>();
+            effectsSource.playOnAwake = false;
+            effectsSource.loop = false;
+            effectsSource.spatialBlend = 0f;
+            ambienceSource = gameObject.AddComponent<AudioSource>();
+            ambienceSource.playOnAwake = false;
+            ambienceSource.loop = true;
+            ambienceSource.spatialBlend = 0f;
             foreach (ActionKind kind in Enum.GetValues(typeof(ActionKind))) clips[kind] = BuildClip(kind);
+            ambienceClip = BuildAmbienceClip();
+            ambienceSource.clip = ambienceClip;
+            ambienceSource.Play();
+            Configure(.8f, .7f, .35f);
+        }
+
+        public void Configure(float master, float effects, float ambience)
+        {
+            AudioListener.volume = Mathf.Clamp01(master);
+            if (effectsSource != null) effectsSource.volume = Mathf.Clamp01(effects) * .6f;
+            if (ambienceSource != null) ambienceSource.volume = Mathf.Clamp01(ambience) * .18f;
         }
 
         public void Play(ActionKind mission)
         {
-            if (source == null || !clips.TryGetValue(mission, out AudioClip clip) || clip == null) return;
-            source.PlayOneShot(clip);
+            if (effectsSource == null || !clips.TryGetValue(mission, out AudioClip clip) || clip == null) return;
+            effectsSource.PlayOneShot(clip);
         }
 
         private void OnDestroy()
         {
             foreach (AudioClip clip in clips.Values) if (clip != null) Destroy(clip);
             clips.Clear();
+            if (ambienceClip != null) Destroy(ambienceClip);
+        }
+
+        public static string Description(ActionKind kind)
+        {
+            switch (kind)
+            {
+                case ActionKind.Move: return "Movement complete: rising engine pulse.";
+                case ActionKind.Search: return "Search complete: descending sonar sweep.";
+                case ActionKind.Strike: return "Strike resolved: sharp impact burst.";
+                case ActionKind.Recover: return "Recovery complete: three ascending clear tones.";
+                case ActionKind.Hold: return "Hold complete: steady two-note tone.";
+                case ActionKind.Patrol: return "Patrol established: alternating watch tones.";
+                case ActionKind.Support: return "Support established: paired confirmation tones.";
+                case ActionKind.Replenish: return "Replenishment complete: rising machinery tone.";
+                default: return "Operational audio cue.";
+            }
+        }
+
+        private static AudioClip BuildAmbienceClip()
+        {
+            const float duration = 4f;
+            int count = Mathf.CeilToInt(duration * SampleRate);
+            var samples = new float[count];
+            uint noise = 0x5EA0BEEFu;
+            float filtered = 0f;
+            for (int index = 0; index < count; index++)
+            {
+                noise = noise * 1664525u + 1013904223u;
+                float raw = (noise >> 8) / 8388607.5f - 1f;
+                filtered = Mathf.Lerp(filtered, raw, .006f);
+                float time = index / (float)SampleRate;
+                samples[index] = (filtered * .42f + Mathf.Sin(2f * Mathf.PI * .18f * time) * .025f) * Mathf.Sin(Mathf.PI * index / count);
+            }
+            AudioClip clip = AudioClip.Create("Open Sea Ambience", count, 1, SampleRate, false);
+            clip.SetData(samples, 0);
+            return clip;
         }
 
         private static AudioClip BuildClip(ActionKind kind)

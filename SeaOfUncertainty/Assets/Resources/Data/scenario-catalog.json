@@ -1,0 +1,53 @@
+{
+  "Version": 1,
+  "Scenarios": [
+    {
+      "Id": "meridian-veil",
+      "DisplayName": "Meridian Veil",
+      "Summary": "Two naval forces converge on the Inner Sea.",
+      "Horizon": 16,
+      "Weather": "Clear",
+      "WeatherSeverity": 0,
+      "SpecialRules": "Fixed paired-test deployment with finite magazines and layered defense.",
+      "VictoryConditions": "Score operational control, transit, escort, denial, and carrier preservation/withdrawal at T16. Damage breaks tied operational scores.",
+      "BlueCommandArchitecture": 1,
+      "RedCommandArchitecture": 1,
+      "Formations": [
+        {"Id":"B-CV","Name":"CSG Resolute","Side":0,"Kind":0,"Q":1,"R":4,"ReadyTime":1,"Ratings":{"Move":2,"Search":3,"Signature":1,"Strike":4,"Defense":3,"Asw":1,"Command":1,"ElectronicWarfare":2,"Cyber":2},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
+        {"Id":"B-SG","Name":"SAG Valiant","Side":0,"Kind":1,"Q":2,"R":7,"ReadyTime":0,"Ratings":{"Move":2,"Search":2,"Signature":2,"Strike":3,"Defense":3,"Asw":3,"Command":2,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
+        {"Id":"B-SS","Name":"SSN Nightfall","Side":0,"Kind":2,"Q":0,"R":7,"ReadyTime":0,"Ratings":{"Move":2,"Search":3,"Signature":-1,"Strike":3,"Defense":2,"Asw":3,"Command":3,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":3,"Standard":2,"Heavy":1,"MaxLight":3,"MaxStandard":2,"MaxHeavy":1}},
+        {"Id":"B-AG","Name":"Air Group Kestrel","Side":0,"Kind":3,"Q":3,"R":2,"ReadyTime":1,"Ratings":{"Move":3,"Search":3,"Signature":2,"Strike":3,"Defense":2,"Asw":2,"Command":2,"ElectronicWarfare":2,"Cyber":1},"Weapons":{"Light":4,"Standard":2,"Heavy":1,"MaxLight":4,"MaxStandard":2,"MaxHeavy":1}},
+        {"Id":"B-LG","Name":"Fleet Train Haven","Side":0,"Kind":4,"Q":1,"R":3,"ReadyTime":2,"Ratings":{"Move":1,"Search":1,"Signature":3,"Strike":1,"Defense":2,"Asw":0,"Command":1,"ElectronicWarfare":0,"Cyber":0},"Weapons":{"Light":1,"Standard":0,"Heavy":0,"MaxLight":1,"MaxStandard":0,"MaxHeavy":0}},
+        {"Id":"R-CV","Name":"CVG Tempest","Side":1,"Kind":0,"Q":10,"R":5,"ReadyTime":1,"Ratings":{"Move":2,"Search":3,"Signature":1,"Strike":4,"Defense":3,"Asw":1,"Command":1,"ElectronicWarfare":2,"Cyber":2},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
+        {"Id":"R-SG","Name":"Surface Action Two","Side":1,"Kind":1,"Q":9,"R":2,"ReadyTime":0,"Ratings":{"Move":2,"Search":2,"Signature":2,"Strike":3,"Defense":3,"Asw":3,"Command":2,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
+        {"Id":"R-SS","Name":"Hunter Submarine","Side":1,"Kind":2,"Q":11,"R":2,"ReadyTime":0,"Ratings":{"Move":2,"Search":3,"Signature":-1,"Strike":3,"Defense":2,"Asw":3,"Command":3,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":3,"Standard":2,"Heavy":1,"MaxLight":3,"MaxStandard":2,"MaxHeavy":1}},
+        {"Id":"R-AG","Name":"Air Group Ember","Side":1,"Kind":3,"Q":8,"R":8,"ReadyTime":1,"Ratings":{"Move":3,"Search":3,"Signature":2,"Strike":3,"Defense":2,"Asw":2,"Command":2,"ElectronicWarfare":2,"Cyber":1},"Weapons":{"Light":4,"Standard":2,"Heavy":1,"MaxLight":4,"MaxStandard":2,"MaxHeavy":1}},
+        {"Id":"R-LG","Name":"Fleet Train Harbor","Side":1,"Kind":4,"Q":10,"R":6,"ReadyTime":2,"Ratings":{"Move":1,"Search":1,"Signature":3,"Strike":1,"Defense":2,"Asw":0,"Command":1,"ElectronicWarfare":0,"Cyber":0},"Weapons":{"Light":1,"Standard":0,"Heavy":0,"MaxLight":1,"MaxStandard":0,"MaxHeavy":0}}
+      ]
+    },
+    {
+      "Id": "northern-gateway",
+      "DisplayName": "Northern Gateway",
+      "Summary": "Fictional forces contest the Luzon Strait and its northern approaches.",
+      "Horizon": 24,
+      "Weather": "Maritime haze",
+      "WeatherSeverity": 1,
+      "SpecialRules": "Real geography with asymmetric command architectures, scheduled reinforcement, and changing weather.",
+      "VictoryConditions": "Score operational control, transit, escort, denial, and carrier preservation/withdrawal at T24. Damage breaks tied operational scores.",
+      "BlueCommandArchitecture": 2,
+      "RedCommandArchitecture": 0,
+      "Formations": [
+        {"Id":"B-CV-L","Name":"CSG Horizon","Side":0,"Kind":0,"Q":2,"R":10,"ReadyTime":1,"Ratings":{"Move":2,"Search":3,"Signature":1,"Strike":4,"Defense":3,"Asw":1,"Command":2,"ElectronicWarfare":2,"Cyber":2},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
+        {"Id":"B-SG-L","Name":"SAG Lantern","Side":0,"Kind":1,"Q":3,"R":7,"ReadyTime":0,"Ratings":{"Move":2,"Search":2,"Signature":2,"Strike":3,"Defense":3,"Asw":3,"Command":2,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
+        {"Id":"B-SS-L","Name":"SSN Wayfinder","Side":0,"Kind":2,"Q":4,"R":13,"ReadyTime":0,"Ratings":{"Move":2,"Search":3,"Signature":-1,"Strike":3,"Defense":2,"Asw":3,"Command":3,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":3,"Standard":2,"Heavy":1,"MaxLight":3,"MaxStandard":2,"MaxHeavy":1}},
+        {"Id":"B-AG-L","Name":"Air Group Meridian","Side":0,"Kind":3,"Q":5,"R":9,"ReadyTime":1,"Ratings":{"Move":3,"Search":3,"Signature":2,"Strike":3,"Defense":2,"Asw":2,"Command":2,"ElectronicWarfare":2,"Cyber":1},"Weapons":{"Light":4,"Standard":2,"Heavy":1,"MaxLight":4,"MaxStandard":2,"MaxHeavy":1}},
+        {"Id":"B-LG-L","Name":"Fleet Train West","Side":0,"Kind":4,"Q":2,"R":12,"ReadyTime":2,"Ratings":{"Move":1,"Search":1,"Signature":3,"Strike":1,"Defense":2,"Asw":0,"Command":1,"ElectronicWarfare":0,"Cyber":0},"Weapons":{"Light":1,"Standard":0,"Heavy":0,"MaxLight":1,"MaxStandard":0,"MaxHeavy":0}},
+        {"Id":"R-CV-L","Name":"CVG Typhoon","Side":1,"Kind":0,"Q":21,"R":8,"ReadyTime":1,"Ratings":{"Move":2,"Search":3,"Signature":1,"Strike":4,"Defense":3,"Asw":1,"Command":2,"ElectronicWarfare":2,"Cyber":2},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
+        {"Id":"R-SG-L","Name":"SAG Monsoon","Side":1,"Kind":1,"Q":20,"R":12,"ReadyTime":0,"Ratings":{"Move":2,"Search":2,"Signature":2,"Strike":3,"Defense":3,"Asw":3,"Command":2,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
+        {"Id":"R-SS-L","Name":"Submarine Shade","Side":1,"Kind":2,"Q":18,"R":6,"ReadyTime":0,"Ratings":{"Move":2,"Search":3,"Signature":-1,"Strike":3,"Defense":2,"Asw":3,"Command":3,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":3,"Standard":2,"Heavy":1,"MaxLight":3,"MaxStandard":2,"MaxHeavy":1}},
+        {"Id":"R-AG-L","Name":"Air Group Squall","Side":1,"Kind":3,"Q":19,"R":10,"ReadyTime":1,"Ratings":{"Move":3,"Search":3,"Signature":2,"Strike":3,"Defense":2,"Asw":2,"Command":2,"ElectronicWarfare":2,"Cyber":1},"Weapons":{"Light":4,"Standard":2,"Heavy":1,"MaxLight":4,"MaxStandard":2,"MaxHeavy":1}},
+        {"Id":"R-LG-L","Name":"Fleet Train East","Side":1,"Kind":4,"Q":21,"R":10,"ReadyTime":2,"Ratings":{"Move":1,"Search":1,"Signature":3,"Strike":1,"Defense":2,"Asw":0,"Command":1,"ElectronicWarfare":0,"Cyber":0},"Weapons":{"Light":1,"Standard":0,"Heavy":0,"MaxLight":1,"MaxStandard":0,"MaxHeavy":0}}
+      ]
+    }
+  ]
+}

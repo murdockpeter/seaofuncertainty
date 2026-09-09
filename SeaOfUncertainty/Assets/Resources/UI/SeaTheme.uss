@@ -79,19 +79,25 @@
 .button.danger-button { background-color: rgb(102, 35, 34); border-bottom-color: rgb(234, 79, 70); }
 .button.selected { background-color: rgb(19, 126, 133); color: white; }
 
-.workspace { flex-grow: 1; flex-direction: row; padding: 10px; }
-.timeline { width: 255px; min-width: 225px; margin-right: 10px; }
+.workspace { flex-grow: 1; flex-direction: row; padding: 10px; min-height: 0; }
+.timeline { width: 235px; min-width: 215px; margin-right: 10px; padding: 12px; overflow: hidden; }
 .map-column { flex-grow: 1; min-width: 500px; }
-.dossier { width: 330px; min-width: 285px; margin-left: 10px; }
-.bottom-deck { height: 250px; min-height: 220px; flex-direction: row; padding: 0 10px 10px 10px; }
-.actions { flex-grow: 1; margin-right: 10px; }
-.event-feed { width: 390px; min-width: 300px; }
-.card-hand { width: 610px; min-width: 440px; margin-right: 10px; padding: 10px; }
+.dossier { width: 310px; min-width: 275px; margin-left: 10px; padding: 12px; overflow: hidden; }
+.dossier-scroll { flex-grow: 1; }
+.dossier-summary { margin-top: 7px; padding-top: 5px; border-top-width: 1px; border-top-color: rgba(52, 139, 150, 0.28); }
+.bottom-deck { height: 225px; min-height: 205px; flex-direction: row; padding: 0 10px 10px 10px; }
+.actions { flex-grow: 1; min-width: 570px; margin-right: 10px; padding: 10px 12px; overflow: hidden; }
+.action-row { width: 100%; }
+.action-row > .button { flex-grow: 1; min-width: 0; height: 38px; margin: 3px; }
+.command-summary { height: 18px; }
+.action-preview { font-size: 12px; }
+.event-feed { width: 280px; min-width: 240px; padding: 10px; overflow: hidden; }
+.card-hand { width: 430px; min-width: 350px; margin-right: 10px; padding: 10px; }
 .hand-scroll { flex-grow: 1; margin-top: 5px; }
 .hand-card {
-    width: 170px;
-    min-width: 170px;
-    height: 178px;
+    width: 145px;
+    min-width: 145px;
+    height: 122px;
     margin-right: 8px;
     padding: 10px;
     align-items: stretch;
@@ -118,10 +124,10 @@
 .hand-card-id { font-size: 10px; color: rgb(241, 174, 65); -unity-font-style: bold; letter-spacing: 1px; }
 .hand-card-title { margin-top: 5px; font-size: 14px; color: white; -unity-font-style: bold; white-space: normal; }
 .hand-card-effect { flex-grow: 1; margin-top: 7px; font-size: 11px; color: rgb(185, 207, 214); white-space: normal; }
-.hand-card-footer { margin-top: 5px; font-size: 9px; color: rgb(116, 170, 181); -unity-font-style: bold; white-space: normal; }
+.hand-card-footer { margin-top: auto; font-size: 9px; color: rgb(116, 170, 181); -unity-font-style: bold; white-space: normal; }
 
 .timeline-row {
-    height: 62px;
+    height: 56px;
     margin-top: 4px;
     min-width: 0;
     padding: 4px 8px;
@@ -150,9 +156,9 @@
 
 .stat-grid { flex-direction: row; flex-wrap: wrap; }
 .stat {
-    width: 92px;
-    height: 64px;
-    margin: 4px;
+    width: 84px;
+    height: 58px;
+    margin: 3px;
     padding: 4px;
     background-color: rgb(9, 49, 59);
     border-bottom-width: 2px;
@@ -199,6 +205,18 @@
 .modal { width: 760px; max-width: 88%; max-height: 88%; padding: 28px; }
 .scroll { flex-grow: 1; }
 .feedback-field { height: 92px; margin: 5px; background-color: rgb(5, 29, 37); color: white; }
+.settings-scroll { flex-grow: 1; }
+.settings-scroll > .eyebrow { margin-top: 12px; }
+.audio-description {
+    min-height: 28px;
+    padding: 6px 18px;
+    background-color: rgb(2, 20, 29);
+    color: rgb(226, 236, 155);
+    font-size: 12px;
+    -unity-text-align: middle-center;
+    border-top-width: 1px;
+    border-top-color: rgba(226, 236, 155, 0.45);
+}
 
 .map {
     flex-grow: 1;
@@ -249,6 +267,24 @@
 .compact .event-feed { display: none; }
 .compact .card-hand { width: 440px; min-width: 330px; }
 .compact .brand { font-size: 21px; }
+.short .bottom-deck { height: 205px; min-height: 190px; }
+.short .event-feed { display: none; }
+.short .timeline-row { height: 52px; font-size: 11px; }
 
 .high-contrast .blue-accent { color: rgb(34, 220, 255); }
 .high-contrast .red-accent { color: rgb(255, 194, 25); }
+
+.large-text .body-copy { font-size: 18px; }
+.large-text .muted, .large-text .audio-description { font-size: 15px; }
+.large-text .button, .large-text .timeline-row { font-size: 15px; }
+.large-text .eyebrow, .large-text .hand-card-id, .large-text .hand-card-footer, .large-text .stat-name { font-size: 13px; }
+.large-text .subheading, .large-text .hand-card-title { font-size: 20px; }
+.large-text .heading { font-size: 35px; }
+
+.extra-large-text .body-copy { font-size: 21px; }
+.extra-large-text .muted, .extra-large-text .audio-description { font-size: 18px; }
+.extra-large-text .button, .extra-large-text .timeline-row { font-size: 18px; }
+.extra-large-text .eyebrow, .extra-large-text .hand-card-id, .extra-large-text .hand-card-footer, .extra-large-text .stat-name { font-size: 15px; }
+.extra-large-text .subheading, .extra-large-text .hand-card-title { font-size: 23px; }
+.extra-large-text .heading { font-size: 39px; }
+.large-text .modal, .extra-large-text .modal { max-height: 94%; }
