@@ -64,7 +64,7 @@ Content-proof HTML is generated from the runtime catalogs under `SeaOfUncertaint
 The production network foundation is implemented, but public activation remains gated on human-tested Local Hotseat privacy and live two-client service validation.
 
 - [ ] Complete and human-test Local Hotseat privacy before networking.
-- [ ] Conduct latency, reconnect, host-migration, and adversarial information-leak testing with two authenticated builds over direct IP and Unity Relay. **Automated:** deterministic loopback fault, wire-authentication, side-scoped response, tamper, interrupted-recovery, activation-gate, and RTT-protocol tests pass. **Developer harness:** account-free direct-IP host/join plus optional private Relay, readiness, host-only authority start, clean leave, and live RTT controls are available; the Unity Cloud project is not linked yet, but it no longer blocks direct testing.
+- [ ] Conduct latency, reconnect, host-migration, and adversarial information-leak testing with two authenticated builds over direct IP and Unity Relay. **Automated:** deterministic loopback fault, wire-authentication, side-scoped response, tamper, interrupted-recovery, activation-gate, Relay-admission-cache, and RTT-protocol tests pass. **Developer harness:** account-free direct-IP host/join plus optional private Relay, readiness, host-only authority start, clean leave, and live RTT controls are available. The Unity Cloud project is linked; live service configuration and evidence remain outstanding.
 
 ## 6. Release gates
 

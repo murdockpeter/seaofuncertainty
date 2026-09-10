@@ -182,13 +182,15 @@ namespace SeaOfUncertainty.Prototype
             card.Add(Text("OPERATE INSIDE\nUNCERTAINTY", "front-title"));
             card.Add(Text("You are not trying to eliminate uncertainty. You are trying to operate better than your opponent inside it.", "body-copy"));
             card.Add(ActionButton("BEGIN OPERATION", ShowMode, "primary"));
-            if (backend.HasSave) card.Add(ActionButton("CONTINUE SAVED OPERATION", () => { backend.ToolkitLoad(); ContinueOperation(); }));
+            if (backend.HasSave) card.Add(ActionButton("CONTINUE SAVED OPERATION", LoadOperationAndContinue));
             VisualElement row = El("row");
             row.Add(ActionButton("SETTINGS", ShowSettings));
             row.Add(ActionButton("FIELD MANUAL", ShowRules));
             row.Add(ActionButton("EXIT GAME", ShowExitConfirmation, "danger-button"));
             card.Add(row);
-            card.Add(Text("Solo vs AI • Local pass-and-play • Online multiplayer via Unity Relay", "muted"));
+            card.Add(Text(OnlineMultiplayerCoordinator.IsDeveloperPreviewEnabled()
+                ? "Solo vs AI • Local pass-and-play • Developer-gated online validation"
+                : "Solo vs AI • Local pass-and-play • Online multiplayer remains gated for validation", "muted"));
             page.Add(card);
             app.Add(page);
         }
@@ -206,8 +208,11 @@ namespace SeaOfUncertainty.Prototype
             card.Add(Text("The deterministic OPFOR commander controls Red using only its own Contacts, formations, public terrain, and objective information.", "muted"));
             card.Add(ActionButton("LOCAL HOTSEAT  •  BLUE VS RED", () => { backend.ToolkitSetOperationMode(OperationMode.LocalHotseat); ShowScenario(); }));
             card.Add(Text("Two players share this device with secure information-handoff screens whenever command changes sides.", "muted"));
-            card.Add(ActionButton("ONLINE MULTIPLAYER  •  PRIVATE RELAY", ShowOnline));
-            card.Add(Text("Private lobby, readiness, DTLS Relay startup, reconnect, and latency diagnostics for a two-commander match.", "muted"));
+            if (OnlineMultiplayerCoordinator.IsDeveloperPreviewEnabled())
+            {
+                card.Add(ActionButton("ONLINE PREVIEW  •  DIRECT / PRIVATE RELAY", ShowOnline));
+                card.Add(Text("Validation harness for two authenticated commanders. Playable command routing and public activation remain gated on privacy and two-build QA.", "muted"));
+            }
             card.Add(ActionButton("BACK", ShowMain));
             page.Add(card);
             app.Add(page);
@@ -221,13 +226,11 @@ namespace SeaOfUncertainty.Prototype
                 onlineKillSwitchRefreshed = true;
                 RefreshKillSwitchThenRedraw();
             }
-            BeginScreen("ONLINE MULTIPLAYER");
+            BeginScreen("ONLINE MULTIPLAYER  •  VALIDATION PREVIEW");
             VisualElement page = El("front-page");
             VisualElement card = Panel("hero-card");
             card.Add(Text("PRIVATE TWO-COMMANDER SESSION", "heading"));
-            card.Add(Text(MultiplayerKillSwitch.IsEnabled
-                ? "Unity Relay is the primary path: managed join codes, NAT traversal, encrypted transport, and host-migration coordination."
-                : "Unity Relay is temporarily disabled by the developer. Use Direct IP below instead.", "body-copy"));
+            card.Add(Text("Direct IP works without Unity Cloud. Relay optionally provides managed membership, NAT traversal, DTLS encryption, IP concealment, and migration coordination.", "body-copy"));
 
             if (online.Session == null && !online.IsDirect)
             {
@@ -236,29 +239,27 @@ namespace SeaOfUncertainty.Prototype
                 TextField code = new TextField("JOIN CODE") { value = string.Empty };
                 code.name = "online-join-code";
                 code.maxLength = 12;
+                TextField address = new TextField("HOST IP") { value = PlayerPrefs.GetString("DirectHostAddress", "127.0.0.1") };
+                address.name = "direct-host-address";
+                IntegerField port = new IntegerField("UDP PORT") { value = PlayerPrefs.GetInt("DirectHostPort", 7978) };
+                port.name = "direct-host-port";
                 card.Add(name);
-                card.Add(Text("UNITY RELAY", "eyebrow"));
+                card.Add(Text("DIRECT IP  •  NO CLOUD REQUIRED", "eyebrow"));
+                card.Add(address);
+                card.Add(port);
                 card.Add(code);
+                VisualElement directRow = El("row");
+                directRow.Add(ActionButton("HOST DIRECT", () => HostDirect(name.value, port.value), "primary"));
+                directRow.Add(ActionButton("JOIN DIRECT", () => JoinDirect(address.value, port.value, code.value, name.value)));
+                card.Add(directRow);
+                card.Add(Text("Use LAN/VPN, or configure firewall and UDP port forwarding. Direct traffic is not DTLS-encrypted and exposes the host address.", "muted"));
+                card.Add(Text("UNITY RELAY", "eyebrow"));
                 VisualElement relayRow = El("row");
                 relayRow.Add(ActionButton("HOST RELAY LOBBY", () => HostOnline(name.value), "primary"));
                 relayRow.Add(ActionButton("JOIN RELAY CODE", () => JoinOnline(code.value, name.value)));
+                relayRow.SetEnabled(MultiplayerKillSwitch.IsEnabled);
                 card.Add(relayRow);
-
-                if (!MultiplayerKillSwitch.IsEnabled)
-                {
-                    TextField address = new TextField("HOST IP") { value = PlayerPrefs.GetString("DirectHostAddress", "127.0.0.1") };
-                    address.name = "direct-host-address";
-                    IntegerField port = new IntegerField("UDP PORT") { value = PlayerPrefs.GetInt("DirectHostPort", 7978) };
-                    port.name = "direct-host-port";
-                    card.Add(Text("DIRECT IP  •  FALLBACK WHILE RELAY IS DISABLED", "eyebrow"));
-                    card.Add(address);
-                    card.Add(port);
-                    VisualElement row = El("row");
-                    row.Add(ActionButton("HOST DIRECT", () => HostDirect(name.value, port.value)));
-                    row.Add(ActionButton("JOIN DIRECT", () => JoinDirect(address.value, port.value, code.value, name.value)));
-                    card.Add(row);
-                    card.Add(Text("Direct traffic uses reliable Unity Transport over UDP. Use LAN/VPN, or configure firewall and UDP port forwarding. Direct transport does not conceal the host IP and is not DTLS-encrypted.", "muted"));
-                }
+                if (!MultiplayerKillSwitch.IsEnabled) card.Add(Text(MultiplayerKillSwitch.DisabledMessage, "muted"));
             }
             else
             {
@@ -282,7 +283,7 @@ namespace SeaOfUncertainty.Prototype
 
             card.Add(Text("STATUS", "eyebrow"));
             card.Add(Text(online.Status + (online.LastRoundTripMilliseconds >= 0 ? $"\nLAST RTT  •  {online.LastRoundTripMilliseconds} MS" : string.Empty), "muted"));
-            card.Add(Text("Relay can be disabled instantly from the Unity Dashboard (Remote Config → multiplayer_enabled) without a new build. Direct IP appears here automatically as a fallback whenever Relay is off.", "body-copy"));
+            card.Add(Text("PUBLIC ACTIVATION GATES\n1. Full Local Hotseat privacy playtest\n2. Playable UI routed through side-scoped authority receipts\n3. Two-build latency, reconnect, migration, and adversarial leak evidence\n\nRemote Config controls admission to new Relay sessions only; Direct IP remains available in this preview.", "body-copy"));
             card.Add(ActionButton("BACK", ShowMode));
             page.Add(card);
             app.Add(page);
@@ -327,9 +328,8 @@ namespace SeaOfUncertainty.Prototype
 
         private async void RefreshKillSwitchThenRedraw()
         {
-            bool before = MultiplayerKillSwitch.IsEnabled;
             await MultiplayerKillSwitch.RefreshAsync();
-            if (view == View.Online && root != null && MultiplayerKillSwitch.IsEnabled != before) ShowOnline();
+            if (view == View.Online && root != null) ShowOnline();
         }
 
         private void ShowScenario()
@@ -425,6 +425,13 @@ namespace SeaOfUncertainty.Prototype
         private void BeginSelectedOperation()
         {
             previousSide = backend.Game.Active.Side;
+            ContinueOperation();
+        }
+
+        private void LoadOperationAndContinue()
+        {
+            backend.ToolkitLoad();
+            OperationalMap3D.ResetPresentationMemory();
             ContinueOperation();
         }
 
@@ -1386,7 +1393,7 @@ namespace SeaOfUncertainty.Prototype
             VisualElement modal = Modal("OPERATION PAUSED");
             modal.Add(ActionButton("RESUME", ShowGame, "primary"));
             modal.Add(ActionButton("SAVE OPERATION", () => { backend.ToolkitSave(); ShowGame(); }));
-            if (backend.HasSave) modal.Add(ActionButton("LOAD SAVED OPERATION", () => { backend.ToolkitLoad(); ContinueOperation(); }));
+            if (backend.HasSave) modal.Add(ActionButton("LOAD SAVED OPERATION", LoadOperationAndContinue));
             modal.Add(ActionButton("EXPORT PLAYTEST DATA", () => { backend.ToolkitExport(); ShowGame(); }));
             modal.Add(ActionButton("SETTINGS", ShowSettings));
             modal.Add(ActionButton("RESTART OPERATION", () => { backend.ToolkitNewScenario(); OperationalMap3D.ResetPresentationMemory(); ShowBriefing(); }, "warning"));

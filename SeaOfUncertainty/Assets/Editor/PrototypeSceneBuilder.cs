@@ -1008,8 +1008,8 @@ namespace SeaOfUncertainty.Editor
         public static void RunBuildValidationSuite()
         {
             BuildWindows();
-            string executable = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/Windows/SeaOfUncertainty.exe"));
-            string dataDirectory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/Windows/SeaOfUncertainty_Data"));
+            string executable = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/Windows/Sea of Uncertainty.exe"));
+            string dataDirectory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/Windows/Sea of Uncertainty_Data"));
             Assert(File.Exists(executable), "Windows build emits the player executable");
             Assert(Directory.Exists(dataDirectory) && File.Exists(Path.Combine(dataDirectory, "globalgamemanagers")), "Windows build emits its player data and global managers");
             Assert(EditorBuildSettings.scenes.Any(scene => scene.enabled && scene.path == "Assets/Scenes/Prototype.unity"), "Build validation uses the authoritative prototype scene");

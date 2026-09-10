@@ -13,6 +13,13 @@ namespace SeaOfUncertainty.Editor
         [MenuItem("Sea of Uncertainty/Tests/Run Multiplayer Foundation Suite")]
         public static void Run()
         {
+            Assert(!OnlineMultiplayerCoordinator.IsDeveloperPreviewEnabled(Array.Empty<string>(), false, false), "Online preview remains hidden in a non-development release");
+            Assert(OnlineMultiplayerCoordinator.IsDeveloperPreviewEnabled(new[] { "game.exe", "-enableOnlinePreview" }, false, false), "Explicit launch flag enables the online validation surface");
+            bool priorRelayState = MultiplayerKillSwitch.IsEnabled;
+            string priorRelayMessage = MultiplayerKillSwitch.DisabledMessage;
+            MultiplayerKillSwitch.EditorApplyForTests(false, "Scheduled service pause");
+            Assert(!MultiplayerKillSwitch.IsEnabled && MultiplayerKillSwitch.DisabledMessage == "Scheduled service pause", "Relay admission state and operator message are cached without disabling Direct IP");
+            MultiplayerKillSwitch.EditorApplyForTests(priorRelayState, priorRelayMessage);
             AssertSessionLifecycleAndInterruptedRecovery();
             var server = new AuthoritativeMatchServer("PHASE1-SECURITY", 424242, ScenarioCatalog.Find("meridian-veil"));
             AssertPrivacy(server, Side.Blue);

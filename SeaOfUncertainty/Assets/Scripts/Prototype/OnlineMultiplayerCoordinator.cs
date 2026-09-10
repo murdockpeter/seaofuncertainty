@@ -11,9 +11,8 @@ namespace SeaOfUncertainty.Prototype
     public enum OnlinePreviewState { Offline, Working, Lobby, Starting, Connected, Error }
 
     /// <summary>
-    /// Activation shell for the production Sessions/Relay stack. Relay is the primary online path;
-    /// Direct IP is a fallback the UI surfaces only while <see cref="MultiplayerKillSwitch"/> reports
-    /// Relay disabled via Remote Config.
+    /// Developer-gated activation shell for direct IP and the production Sessions/Relay stack.
+    /// Remote Config controls admission to Relay only; it never removes the account-free direct path.
     /// </summary>
     public sealed class OnlineMultiplayerCoordinator : MonoBehaviour
     {
@@ -44,6 +43,13 @@ namespace SeaOfUncertainty.Prototype
         private string directJoinCode;
         private bool directHost;
         private long pingSentAt;
+
+        public static bool IsDeveloperPreviewEnabled(string[] arguments = null, bool? isEditor = null, bool? isDebugBuild = null)
+        {
+            string[] args = arguments ?? Environment.GetCommandLineArgs();
+            bool explicitFlag = args.Any(item => string.Equals(item, "-enableOnlinePreview", StringComparison.OrdinalIgnoreCase));
+            return explicitFlag || (isEditor ?? Application.isEditor) || (isDebugBuild ?? Debug.isDebugBuild);
+        }
 
         public async Task HostAsync(string commanderName, string scenarioId)
         {
