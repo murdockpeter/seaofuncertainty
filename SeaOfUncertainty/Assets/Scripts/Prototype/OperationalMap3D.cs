@@ -119,6 +119,8 @@ namespace SeaOfUncertainty.Prototype
         public string WeatherPreset => string.IsNullOrWhiteSpace(area.Presentation.WeatherPreset) ? "Clear" : area.Presentation.WeatherPreset;
         public int PrecipitationStreakCount { get; private set; }
         public int PersistentWakeCount { get; private set; }
+        public int AircraftContrailCount { get; private set; }
+        public bool PersistentTrailsUseFormationSpace { get; private set; }
         public bool CameraIsSettling => cameraPanVelocity.sqrMagnitude > .0001f || Mathf.Abs(cameraYawVelocity) > .01f || Mathf.Abs(cameraPitchVelocity) > .01f || Mathf.Abs(cameraZoomVelocity) > .01f;
         public bool UsesProceduralSurfaceTextures => generatedTextures.Count >= 3;
         public bool PermanentGridVisible => hexLines.Any(pair => pair.Value != null && pair.Value.enabled && !pair.Key.Equals(area.Objective));
@@ -908,6 +910,8 @@ namespace SeaOfUncertainty.Prototype
             VisibleFormationCount = 0;
             VisibleContactCount = 0;
             PersistentWakeCount = 0;
+            AircraftContrailCount = 0;
+            PersistentTrailsUseFormationSpace = true;
             if (game?.Active == null) return;
             Side viewer = game.Active.Side;
             foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed && f.Side == viewer))
@@ -978,7 +982,7 @@ namespace SeaOfUncertainty.Prototype
                 case FormationKind.LogisticsGroup: BuildLogisticsGroup(detail.transform, material); break;
             }
             AddRecognitionMarking(detail.transform, formation.Kind, material);
-            AddPersistentWake(marker.transform, formation.Kind, destination);
+            AddPersistentWake(marker.transform, formation.Kind);
             PrimitiveType symbolType = formation.Kind == FormationKind.Submarine ? PrimitiveType.Sphere : formation.Kind == FormationKind.AirGroup ? PrimitiveType.Cylinder : PrimitiveType.Cube;
             GameObject symbol = Primitive(symbolType, formation.Kind + " Distant Operational Symbol", marker.transform, material);
             symbol.transform.localScale = formation.Kind == FormationKind.CarrierGroup ? new Vector3(.24f, .025f, .42f)
@@ -988,15 +992,20 @@ namespace SeaOfUncertainty.Prototype
             if (formation.Kind == FormationKind.AirGroup) symbol.transform.localRotation = Quaternion.Euler(0f, 0f, 45f);
             lodPairs.Add(new LodPair { Detail = detail, Symbol = symbol });
             bool active = formation == game.Active;
-            LineRenderer ring = Ring(active ? "Active Formation Pulse" : "Formation Selection", formation.Position, active ? .58f : .48f, active ? new Color(1f, .68f, .14f, 1f) : material.color, active ? .12f : .045f);
+            LineRenderer ring = Ring(active ? "Active Formation Pulse" : "Formation Selection", formation.Position, active ? .72f : .48f, active ? new Color(1f, .68f, .14f, 1f) : material.color, active ? .16f : .045f);
             ring.transform.SetParent(marker.transform, true);
             if (active)
             {
                 activeFormationRing = ring;
                 activePulsePhase = 0f;
+                LineRenderer coreRing = Ring("Active Formation Core Ring", formation.Position, .42f, new Color(1f, .92f, .32f, 1f), .065f);
+                coreRing.transform.SetParent(marker.transform, true);
                 GameObject beacon = Primitive(PrimitiveType.Cylinder, "Ready Beacon", marker.transform, warningMaterial);
-                beacon.transform.localPosition = new Vector3(-.42f, .28f, 0f);
-                beacon.transform.localScale = new Vector3(.055f, .28f, .055f);
+                beacon.transform.localPosition = new Vector3(-.55f, .72f, 0f);
+                beacon.transform.localScale = new Vector3(.06f, .72f, .06f);
+                GameObject beaconCap = Primitive(PrimitiveType.Sphere, "Active Formation Beacon Cap", marker.transform, warningMaterial);
+                beaconCap.transform.localPosition = new Vector3(-.55f, 1.46f, 0f);
+                beaconCap.transform.localScale = Vector3.one * .14f;
             }
             AddFormationStatusCues(marker, formation);
             UpdateLod();
@@ -1013,20 +1022,33 @@ namespace SeaOfUncertainty.Prototype
                 : kind == FormationKind.AirGroup ? new Vector3(.52f, .008f, .035f) : new Vector3(.24f, .008f, .30f);
         }
 
-        private void AddPersistentWake(Transform parent, FormationKind kind, Vector3 position)
+        private void AddPersistentWake(Transform parent, FormationKind kind)
         {
             if (kind == FormationKind.Submarine) return;
-            float height = kind == FormationKind.AirGroup ? 1.05f : .025f;
-            float length = kind == FormationKind.AirGroup ? 1.0f : .72f;
+            if (kind == FormationKind.AirGroup)
+            {
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    Vector3 start = new Vector3(side * .055f, -.08f, -.38f);
+                    Vector3 end = new Vector3(side * .055f, -.08f, -1.22f);
+                    LineRenderer contrail = LocalTrail(parent, "Persistent Aircraft Contrail", start, end,
+                        new Color(.9f, .97f, 1f, .68f), new Color(.72f, .9f, 1f, .06f), .018f, .07f, lineMaterial);
+                    PersistentTrailsUseFormationSpace &= !contrail.useWorldSpace;
+                    PersistentWakeCount++;
+                    AircraftContrailCount++;
+                }
+                return;
+            }
+
+            float length = kind == FormationKind.CarrierGroup ? .92f : kind == FormationKind.LogisticsGroup ? .78f : .72f;
             float spread = kind == FormationKind.CarrierGroup ? .22f : .13f;
-            Color wakeColor = kind == FormationKind.AirGroup ? new Color(.72f, .82f, .88f, .3f) : new Color(.72f, .94f, .94f, .48f);
             for (int side = -1; side <= 1; side += 2)
             {
-                Vector3 start = position + new Vector3(side * spread, height, -.22f);
-                Vector3 end = position + new Vector3(side * spread * 2.2f, height, -.22f - length);
-                LineRenderer wake = Segment(kind == FormationKind.AirGroup ? "Persistent Contrail" : "Persistent Formation Wake", start, end, wakeColor, kind == FormationKind.AirGroup ? .025f : .045f);
-                wake.sharedMaterial = foamMaterial;
-                wake.transform.SetParent(parent, true);
+                Vector3 start = new Vector3(side * spread, .025f, -.22f);
+                Vector3 end = new Vector3(side * spread * 2.2f, .025f, -.22f - length);
+                LineRenderer wake = LocalTrail(parent, "Persistent Surface Wake", start, end,
+                    new Color(.76f, .96f, .96f, .52f), new Color(.62f, .88f, .9f, .05f), .035f, .085f, foamMaterial);
+                PersistentTrailsUseFormationSpace &= !wake.useWorldSpace;
                 PersistentWakeCount++;
             }
         }
@@ -1123,7 +1145,6 @@ namespace SeaOfUncertainty.Prototype
 
         private void BuildAircraft(Transform parent, Material sideMaterial)
         {
-            parent.localRotation = Quaternion.Euler(0f, -12f, 0f);
             GameObject fuselage = Primitive(PrimitiveType.Capsule, "Aircraft Fuselage", parent, sideMaterial);
             fuselage.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             fuselage.transform.localScale = new Vector3(.095f, .38f, .095f);
@@ -1263,6 +1284,22 @@ namespace SeaOfUncertainty.Prototype
             line.SetPosition(1, end);
             line.widthMultiplier = width;
             line.startColor = line.endColor = color;
+            return line;
+        }
+
+        private static LineRenderer LocalTrail(Transform parent, string name, Vector3 start, Vector3 end, Color startColor, Color endColor, float startWidth, float endWidth, Material material)
+        {
+            GameObject lineObject = Child(name, parent);
+            LineRenderer line = lineObject.AddComponent<LineRenderer>();
+            line.sharedMaterial = material;
+            line.useWorldSpace = false;
+            line.positionCount = 2;
+            line.SetPosition(0, start);
+            line.SetPosition(1, end);
+            line.startColor = startColor;
+            line.endColor = endColor;
+            line.startWidth = startWidth;
+            line.endWidth = endWidth;
             return line;
         }
 

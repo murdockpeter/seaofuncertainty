@@ -23,6 +23,7 @@ namespace SeaOfUncertainty.Prototype
         private int dragButton = -1;
         private Vector2 lastPointer;
         private Vector2 dragTravel;
+        private bool activeFormationContextCandidate;
         private readonly Label hexReadout;
         private readonly Label headingReadout;
         private bool reducedMotion;
@@ -31,6 +32,7 @@ namespace SeaOfUncertainty.Prototype
         public Action<HexCoord> HexChosen;
         public Action<ContactState> ContactChosen;
         public Action<ContactState> ContactHovered;
+        public Action<Vector2> ActiveFormationContextRequested;
         public bool CameraInputActive => cameraKeys.Count > 0;
         public bool EdgeScrollEnabled { get; private set; }
 
@@ -108,8 +110,10 @@ namespace SeaOfUncertainty.Prototype
             Side viewer = game.Active.Side;
             foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed && f.Side == viewer))
             {
-                Label marker = Marker(formation.Position, Code(formation.Kind), "map-marker", formation.Side == Side.Blue ? "blue" : "red");
-                marker.tooltip = $"{formation.Name}\n{formation.Kind} • Ready T{formation.ReadyTime:00}\n{formation.Cohesion}";
+                bool active = formation == game.Active;
+                Label marker = Marker(formation.Position, active ? "ACTIVE\n" + Code(formation.Kind) : Code(formation.Kind), "map-marker", formation.Side == Side.Blue ? "blue" : "red");
+                if (active) marker.AddToClassList("active-formation");
+                marker.tooltip = $"{formation.Name}\n{formation.Kind} • Ready T{formation.ReadyTime:00}\n{formation.Cohesion}{(active ? "\nACTIVE — right-click for orders" : string.Empty)}";
             }
             foreach (ContactState contact in game.Contacts.Where(c => c.Owner == viewer && !c.IsLost))
             {
@@ -148,6 +152,7 @@ namespace SeaOfUncertainty.Prototype
             if (evt.button == 1 || evt.button == 2)
             {
                 dragButton = evt.button;
+                activeFormationContextCandidate = evt.button == 1 && IsOverActiveFormation(evt.localPosition);
                 lastPointer = evt.localPosition;
                 dragTravel = Vector2.zero;
                 this.CapturePointer(evt.pointerId);
@@ -179,7 +184,11 @@ namespace SeaOfUncertainty.Prototype
                 lastPointer = evt.localPosition;
                 dragTravel += delta;
                 if (dragButton == 2) presentation?.Pan(delta);
-                else if (dragButton == 1) presentation?.Orbit(delta);
+                else if (dragButton == 1)
+                {
+                    if (dragTravel.magnitude > 7f) activeFormationContextCandidate = false;
+                    if (!activeFormationContextCandidate) presentation?.Orbit(delta);
+                }
                 UpdateMarkers();
                 UpdateReadout(null);
                 evt.StopPropagation();
@@ -202,12 +211,18 @@ namespace SeaOfUncertainty.Prototype
         private void OnPointerUp(PointerUpEvent evt)
         {
             if (dragButton < 0 || evt.button != dragButton) return;
+            bool openOrders = dragButton == 1 && activeFormationContextCandidate && dragTravel.magnitude <= 7f;
             dragButton = -1;
+            activeFormationContextCandidate = false;
             if (this.HasPointerCapture(evt.pointerId)) this.ReleasePointer(evt.pointerId);
             UpdateMarkers();
             UpdateReadout(null);
+            if (openOrders) ActiveFormationContextRequested?.Invoke(evt.localPosition);
             evt.StopPropagation();
         }
+
+        private bool IsOverActiveFormation(Vector2 point)
+            => game?.Active != null && presentation != null && Vector2.Distance(presentation.Project(game.Active.Position, contentRect), point) <= 62f;
 
         private void OnWheel(WheelEvent evt)
         {

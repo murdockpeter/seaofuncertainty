@@ -28,6 +28,7 @@ namespace SeaOfUncertainty.Prototype
         private Side previousSide;
         private bool aiRunning;
         private bool edgeScrollEnabled;
+        private bool edgeHudVisible;
         private bool entropyRevealBlocking;
         private FormationState pendingReactionTarget;
         private Salvo pendingReactionSalvo;
@@ -38,6 +39,7 @@ namespace SeaOfUncertainty.Prototype
         private bool pendingSynchronizedBlind;
         private bool controllerAxisReleased = true;
         private VisualElement focusBeforeOverlay;
+        private Button edgeHudToggle;
         private bool onlineKillSwitchRefreshed;
 
 #if UNITY_EDITOR
@@ -59,6 +61,11 @@ namespace SeaOfUncertainty.Prototype
         public void EditorShowRules() => ShowRules();
         public void EditorShowResponseHand() => ShowResponseHand();
         public void EditorShowStrikeAim(ContactState contact) => ShowStrikeAim(contact);
+        public bool EditorPersistentCardHandVisible => root?.Q<VisualElement>(className: "card-hand") != null;
+        public bool EditorEdgeHudVisible => edgeHudVisible;
+        public void EditorToggleEdgeHud() => ToggleEdgeHud();
+        public void EditorShowFormationOrders() => ShowFormationOrders(new Vector2(640f, 320f));
+        public string EditorActionMode => actionMode.ToString();
 
         public bool EditorInvokeButton(string text)
         {
@@ -170,6 +177,7 @@ namespace SeaOfUncertainty.Prototype
             }
             if (Input.GetKeyDown(KeyCode.JoystickButton0)) SubmitFocused();
             if (Input.GetKeyDown(KeyCode.JoystickButton1)) CancelNavigation();
+            if (view == View.Game && Input.GetKeyDown(KeyCode.JoystickButton3)) ToggleEdgeHud();
         }
 
         private void ShowMain()
@@ -517,10 +525,14 @@ namespace SeaOfUncertainty.Prototype
             map.HexChosen = OnHexChosen;
             map.ContactChosen = OnContactChosen;
             map.ContactHovered = contact => UpdateDossier(contact);
+            map.ActiveFormationContextRequested = ShowFormationOrders;
             map.SetEdgeScroll(edgeScrollEnabled);
             map.SetState(backend.Game, actionMode, moveMode, searchMode, salvo, backend.ReducedMotion, backend.HexGridVisible);
             mapColumn.Add(map);
-            mapColumn.Add(Text($"3D COMMAND MAP  •  {backend.Game.Area.NauticalMilesPerHex} NM / HEX  •  WASD MOVE  •  C ACTIVE  •  O OBJECTIVE  •  V EDGE PAN  •  F9/F10 SAVE/RECALL VIEW  •  HOME RESET", "muted"));
+            Label mapHelp = Text($"3D COMMAND MAP  •  {backend.Game.Area.NauticalMilesPerHex} NM / HEX  •  TAB EDGE HUD  •  H CARDS  •  L LOG  •  WASD MOVE  •  C ACTIVE  •  O OBJECTIVE  •  V EDGE PAN  •  HOME RESET", "muted", "map-help");
+            mapColumn.Add(mapHelp);
+            edgeHudToggle = ActionButton(edgeHudVisible ? "HIDE EDGE HUD  •  TAB" : "SHOW EDGE HUD  •  TAB", ToggleEdgeHud, "map-hud-toggle");
+            mapColumn.Add(edgeHudToggle);
             workspace.Add(mapColumn);
             VisualElement dossierPanel = Panel("dossier");
             var dossierScroll = new ScrollView();
@@ -533,11 +545,10 @@ namespace SeaOfUncertainty.Prototype
             workspace.Add(dossierPanel);
             app.Add(workspace);
 
-            VisualElement bottom = El("bottom-deck");
+            VisualElement bottom = El("bottom-deck", "command-dock");
             bottom.Add(BuildActions());
-            bottom.Add(BuildCardHand());
-            bottom.Add(BuildEventFeed());
             app.Add(bottom);
+            ApplyEdgeHudState();
             if (backend.AudioDescriptions)
             {
                 Label audioDescription = Text("AUDIO DESCRIPTION  •  " + backend.LastAudioDescription, "audio-description");
@@ -661,75 +672,6 @@ namespace SeaOfUncertainty.Prototype
             panel.Add(modes);
             panel.Add(Text(ActionPreview(), "body-copy", "amber", "action-preview"));
             if (actionMode == ToolkitActionMode.None) panel.Add(Text(backend.LastMessage, "muted"));
-            return panel;
-        }
-
-        private VisualElement BuildEventFeed()
-        {
-            VisualElement panel = Panel("event-feed");
-            VisualElement header = El("row");
-            header.Add(Text("AFTER-ACTION FEED", "subheading"));
-            header.Add(El("spacer"));
-            header.Add(ActionButton("INSPECT", ShowEventInspector));
-            panel.Add(header);
-            foreach (string entry in backend.Game.VisibleLog(backend.Game.Active.Side).Take(2)) panel.Add(Text(entry, "muted"));
-            return panel;
-        }
-
-        private VisualElement BuildCardHand()
-        {
-            Side side = backend.SelectedMode == OperationMode.SoloVsAi ? backend.HumanSide : backend.Game.Active.Side;
-            var heldEntropy = backend.Game.Formations
-                .Where(formation => formation.Side == side)
-                .SelectMany(formation => (formation.ActiveEffectCardIds ?? new List<string>())
-                    .Select(id => new { Formation = formation, Card = EntropyEffectCatalog.Find(id) }))
-                .Where(item => item.Card != null)
-                .ToList();
-            IReadOnlyList<CommandResponseDefinition> responses = backend.ToolkitResponseHand(side);
-
-            VisualElement panel = Panel("card-hand");
-            VisualElement header = El("row");
-            header.Add(Text("CARD HAND", "subheading"));
-            header.Add(El("spacer"));
-            header.Add(Text($"{heldEntropy.Count} ENTROPY  •  {responses.Count} RESPONSE", "eyebrow"));
-            panel.Add(header);
-
-            ScrollView scroll = new ScrollView(ScrollViewMode.Horizontal);
-            scroll.AddToClassList("hand-scroll");
-            scroll.verticalScrollerVisibility = ScrollerVisibility.Hidden;
-            scroll.horizontalScrollerVisibility = ScrollerVisibility.Auto;
-            foreach (var held in heldEntropy)
-            {
-                FormationState formation = held.Formation;
-                EntropyEffectDefinition effect = held.Card;
-                var card = new Button(() => ShowHeldEntropyCard(formation, effect)) { focusable = true };
-                card.AddToClassList("hand-card");
-                card.AddToClassList(effect.Source.ToString().ToLowerInvariant());
-                card.Add(Text(effect.Id + "  •  " + effect.Source.ToString().ToUpperInvariant(), "hand-card-id"));
-                card.Add(Text(effect.Title.ToUpperInvariant(), "hand-card-title"));
-                card.Add(Text("ATTACHED  •  " + formation.Name.ToUpperInvariant(), "hand-card-footer"));
-                if (formation.ResolvedEffectCardIds != null && formation.ResolvedEffectCardIds.Contains(effect.Id)) card.Add(Text("RESOLVED", "hand-card-footer", "amber"));
-                card.tooltip = effect.Effect;
-                scroll.Add(card);
-            }
-            foreach (CommandResponseDefinition response in responses)
-            {
-                CommandResponseDefinition cardDefinition = response;
-                var card = new Button(() =>
-                {
-                    if (cardDefinition.MechanicallySupported) ShowResponseTargets(cardDefinition);
-                    else ShowResponseHand();
-                }) { focusable = true };
-                card.AddToClassList("hand-card");
-                card.AddToClassList("response");
-                card.Add(Text(cardDefinition.Id + "  •  RESPONSE", "hand-card-id"));
-                card.Add(Text(cardDefinition.Title.ToUpperInvariant(), "hand-card-title"));
-                card.Add(Text(cardDefinition.MechanicallySupported ? "CLICK TO PLAY" : "PARENT SYSTEM PENDING", "hand-card-footer"));
-                card.tooltip = cardDefinition.Play;
-                scroll.Add(card);
-            }
-            if (heldEntropy.Count == 0 && responses.Count == 0) scroll.Add(Text("No cards currently held.", "muted"));
-            panel.Add(scroll);
             return panel;
         }
 
@@ -1152,6 +1094,141 @@ namespace SeaOfUncertainty.Prototype
             ShowGame();
         }
 
+        private void ShowFormationOrders(Vector2 mapPosition)
+        {
+            FormationState active = backend.Game.Active;
+            if (active == null) return;
+            VisualElement menu = ContextPanel("ACTIVE FORMATION ORDERS", mapPosition);
+            VisualElement identity = El("context-identity");
+            identity.Add(Text(active.Name.ToUpperInvariant(), "context-formation-name"));
+            identity.Add(Text($"{KindTag(active.Kind)}  •  HEX {active.Position}  •  READY T{active.ReadyTime:00}", "muted"));
+            VisualElement chips = El("row", "context-chip-row");
+            chips.Add(Text(active.Mission.ToString().ToUpperInvariant(), "context-chip", "mission"));
+            chips.Add(Text(active.Endurance.ToString().ToUpperInvariant(), "context-chip", "endurance"));
+            chips.Add(Text(active.Cohesion.ToUpperInvariant(), "context-chip", "cohesion"));
+            identity.Add(chips);
+            menu.Add(identity);
+            menu.Add(Text("PRIMARY ORDERS", "eyebrow", "context-section"));
+            menu.Add(ActionButton("⇢  MOVE ORDERS  ›", () => ShowMoveOrders(mapPosition), actionMode == ToolkitActionMode.Move ? "selected" : null));
+            menu.Add(ActionButton("◎  SEARCH ORDERS  ›", () => ShowSearchOrders(mapPosition), actionMode == ToolkitActionMode.Search ? "selected" : null));
+            menu.Add(ActionButton("✦  STRIKE ORDERS  ›", () => ShowStrikeOrders(mapPosition), actionMode == ToolkitActionMode.Strike ? "selected" : null));
+            menu.Add(Text("IMMEDIATE ACTION", "eyebrow", "context-section"));
+            VisualElement immediate = El("row", "context-order-row");
+            immediate.Add(ActionButton("↻  RECOVER • 2", () => ResolveAction(() => backend.ToolkitRecover())));
+            immediate.Add(ActionButton("■  HOLD • 1", () => ResolveAction(() => backend.ToolkitHold())));
+            menu.Add(immediate);
+            menu.Add(Text("ASSIGNMENTS & COMMAND", "eyebrow", "context-section"));
+            VisualElement assignments = El("row", "context-order-row");
+            assignments.Add(ActionButton("◉  SCREEN", ShowPatrolSetup));
+            assignments.Add(ActionButton("+  SUPPORT", ShowSupportSetup));
+            menu.Add(assignments);
+            menu.Add(ActionButton("⟳  REPLENISHMENT  ›", () => { actionMode = ToolkitActionMode.Replenish; ShowReplenishmentSetup(); }));
+            menu.Add(ActionButton("✦✦  SYNCHRONIZED STRIKE  ›", ShowSynchronizedStrikeContacts));
+            menu.Add(ActionButton("MISSION ORDERS  ›", ShowMissionFormationChoices));
+            menu.Add(ActionButton("▤  OPEN CARD TABLE  •  H", ShowResponseHand, "context-utility"));
+        }
+
+        private void ShowMoveOrders(Vector2 mapPosition)
+        {
+            FormationState active = backend.Game.Active;
+            VisualElement menu = ContextPanel("MOVE ORDERS", mapPosition);
+            menu.Add(Text("Choose movement posture, then select a highlighted destination directly on the 3D map.", "muted"));
+            foreach (MoveMode option in Enum.GetValues(typeof(MoveMode)))
+            {
+                MoveMode selected = option;
+                int distance = Rules.MoveAllowance(active, selected);
+                menu.Add(ActionButton($"{selected.ToString().ToUpperInvariant()}  •  {distance} HEX / {distance * backend.Game.Area.NauticalMilesPerHex} NM", () => BeginMapOrder(ToolkitActionMode.Move, selected, searchMode, searchPriority, salvo), selected == moveMode ? "selected" : null));
+            }
+            menu.Add(ActionButton("‹  BACK TO ORDERS", () => ShowFormationOrders(mapPosition)));
+        }
+
+        private void ShowSearchOrders(Vector2 mapPosition)
+        {
+            FormationState active = backend.Game.Active;
+            VisualElement menu = ContextPanel("SEARCH ORDERS", mapPosition);
+            menu.Add(Text("Choose a sensor posture and intelligence priority, then select the search area or Contact on the 3D map.", "muted"));
+            foreach (SearchMode modeOption in Enum.GetValues(typeof(SearchMode)))
+            {
+                foreach (SearchPriority priorityOption in Enum.GetValues(typeof(SearchPriority)))
+                {
+                    SearchMode selectedMode = modeOption;
+                    SearchPriority selectedPriority = priorityOption;
+                    int range = backend.Game.SearchRangeFor(active, selectedMode) * backend.Game.Area.NauticalMilesPerHex;
+                    menu.Add(ActionButton($"{selectedMode.ToString().ToUpperInvariant()}  •  {selectedPriority.ToString().ToUpperInvariant()}  •  {range} NM", () => BeginMapOrder(ToolkitActionMode.Search, moveMode, selectedMode, selectedPriority, salvo), selectedMode == searchMode && selectedPriority == searchPriority ? "selected" : null));
+                }
+            }
+            menu.Add(ActionButton("‹  BACK TO ORDERS", () => ShowFormationOrders(mapPosition)));
+        }
+
+        private void ShowStrikeOrders(Vector2 mapPosition)
+        {
+            FormationState active = backend.Game.Active;
+            VisualElement menu = ContextPanel("STRIKE ORDERS", mapPosition);
+            menu.Add(Text("Choose the salvo, then select a Contact on the 3D map and confirm its aim hex.", "muted"));
+            foreach (Salvo option in Enum.GetValues(typeof(Salvo)))
+            {
+                Salvo selected = option;
+                int range = Rules.StrikeRange(active.Kind, selected) * backend.Game.Area.NauticalMilesPerHex;
+                int remaining = active.Weapons?.Available(selected) ?? -1;
+                Button order = ActionButton($"{selected.ToString().ToUpperInvariant()}  •  {range} NM  •  {(remaining < 0 ? "AVAILABLE" : remaining + " LEFT")}", () => BeginMapOrder(ToolkitActionMode.Strike, moveMode, searchMode, searchPriority, selected), selected == salvo ? "selected" : null);
+                order.SetEnabled(active.CanFire(selected));
+                menu.Add(order);
+            }
+            menu.Add(ActionButton("‹  BACK TO ORDERS", () => ShowFormationOrders(mapPosition)));
+        }
+
+        private void BeginMapOrder(ToolkitActionMode mode, MoveMode selectedMove, SearchMode selectedSearch, SearchPriority selectedPriority, Salvo selectedSalvo)
+        {
+            actionMode = mode;
+            moveMode = selectedMove;
+            searchMode = selectedSearch;
+            searchPriority = selectedPriority;
+            salvo = selectedSalvo;
+            string detail = mode == ToolkitActionMode.Move ? moveMode.ToString() : mode == ToolkitActionMode.Search ? searchMode + "/" + searchPriority : salvo.ToString();
+            backend.ToolkitRecordChoice(mode.ToString(), detail);
+            ShowGame();
+        }
+
+        private VisualElement ContextPanel(string title, Vector2 mapPosition)
+        {
+            VisualElement previousFocus = root?.panel?.focusController?.focusedElement as VisualElement;
+            CloseOverlay();
+            focusBeforeOverlay = previousFocus ?? map;
+            VisualElement shade = El("context-shade");
+            shade.name = "overlay";
+            shade.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.target == shade) CloseOverlay();
+            });
+            VisualElement menu = Panel("orders-context");
+            menu.name = "dialog-" + AccessibleId(title);
+            Vector2 rootPosition = map != null ? map.ChangeCoordinatesTo(root, mapPosition) : mapPosition;
+            const float menuWidth = 408f;
+            const float formationClearance = 82f;
+            float rightCandidate = rootPosition.x + formationClearance;
+            float leftCandidate = rootPosition.x - formationClearance - menuWidth;
+            bool openLeft = rootPosition.x > root.resolvedStyle.width * .56f || rightCandidate + menuWidth > root.resolvedStyle.width - 12f;
+            float maxLeft = Mathf.Max(12f, root.resolvedStyle.width - menuWidth - 12f);
+            float maxTop = Mathf.Max(12f, root.resolvedStyle.height - 704f);
+            menu.style.left = Mathf.Clamp(openLeft ? leftCandidate : rightCandidate, 12f, maxLeft);
+            menu.style.top = Mathf.Clamp(rootPosition.y - 150f, 12f, maxTop);
+            VisualElement titleBar = El("row", "context-titlebar");
+            titleBar.Add(Text(title, "eyebrow"));
+            titleBar.Add(El("spacer"));
+            titleBar.Add(ActionButton("×", CloseOverlay, "context-close"));
+            menu.Add(titleBar);
+            menu.Add(El("context-accent-rule"));
+            ScrollView scroll = new ScrollView();
+            scroll.AddToClassList("context-scroll");
+            scroll.verticalScrollerVisibility = ScrollerVisibility.Auto;
+            scroll.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
+            menu.Add(scroll);
+            shade.Add(menu);
+            root.Add(shade);
+            menu.schedule.Execute(() => menu.Query<Button>().First()?.Focus());
+            return scroll.contentContainer;
+        }
+
         private Button ModeButton(string text, MoveMode mode) => ActionButton(text, () => { moveMode = mode; backend.ToolkitRecordChoice("Move", mode.ToString()); ShowGame(); }, moveMode == mode ? "selected" : null);
         private Button ModeButton(string text, SearchMode mode) => ActionButton(text, () => { searchMode = mode; backend.ToolkitRecordChoice("Search", mode.ToString()); ShowGame(); }, searchMode == mode ? "selected" : null);
         private Button ModeButton(string text, SearchPriority priority) => ActionButton(text, () => { searchPriority = priority; backend.ToolkitRecordChoice("Search priority", priority.ToString()); ShowGame(); }, searchPriority == priority ? "selected" : null);
@@ -1474,25 +1551,67 @@ namespace SeaOfUncertainty.Prototype
         private void ShowResponseHand()
         {
             Side side = backend.Game.Active.Side;
-            VisualElement modal = Modal(side.ToString().ToUpperInvariant() + " COMMAND RESPONSES");
+            var heldEntropy = HeldEntropyCards(side);
             IReadOnlyList<CommandResponseDefinition> hand = backend.ToolkitResponseHand(side);
-            if (hand.Count == 0) modal.Add(Text("No Command Responses remain in hand.", "body-copy"));
+            VisualElement modal = Modal(side.ToString().ToUpperInvariant() + " COMMAND TABLE");
+            modal.AddToClassList("command-table");
+            modal.parent.AddToClassList("command-table-shade");
+            modal.Add(Text($"YOUR HAND  •  {hand.Count} COMMAND RESPONSE{(hand.Count == 1 ? string.Empty : "S")}  •  {heldEntropy.Count} ATTACHED ENTROPY", "eyebrow"));
+            modal.Add(Text("Select a card to inspect or play it. The operational map remains visible beneath the table.", "muted"));
             ScrollView scroll = new ScrollView();
-            scroll.AddToClassList("scroll");
+            scroll.AddToClassList("card-table-scroll");
+            scroll.contentContainer.AddToClassList("card-table-grid");
+            foreach (var held in heldEntropy)
+            {
+                FormationState formation = held.Formation;
+                EntropyEffectDefinition card = held.Card;
+                VisualElement face = El("physical-card", card.Source.ToString().ToLowerInvariant());
+                face.Add(Text(card.Id + "  •  " + card.Source.ToString().ToUpperInvariant(), "physical-card-id"));
+                face.Add(Text(card.Title.ToUpperInvariant(), "physical-card-title"));
+                face.Add(Text(card.Effect, "physical-card-effect"));
+                if (!string.IsNullOrEmpty(card.Response)) face.Add(Text("RESPONSE  •  " + card.Response, "physical-card-cost"));
+                face.Add(El("physical-card-rule"));
+                face.Add(Text("ATTACHED TO\n" + formation.Name.ToUpperInvariant(), "physical-card-owner"));
+                Button inspect = ActionButton("INSPECT ATTACHED CARD", () => ShowHeldEntropyCard(formation, card));
+                inspect.AddToClassList("physical-card-action");
+                face.Add(inspect);
+                scroll.Add(face);
+            }
             foreach (CommandResponseDefinition card in hand)
             {
-                VisualElement response = Panel("attached-effect");
-                response.Add(Text(card.Id + "  •  COMMAND RESPONSE", "eyebrow"));
-                response.Add(Text(card.Title.ToUpperInvariant(), "subheading"));
-                response.Add(Text(card.Play + (string.IsNullOrEmpty(card.Cost) ? string.Empty : "\nCOST  •  " + card.Cost), "body-copy"));
+                VisualElement response = El("physical-card", "response");
+                response.Add(Text(card.Id + "  •  COMMAND RESPONSE", "physical-card-id"));
+                response.Add(Text(card.Title.ToUpperInvariant(), "physical-card-title"));
+                response.Add(Text(card.Play, "physical-card-effect"));
+                response.Add(Text(string.IsNullOrEmpty(card.Cost) ? "NO ADDITIONAL COST" : "COST  •  " + card.Cost, "physical-card-cost"));
+                response.Add(El("physical-card-rule"));
+                response.Add(Text("HELD IN COMMAND\nPLAY DURING A LEGAL WINDOW", "physical-card-owner"));
                 Button play = ActionButton(card.MechanicallySupported ? "SELECT TARGET & PLAY" : "SYSTEM NOT YET ACTIVE", () => ShowResponseTargets(card), card.MechanicallySupported ? "primary" : null);
                 play.SetEnabled(card.MechanicallySupported);
+                play.AddToClassList("physical-card-action");
                 response.Add(play);
                 scroll.Add(response);
             }
+            if (heldEntropy.Count == 0 && hand.Count == 0)
+            {
+                VisualElement empty = El("empty-hand");
+                empty.Add(Text("NO CARDS ON THE TABLE", "subheading"));
+                empty.Add(Text("Command Responses are drawn through play. Entropy cards appear here when attached to a friendly Formation.", "body-copy"));
+                scroll.Add(empty);
+            }
             modal.Add(scroll);
-            modal.Add(ActionButton("CLOSE", CloseOverlay));
+            modal.Add(ActionButton("RETURN TO COMMAND MAP", CloseOverlay, "primary"));
         }
+
+        private List<(FormationState Formation, EntropyEffectDefinition Card)> HeldEntropyCards(Side side)
+            => backend.Game.Formations
+                .Where(formation => formation.Side == side)
+                .SelectMany(formation => (formation.ActiveEffectCardIds ?? new List<string>())
+                    .Select(id => (Formation: formation, Card: EntropyEffectCatalog.Find(id))))
+                .Where(item => item.Card != null)
+                .ToList();
+
+        private int HeldCardCount(Side side) => HeldEntropyCards(side).Count + backend.ToolkitResponseHand(side).Count;
 
         private void ShowResponseTargets(CommandResponseDefinition card)
         {
@@ -1638,6 +1757,7 @@ namespace SeaOfUncertainty.Prototype
         {
             root.Clear();
             app = El("app");
+            app.EnableInClassList("hud-hidden", gameHeader && !edgeHudVisible);
             if (backend.HighContrast) app.AddToClassList("high-contrast");
             ApplyAccessibilityClasses();
             root.Add(app);
@@ -1651,7 +1771,8 @@ namespace SeaOfUncertainty.Prototype
             {
                 if (backend.SelectedMode == OperationMode.SoloVsAi) top.Add(Text("SOLO • BLUE COMMAND", "eyebrow"));
                 top.Add(Text($"NOW READY  •  {backend.Game.Active.Name.ToUpperInvariant()}", "subheading"));
-                top.Add(ActionButton($"RESPONSES {backend.ToolkitResponseHand(backend.Game.Active.Side).Count}", ShowResponseHand));
+                top.Add(ActionButton($"CARD TABLE {HeldCardCount(backend.Game.Active.Side)}  •  H", ShowResponseHand, "table-access"));
+                top.Add(ActionButton("LOG  •  L", ShowEventInspector));
                 top.Add(ActionButton(backend.HexGridVisible ? "HEXES ON" : "HEXES OFF", () =>
                 {
                     backend.ToolkitToggleHexGrid();
@@ -1690,6 +1811,13 @@ namespace SeaOfUncertainty.Prototype
 
         private void OnGlobalKeyDown(KeyDownEvent evt)
         {
+            if (evt.keyCode == KeyCode.Tab && view == View.Game && root.Q<VisualElement>("overlay") == null)
+            {
+                ToggleEdgeHud();
+                evt.PreventDefault();
+                evt.StopPropagation();
+                return;
+            }
             if (evt.keyCode == KeyCode.Escape)
             {
                 if (entropyRevealBlocking) { evt.StopPropagation(); return; }
@@ -1714,6 +1842,8 @@ namespace SeaOfUncertainty.Prototype
             if (evt.keyCode == KeyCode.F10) { map?.RecallCameraView(); evt.StopPropagation(); return; }
             if (evt.keyCode == KeyCode.Home) { map?.ResetCameraView(); evt.StopPropagation(); return; }
             if (evt.keyCode == KeyCode.G) { backend.ToolkitToggleHexGrid(); ShowGame(); return; }
+            if (evt.keyCode == KeyCode.H) { ShowResponseHand(); evt.StopPropagation(); return; }
+            if (evt.keyCode == KeyCode.L) { ShowEventInspector(); evt.StopPropagation(); return; }
             if (evt.keyCode == KeyCode.Alpha1 || evt.keyCode == KeyCode.Keypad1) SelectAction(ToolkitActionMode.Move);
             else if (evt.keyCode == KeyCode.Alpha2 || evt.keyCode == KeyCode.Keypad2) SelectAction(ToolkitActionMode.Search);
             else if (evt.keyCode == KeyCode.Alpha3 || evt.keyCode == KeyCode.Keypad3) SelectAction(ToolkitActionMode.Strike);
@@ -1734,6 +1864,23 @@ namespace SeaOfUncertainty.Prototype
         {
             ApplyResponsiveClass(evt.newRect.width, evt.newRect.height);
             EnsureNativeFullscreenResolution();
+        }
+
+        private void ToggleEdgeHud()
+        {
+            if (view != View.Game || app == null) return;
+            edgeHudVisible = !edgeHudVisible;
+            ApplyEdgeHudState();
+            map?.schedule.Execute(map.Refresh);
+        }
+
+        private void ApplyEdgeHudState()
+        {
+            if (app == null || view != View.Game) return;
+            app.EnableInClassList("hud-hidden", !edgeHudVisible);
+            if (edgeHudToggle == null) return;
+            edgeHudToggle.text = edgeHudVisible ? "HIDE EDGE HUD  •  TAB" : "SHOW EDGE HUD  •  TAB";
+            edgeHudToggle.tooltip = edgeHudVisible ? "Hide the 2D timeline, dossier, and action controls." : "Show the 2D timeline, dossier, and action controls.";
         }
 
         private void ToggleFullscreen()

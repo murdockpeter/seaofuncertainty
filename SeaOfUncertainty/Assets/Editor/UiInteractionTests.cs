@@ -54,12 +54,27 @@ namespace SeaOfUncertainty.Editor
                 backend.ToolkitNewScenario("meridian-veil");
                 backend.ToolkitSetOperationMode(OperationMode.LocalHotseat);
                 ui.EditorShowGame();
+                Assert(!ui.EditorPersistentCardHandVisible, "The 3D command map no longer loses permanent screen space to the card hand");
+                Assert(!ui.EditorEdgeHudVisible && ui.EditorRoot.Q<VisualElement>(className: "hud-hidden") != null, "The operation opens as a primarily 3D surface with the peripheral HUD hidden");
+                ui.EditorToggleEdgeHud();
+                Assert(ui.EditorEdgeHudVisible && ui.EditorRoot.Q<VisualElement>(className: "hud-hidden") == null, "The complete edge HUD can be restored as one optional layer");
+                ui.EditorToggleEdgeHud();
+                ui.EditorShowFormationOrders();
+                bool continuation = ui.EditorRoot.Q<VisualElement>("dialog-activeformationorders") != null;
+                Assert(continuation && ui.EditorRoot.Q<ScrollView>(className: "context-scroll") != null && ui.EditorRoot.Q<Button>(className: "context-close") != null, "The active Formation opens a bounded, scrollable contextual order palette over the 3D map");
+                Assert(ui.EditorInvokeButton("⇢  MOVE ORDERS  ›"), "The polished command palette preserves primary order navigation");
+                Button normalMove = ui.EditorRoot.Query<Button>().ToList().FirstOrDefault(button => button.text.StartsWith("NORMAL  •", StringComparison.Ordinal));
+                Assert(normalMove?.userData is Action, "The contextual Move submenu exposes movement posture choices");
+                ((Action)normalMove.userData)();
+                Assert(ui.EditorActionMode == "Move" && !ui.EditorOverlayOpen, "A contextual order returns directly to 3D destination selection");
                 Side activeSide = backend.Game.Active.Side;
                 CommandResponseDeckState deck = backend.Game.CommandResponseDecks.First(item => item.Side == activeSide);
                 deck.Hand.Clear(); deck.DrawPile.Remove("C-12"); deck.DiscardPile.Remove("C-12"); deck.Hand.Add("C-12");
                 ContactState contact = backend.Game.Contacts.First(item => item.Owner == activeSide && !item.IsLost);
                 contact.Age = 2;
                 ui.EditorShowResponseHand();
+                Assert(ui.EditorRoot.Q<VisualElement>("dialog-bluecommandtable") != null || ui.EditorRoot.Q<VisualElement>("dialog-redcommandtable") != null, "The card-table overlay opens above the command map");
+                Assert(ui.EditorRoot.Query<VisualElement>(className: "physical-card").ToList().Count == 1, "Each held card receives a physical card face in the overlay");
                 Assert(ui.EditorInvokeButton("SELECT TARGET & PLAY") && ui.EditorOverlayOpen && ui.EditorRoot.Query<Button>().ToList().Any(button => button.text.Contains(contact.LastKnownPosition.ToString())), "Response card targeting advances from hand to owned-Contact choices");
                 Button contactChoice = ui.EditorRoot.Query<Button>().ToList().First(button => button.text.Contains(contact.LastKnownPosition.ToString()));
                 Assert(contactChoice.userData is Action, "Contact target choice retains its production callback");
@@ -78,7 +93,7 @@ namespace SeaOfUncertainty.Editor
                 Assert(ui.EditorView == "Handoff" && backend.Game.Formations.Where(item => item.Side != backend.Game.Active.Side).All(item => !visibleText.Contains(item.Name)), "Hotseat handoff conceals the non-active side's formation identities");
                 Assert(ui.EditorInvokeButton("ASSUME COMMAND") && ui.EditorView == "Game", "Handoff assumption returns to the game screen");
 
-                Debug.Log("Sea of Uncertainty UI interaction tests passed: card targeting, handoff privacy, settings, fullscreen policy, and modal navigation.");
+                Debug.Log("Sea of Uncertainty UI interaction tests passed: immersive HUD toggle, card targeting, handoff privacy, settings, fullscreen policy, and modal navigation.");
             }
             finally
             {

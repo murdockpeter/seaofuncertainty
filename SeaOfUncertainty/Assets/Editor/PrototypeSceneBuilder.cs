@@ -714,6 +714,8 @@ namespace SeaOfUncertainty.Editor
                 Assert(operationalMap.ContainsRenderedName("CarrierGroup Distant Operational Symbol") && operationalMap.ContainsRenderedName("Submarine Distant Operational Symbol"), "Formation kinds retain distinct distant-symbol geometry");
                 int expectedWakes = game.Formations.Count(formation => formation.Side == game.Active.Side && !formation.IsDestroyed && formation.Kind != FormationKind.Submarine) * 2;
                 Assert(operationalMap.PersistentWakeCount == expectedWakes, "Visible surface and air formations receive paired persistent wakes or contrails while submarines do not");
+                int expectedContrails = game.Formations.Count(formation => formation.Side == game.Active.Side && !formation.IsDestroyed && formation.Kind == FormationKind.AirGroup) * 2;
+                Assert(operationalMap.AircraftContrailCount == expectedContrails && operationalMap.PersistentTrailsUseFormationSpace, "Aircraft use paired contrails and every persistent trail rotates in Formation-local space");
                 Assert(operationalMap.VisibleContactCount == game.Contacts.FindAll(contact => contact.Owner == game.Active.Side && !contact.IsLost).Count, "3D view instantiates only the active side's Contacts");
                 FormationState hiddenEnemy = game.Formations.Find(formation => formation.Side != game.Active.Side);
                 Assert(!operationalMap.ContainsRenderedName(hiddenEnemy.Name) && !operationalMap.ContainsRenderedName(hiddenEnemy.Id), "3D scene hierarchy does not expose a hidden enemy identity");

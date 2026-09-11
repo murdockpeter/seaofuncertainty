@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sea of Uncertainty — Digital Prototype Rules — 11 September 2026</title>
+<style>
+  :root { --navy:#071a24; --navy2:#0d2c39; --cyan:#28b9d0; --amber:#f3ad22; --red:#cf4d4d; --violet:#8367ba; --ink:#17252d; --muted:#51646e; --paper:#f7f5ef; --line:#b8c9cf; }
+  * { box-sizing:border-box; }
+  @page { size: Letter; margin: .58in .58in .62in; @bottom-right { content:"SEA OF UNCERTAINTY  •  " counter(page); color:#65757d; font:8pt Arial,sans-serif; } }
+  html { background:#d7dde0; }
+  body { margin:0 auto; max-width:8.5in; color:var(--ink); background:var(--paper); font:10pt/1.38 Arial,Helvetica,sans-serif; }
+  main { padding:.08in; }
+  h1,h2,h3,h4 { font-family:"Arial Narrow",Arial,sans-serif; margin:0 0 .12in; line-height:1.08; color:var(--navy); break-after:avoid; }
+  h1 { font-size:35pt; letter-spacing:.035em; text-transform:uppercase; }
+  h2 { margin-top:.18in; padding-bottom:.06in; border-bottom:2px solid var(--cyan); font-size:20pt; letter-spacing:.045em; text-transform:uppercase; }
+  h3 { margin-top:.15in; font-size:13pt; letter-spacing:.035em; text-transform:uppercase; }
+  h4 { margin-top:.1in; font-size:10pt; text-transform:uppercase; }
+  p { margin:.06in 0 .1in; }
+  ul,ol { margin:.06in 0 .12in; padding-left:.22in; }
+  li { margin:.025in 0; }
+  strong { color:#0a3341; }
+  table { width:100%; border-collapse:collapse; margin:.08in 0 .16in; font-size:8.6pt; break-inside:avoid; }
+  th { padding:.055in .065in; color:white; background:var(--navy2); text-align:left; text-transform:uppercase; letter-spacing:.025em; }
+  td { padding:.052in .065in; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr:nth-child(even) td { background:#eaf0f1; }
+  .cover { height:9.65in; padding:.62in; color:white; background:linear-gradient(155deg,#06141d 0%,#0b3342 62%,#0b1f29 100%); position:relative; overflow:hidden; break-after:page; }
+  .cover:before { content:""; position:absolute; inset:0; opacity:.22; background:repeating-linear-gradient(30deg,transparent 0 44px,#39c1d6 45px 46px,transparent 47px 88px),repeating-linear-gradient(150deg,transparent 0 44px,#39c1d6 45px 46px,transparent 47px 88px); }
+  .cover-content { position:relative; z-index:1; margin-top:1.55in; }
+  .cover h1 { color:white; font-size:43pt; max-width:6.3in; }
+  .eyebrow { display:inline-block; padding:.055in .1in; margin-bottom:.2in; color:#071a24; background:var(--amber); font-size:9pt; font-weight:bold; letter-spacing:.12em; text-transform:uppercase; }
+  .subtitle { max-width:5.8in; color:#cce7ed; font-size:17pt; line-height:1.25; }
+  .edition { position:absolute; z-index:1; bottom:.62in; left:.62in; right:.62in; padding-top:.14in; border-top:1px solid #68adba; display:flex; justify-content:space-between; color:#b8d5dc; font-size:9pt; letter-spacing:.06em; text-transform:uppercase; }
+  .page { break-before:page; }
+  .chapter { break-before:page; }
+  .lede { color:#264753; font-size:12pt; line-height:1.42; }
+  .callout { margin:.12in 0 .16in; padding:.11in .13in; border-left:4px solid var(--amber); background:#fff2d3; break-inside:avoid; }
+  .cyan { border-color:var(--cyan); background:#e1f4f7; }
+  .red { border-color:var(--red); background:#f8e4df; }
+  .violet { border-color:var(--violet); background:#eee8f7; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:.13in; }
+  .card { padding:.11in .13in; border:1px solid var(--line); border-radius:5px; background:white; break-inside:avoid; }
+  .card h3 { margin-top:0; }
+  .steps { counter-reset:step; list-style:none; padding:0; }
+  .steps li { counter-increment:step; position:relative; min-height:.3in; padding:.03in 0 .08in .38in; }
+  .steps li:before { content:counter(step); position:absolute; left:0; top:0; width:.27in; height:.27in; border-radius:50%; color:white; background:var(--navy2); text-align:center; line-height:.27in; font-weight:bold; }
+  .formula { padding:.08in .1in; margin:.08in 0; color:white; background:var(--navy2); font-weight:bold; letter-spacing:.015em; break-inside:avoid; }
+  .tag { display:inline-block; padding:.015in .05in; color:white; background:var(--navy2); border-radius:3px; }
+  .small { color:var(--muted); font-size:8.4pt; }
+  .tight td,.tight th { padding:.038in .052in; }
+  .cards td:first-child { width:.45in; font-weight:bold; white-space:nowrap; }
+  .cards td:nth-child(2) { width:1.35in; font-weight:bold; }
+  .friction th { background:#8a6320; } .disruption th { background:#624e87; } .destruction th { background:#8d3535; }
+  .toc a { color:inherit; text-decoration:none; }
+  .toc td:first-child { width:.38in; color:var(--cyan); font-weight:bold; }
+  .footer-note { margin-top:.2in; padding-top:.08in; border-top:1px solid var(--line); color:var(--muted); font-size:8pt; }
+  .no-break { break-inside:avoid; }
+  @media print { html,body { background:white; } body { max-width:none; } main { padding:0; } a { color:inherit; text-decoration:none; } }
+</style>
+</head>
+<body>
+<section class="cover">
+  <div class="cover-content">
+    <span class="eyebrow">Current implemented rules</span>
+    <h1>Sea of<br>Uncertainty</h1>
+    <p class="subtitle">Digital Prototype Rules &amp; Commander's Reference</p>
+  </div>
+  <div class="edition"><span>Prototype snapshot • 11 September 2026</span><span>20 NM hex • 2-hour Ready Time</span></div>
+</section>
+
+<main>
+<section>
+  <h2>Authority &amp; scope</h2>
+  <p class="lede">This book records the rules enforced by the current digital prototype. When this PDF differs from the archived v0.6 books or design notes, the running simulation is authoritative for playtesting.</p>
+  <div class="callout"><strong>Snapshot, not a promise.</strong> Numbers and procedures here are balance candidates. The document describes the build as inspected on 11 September 2026; later code changes can supersede it.</div>
+  <h3>What is rules-bearing</h3>
+  <p>Formation state, the authoritative hex grid, Contacts, Ready Time, card effects, scenario data, and action resolution are rules. Models, wakes, shadows, coast meshes, animated water, labels, camera perspective, and other 3D presentation are not. Use highlighted legal hexes and the action previews when presentation and perspective appear ambiguous.</p>
+  <h3>Current playable frame</h3>
+  <ul>
+    <li><strong>Solo vs AI:</strong> the player commands Blue; deterministic OPFOR commands Red using Red-owned information and the same action methods.</li>
+    <li><strong>Local Hotseat:</strong> two commanders share one device with secure handoffs.</li>
+    <li><strong>Online preview:</strong> networking infrastructure is experimental; public playable command routing remains gated. It is not a rules-complete play mode.</li>
+  </ul>
+  <p class="small">Source audit: Core simulation, live field manual, scenario catalog, action UI, and regression-tested behavior. The old HTML/PDF books remain an archive.</p>
+</section>
+
+<section class="chapter toc">
+  <h2>Contents</h2>
+  <table>
+    <tr><td>1</td><td><a href="#concepts">Core concepts</a></td><td>Scale, formations, ratings, sequence</td></tr>
+    <tr><td>2</td><td><a href="#command">Command &amp; missions</a></td><td>Slots, strain, standing missions, Push Through</td></tr>
+    <tr><td>3</td><td><a href="#actions">Actions &amp; movement</a></td><td>Timing, terrain, patrol, support, logistics</td></tr>
+    <tr><td>4</td><td><a href="#information">Information warfare</a></td><td>Contacts, uncertainty, Search</td></tr>
+    <tr><td>5</td><td><a href="#combat">Strike &amp; reaction</a></td><td>Salvos, defense, damage</td></tr>
+    <tr><td>6</td><td><a href="#synchronization">Synchronized Strikes</a></td><td>Reservation, resolution, abort/retask</td></tr>
+    <tr><td>7</td><td><a href="#entropy">Entropy &amp; endurance</a></td><td>Cohesion, recovery, card decks</td></tr>
+    <tr><td>8</td><td><a href="#responses">Command Responses</a></td><td>Hand cycle and all 24 cards</td></tr>
+    <tr><td>9</td><td><a href="#victory">Scenarios &amp; victory</a></td><td>Objectives, tie-breakers, setups</td></tr>
+    <tr><td>10</td><td><a href="#interface">Digital command interface</a></td><td>3D interactions and controls</td></tr>
+    <tr><td>A</td><td><a href="#reference">Quick reference</a></td><td>Ranges, tables, timing</td></tr>
+  </table>
+</section>
+
+<section class="chapter" id="concepts">
+  <h2>1 • Core concepts</h2>
+  <p class="lede">You do not take a side-wide turn. Individual formations become Ready, act, and schedule their next opportunity. The contest is to convert incomplete information into better-timed action than the opponent.</p>
+  <h3>Scale and map</h3>
+  <p>Adjacent hex centers are <strong>20 nautical miles</strong> apart. One Ready-Time point is <strong>two hours</strong>. Hex coordinates, terrain, restricted regions, objective regions, facilities, and formation positions are authoritative even when the 3D scene visually spans or overlaps their boundaries.</p>
+  <h3>Formation types</h3>
+  <table class="tight"><tr><th>Type</th><th>Role in the prototype</th><th>Special rules</th></tr>
+    <tr><td>Carrier Group (CV)</td><td>Long-range strike, sensors, headquarters</td><td>May conduct HQ Recovery; air-related Destruction can apply</td></tr>
+    <tr><td>Surface Group (SG)</td><td>Escort, control, defense, ASW</td><td>Operational combatant for objectives</td></tr>
+    <tr><td>Submarine (SS)</td><td>Low-signature search and strike</td><td>Cautious Move sets Deep; other Move and non-Passive Search set Shallow</td></tr>
+    <tr><td>Air Group (AG)</td><td>Fast movement and extended sensor/strike reach</td><td>Weather delays complex actions; replenishes at an airfield</td></tr>
+    <tr><td>Logistics Group (LG)</td><td>Mobile logistics access and limited self-defense</td><td>Does not establish objective control or count as an operational combatant</td></tr>
+  </table>
+  <h3>Ratings</h3>
+  <p><strong>Move, Search, Strike, Defense, Signature, Command, ASW, EW, and Cyber</strong> are printed data. Current effects produce effective ratings. Lower Signature is generally harder to find because a target's effective Signature is added to the searcher's detection total.</p>
+  <h3>Ready sequence</h3>
+  <ol class="steps">
+    <li>Find the lowest Ready Time among undestroyed, unreserved formations.</li>
+    <li>If formations of both sides tie, priority passes away from the side that acted most recently.</li>
+    <li>Break remaining ties by fewer marked Entropy sources, then higher effective Command, then stable formation ID.</li>
+    <li>Highlight that formation. Only it may take an action, though the active side may manage eligible missions/cards and the defender may react to a Strike.</li>
+    <li>After resolution, set the acting formation's next Ready Time and repeat. Advance the clock to the next formation or scheduled event.</li>
+  </ol>
+  <div class="callout cyan"><strong>No pass action.</strong> Use <strong>Hold</strong> to spend 1 Time, remain in place, go quiet, and clear Checklist Churn if attached.</div>
+</section>
+
+<section class="chapter" id="command">
+  <h2>2 • Command &amp; missions</h2>
+  <h3>Command Attention slots</h3>
+  <p>Each side has a pool set by command architecture. A free slot can be occupied by an immediate retask, a mission change, Focused Search, printed entropy response, or Synchronized Strike. The interface shows Free, Occupied, and Strained slots.</p>
+  <table><tr><th>Architecture</th><th>Slots</th><th>Current scenarios</th></tr><tr><td>Centralized</td><td>4</td><td>Northern Gateway — Red</td></tr><tr><td>Mission Command</td><td>3</td><td>Meridian Veil — both sides</td></tr><tr><td>Distributed</td><td>2</td><td>Northern Gateway — Blue</td></tr></table>
+  <p><strong>Command Strain</strong> runs from 0–6. Every two Strain marks one slot Strained (maximum three), making it unavailable. A Carrier Group with logistics access can spend a Recover action as <strong>HQ Recovery</strong> to remove up to 2 Strain.</p>
+  <h3>Standing missions</h3>
+  <p>Every formation has a Mission task, objective, posture, and trigger. An action matching the current task needs no immediate Command Attention. Otherwise, a normal out-of-Mission action occupies one slot until that action resolves.</p>
+  <p>Changing a Standing Mission normally occupies one slot until the formation's next action. <strong>Confused Priorities</strong> adds another slot. <strong>Communications Latency</strong> delays delivery by 1 Time; the old mission continues and occupied slots release on delivery.</p>
+  <table class="tight"><tr><th>Trigger</th><th>Automatic task when condition is true</th></tr>
+    <tr><td>Contact Located</td><td>Strike when the side owns any usable Contact</td></tr>
+    <tr><td>Entropy Marked</td><td>Recover when that formation has Friction or Disruption</td></tr>
+    <tr><td>Logistics Required</td><td>Replenish when the formation needs service and has logistics access</td></tr>
+    <tr><td>Objective Reached</td><td>Patrol when the formation occupies the operational objective</td></tr>
+    <tr><td>On Ready</td><td>No conditional task change</td></tr>
+  </table>
+  <h3>Broken links and disorganization</h3>
+  <p><strong>Broken Link</strong> permits only the current Mission or an authorized trigger. Mission Command and Flash Order response cards provide exceptions. A formation with all three Entropy sources is <strong>Disorganized</strong> and must first <strong>Push Through</strong> to attempt one complex action. Push Through marks 1 Command Strain and is consumed by authorization.</p>
+</section>
+
+<section class="chapter" id="actions">
+  <h2>3 • Actions &amp; movement</h2>
+  <h3>Base action time</h3>
+  <table class="tight"><tr><th>Action</th><th>Base Time</th><th>Class</th></tr>
+    <tr><td>Move, Search, Strike</td><td>2</td><td>Complex and Major</td></tr>
+    <tr><td>Patrol/Screen, Support</td><td>1</td><td>Complex</td></tr>
+    <tr><td>Recover</td><td>2</td><td>Neither</td></tr>
+    <tr><td>Replenish</td><td>3</td><td>Neither</td></tr>
+    <tr><td>Hold</td><td>1</td><td>Neither</td></tr>
+  </table>
+  <p>Apply terrain, weather, endurance, and attached-card delays. An Air Group's complex action adds current weather severity. Friction adds +1 Time to complex actions unless Accept the Risk is prepared. Extended Recover adds +1 Time.</p>
+  <h3>Move</h3>
+  <table><tr><th>Commitment</th><th>Naval / carrier</th><th>Logistics</th><th>Air</th><th>Signature / Entropy</th></tr>
+    <tr><td>Cautious</td><td>1 hex / 20 nm</td><td>1 / 20 nm</td><td>4 / 80 nm</td><td>Signature −1 after action; submarine Deep</td></tr>
+    <tr><td>Normal</td><td>2 / 40 nm</td><td>1 / 20 nm</td><td>6 / 120 nm</td><td>Submarine Shallow</td></tr>
+    <tr><td>High Tempo</td><td>3 / 60 nm</td><td>2 / 40 nm</td><td>8 / 160 nm</td><td>Marks Friction and becomes Loud; submarine Shallow</td></tr>
+  </table>
+  <p>Non-air allowance cannot exceed effective Move; Air uses its printed mode allowance. Bonuses and Navigation Drift then modify allowance, minimum 1. Legal routes remain inside the area, cannot cross restricted areas, and cannot cross Land. A naval formation may end on Land only at a Port or Anchorage. Entering an intervening Strait ends further pathfinding; a Strait can be the destination. Any Littoral hex after the starting hex adds +1 Time. One friendly formation may end in a hex; opposing formations may coexist without automatic revelation.</p>
+  <p>Under weather severity above zero, a non-air High Tempo Move adds +1 Time. Movement increases enemy tracking uncertainty for Contacts on that formation. In this snapshot, Air movement allowance bypasses effective Move penalties; weather still delays its complex actions.</p>
+  <h3>Patrol / Screen</h3>
+  <p>Choose a center in the formation's hex or an adjacent hex, a Defensive/Balanced/Aggressive posture, and optionally a friendly protected formation inside the radius-1 area. A <strong>Defensive</strong> screen grants +1 Defense to friendly formations in its area on eligible Strikes; this bonus is not consumed. Any posture can intercept the first enemy moving into its area. Aggressive posture gives that interception +1 Strike and makes the screener Loud. Patrol persists until its owner performs a non-Patrol action; interception availability refreshes when Patrol is established again.</p>
+  <h3>Support</h3>
+  <p>Choose another friendly formation within 2 hexes and one type: <strong>Strike, Search, Defense, ASW Search, or Synchronization</strong>. A valid assignment grants +1 when consumed. Only one supporter may provide the same type to the same recipient; moving out of range clears the assignment. A supporter's next non-Support action clears its assignment. Formation Spread or EW Shadow can cancel the recipient's first applicable bonus.</p>
+  <h3>Recover, Hold, and Replenish</h3>
+  <p><strong>Recover</strong> discards one selected attached Friction or Disruption card. The source remains marked if another matching card remains. Destruction cannot be removed this way. Recover also clears Support blocked by Fuel Priority Conflict.</p>
+  <p><strong>Replenish</strong> requires service need plus access: Air Groups at an airfield inside a scenario logistics region; others at a Port/Anchorage there. Any formation may instead use a friendly, combat-capable Logistics Group within 1 hex. Service improves Endurance one step, reloads every magazine, improves Damage one step, resets the three-Major-Action track, repairs one selected Destruction card, and clears Loud. It takes 3 Time, +1 with Hull Breach. The formation cannot react while service is underway.</p>
+</section>
+
+<section class="chapter" id="information">
+  <h2>4 • Information warfare</h2>
+  <h3>Contacts and uncertainty</h3>
+  <p>Contacts belong to one side. They record a target reference (or a False Contact), last known hex, Location quality, Identity quality, Age, domain when known, movement uncertainty, and possibly a contradictory second position.</p>
+  <table class="tight"><tr><th>Attribute</th><th>Levels</th><th>Effect</th></tr>
+    <tr><td>Location</td><td>Low / Medium / High</td><td>Base uncertainty radius 2 / 1 / 0; Strike modifier −2 / −1 / 0</td></tr>
+    <tr><td>Identity</td><td>Unknown / General / Identified</td><td>Identified grants +1 Strike; General or better reveals domain</td></tr>
+    <tr><td>Age</td><td>0 and upward</td><td>Add up to 2 uncertainty rings; optional Age-2 targeting rule gives −1 at Age 2+</td></tr>
+  </table>
+  <div class="formula">UNCERTAINTY RADIUS = LOCATION RADIUS + min(2, max(Age, movement uncertainty))</div>
+  <p>A contradictory report adds a second possible center. Each possible center projects the full radius, clipped to the operational area. A Strike chooses a single aim hex in this possible area; the game tests hidden occupancy only after commitment.</p>
+  <p>When Time advances, every usable Contact ages by the elapsed amount. Beginning after Age 2, each further point degrades Location by one level; degrading a Low Location Contact makes it Lost. A successful Search resets Age and movement uncertainty to 0, clears contradiction/false status for the detected real target, and restores the reported position.</p>
+  <h3>Search declaration</h3>
+  <ol class="steps">
+    <li>Choose Passive, Active, or Focused Search and Location or Identity priority.</li>
+    <li>Choose a center in sensor range. The center and all adjacent hexes are searched (radius 1).</li>
+    <li>Authorize the action. Focused also immediately occupies one slot unless Directed Telescope prepared it free.</li>
+    <li>Resolve one d6 check against every enemy formation actually in the searched area and range. Resolve eligible False Contacts privately.</li>
+    <li>On success, create a Low/Unknown Contact or improve the priority attribute one level; if already maximum, improve the other attribute.</li>
+  </ol>
+  <div class="formula">SEARCH VALUE = effective Search + mode + ASW/support + spectrum + target effective Signature − range</div>
+  <p>Mode modifier: Passive +0, Active +1, Focused +2, then subtract current weather severity. Against a submarine, ASW modifier is <strong>ASW − 2 + the better of Search or ASW Support</strong>. Otherwise add Search Support. Spectrum modifier is max(0, Cyber ÷ 2) − max(0, target EW). Active Search makes the searcher Loud. A submarine using Active or Focused Search becomes Shallow.</p>
+  <table class="tight"><tr><th>Final Search Value</th><th>Success on d6</th></tr><tr><td>0 or less</td><td>5+</td></tr><tr><td>1–2</td><td>3+</td></tr><tr><td>3–4</td><td>2+</td></tr><tr><td>5+</td><td>1+ (automatic on a d6)</td></tr></table>
+  <h3>Scenario sensor range</h3>
+  <table class="tight"><tr><th>Formation</th><th>Passive</th><th>Active</th><th>Focused</th></tr>
+    <tr><td>Carrier</td><td>8 / 160 nm</td><td>10 / 200</td><td>12 / 240</td></tr><tr><td>Surface</td><td>7 / 140</td><td>9 / 180</td><td>11 / 220</td></tr><tr><td>Submarine</td><td>6 / 120</td><td>8 / 160</td><td>10 / 200</td></tr><tr><td>Air</td><td>10 / 200</td><td>12 / 240</td><td>14 / 280</td></tr><tr><td>Logistics</td><td>4 / 80</td><td>6 / 120</td><td>8 / 160</td></tr>
+  </table>
+</section>
+
+<section class="chapter" id="combat">
+  <h2>5 • Strike &amp; reaction</h2>
+  <h3>Declare a Strike</h3>
+  <ol class="steps">
+    <li>Choose one of your usable Contacts and one possible aim hex.</li>
+    <li>Choose an available Light, Standard, or Heavy salvo in range. Standard/Heavy versus a subsurface Contact requires Identified identity.</li>
+    <li>Commit the action. An empty, stale, or false aim expends the salvo and reports “no confirmed effect” without revealing why.</li>
+    <li>If a target is present, its controller chooses one legal Reaction before the roll.</li>
+    <li>Calculate Attack and Defense, find a combat band, roll one d6, and apply damage.</li>
+  </ol>
+  <div class="formula">ATTACK = effective Strike + salvo + Strike Support + Contact targeting</div>
+  <div class="formula">DEFENSE = effective Defense + Reaction + Defense Support + Screen + layered missile defense − Destruction source penalty</div>
+  <table class="tight"><tr><th>Salvo</th><th>Attack</th><th>Carrier range</th><th>Surface</th><th>Sub</th><th>Air</th><th>Logistics</th></tr>
+    <tr><td>Light</td><td>+0</td><td>4</td><td>3</td><td>3</td><td>6</td><td>1</td></tr><tr><td>Standard</td><td>+1</td><td>8</td><td>6</td><td>5</td><td>10</td><td>1</td></tr><tr><td>Heavy</td><td>+2</td><td>12</td><td>9</td><td>7</td><td>14</td><td>1</td></tr>
+  </table>
+  <p>One round equals 20 nm. Each formation begins with finite magazines: Carrier/Surface 4 Light, 3 Standard, 1 Heavy; Submarine 3/2/1; Air 4/2/1; Logistics 1/0/0. Heavy is also blocked by Critical Endurance, Crippled damage, Magazine Damage, Launcher Damage, or legacy expended state.</p>
+  <h3>Layered missile defense</h3>
+  <p>Defense layers add by salvo. Carrier and Surface use Outer 1 / Area 1 / Point 1; Air uses 0/1/1; Logistics 0/0/1; Submarine 0/0/0. Light receives all layers, Standard Area + Point, Heavy Point only. A target with positive EW gains another +1.</p>
+  <h3>Reactions</h3>
+  <table><tr><th>Reaction</th><th>Effect</th></tr>
+    <tr><td>Defend</td><td>+1 Defense.</td></tr><tr><td>Evade</td><td>+1 Defense; after combat move to a legal hex farther from the attacker, normally 1 hex. Orderly Withdrawal permits 2.</td></tr><tr><td>Counterattack</td><td>After surviving, make one Light return attack using a usable Contact. No weapon is expended for this reaction in the current implementation.</td></tr><tr><td>Hold</td><td>No modifier and remain in place.</td></tr>
+  </table>
+  <p>A reaction does not change Ready Time. A formation reacts once, then refreshes after completing its own action. Replenishing formations cannot react. Crippled formations may only Defend or Hold. Counterattack also requires fewer than two marked Entropy sources, no Fire Control Hit, a usable return Contact, and Light range.</p>
+  <h3>Combat bands and damage</h3>
+  <table class="tight"><tr><th>Attack − Defense</th><th>Band</th><th>1</th><th>2–5</th><th>6</th></tr>
+    <tr><td>−2 or less</td><td>Poor</td><td>None</td><td>None</td><td>Light</td></tr><tr><td>−1 to +1</td><td>Even</td><td>None</td><td>Light</td><td>Heavy</td></tr><tr><td>+2 to +3</td><td>Favorable</td><td>Light</td><td>Heavy</td><td>Crippled</td></tr><tr><td>+4 or more</td><td>Dominant</td><td>Heavy</td><td>Crippled</td><td>Destroyed</td></tr>
+  </table>
+  <p>Damage states are None, Light, Heavy, Crippled, Destroyed. Higher incoming damage replaces lower. Incoming damage equal to the current state escalates one step; lower damage does not worsen it. Light damage gives −1 effective Defense through the target's next completed own action. Crippled gives −1 Move, −1 Defense, and disables Heavy.</p>
+</section>
+
+<section class="chapter" id="synchronization">
+  <h2>6 • Synchronized Strikes</h2>
+  <p>A synchronized strike reserves multiple formations against one Contact solution and brings them onto one future Strike Time.</p>
+  <ol class="steps">
+    <li>The active leader selects 2–4 eligible friendly participants, including itself; all must be able to synchronize, fire the chosen salvo, and reach the aim.</li>
+    <li>Only one synchronized strike per side may be on the timeline. Declaration occupies one Command slot until resolution and sets Strike Time to at least T+1 and no earlier than the latest participant Ready Time.</li>
+    <li>Reserved participants cannot act independently. Disorganized participants must have prepared Push Through.</li>
+    <li>At Strike Time, resolve against the declared aim. If the Contact was lost, abort, retask, or explicitly continue blind.</li>
+    <li>The defender receives one Reaction for the entire volley. Resolve each attack in participant order; each attack after the first reduces Defense by a cumulative 1.</li>
+  </ol>
+  <p>Defense/Screen Support and prepared reaction defense apply on the first attack. Each participant expends its salvo. A participant normally schedules +1 additional Time after resolution; Synchronization Support or Deconfliction Cell cancels that delay for its named participant.</p>
+  <p>With 3+ participants, each participant after the first marks Friction. Prior Planning exempts the first otherwise-affected participant. Aborting at Strike Time gives every participant +1 Time and marks leader Friction. Retasking at Strike Time requires all participants in range, gives each +1 Time, and marks leader Friction.</p>
+</section>
+
+<section class="chapter" id="entropy">
+  <h2>7 • Entropy &amp; endurance</h2>
+  <h3>Three sources</h3>
+  <p><strong>Friction</strong> is operational delay and coordination cost. <strong>Disruption</strong> attacks information and command links. <strong>Destruction</strong> represents material loss. Each event draws and attaches a card even if that source is already marked; effects can therefore stack.</p>
+  <table class="tight"><tr><th>Marked sources</th><th>Cohesion</th><th>Universal consequence</th></tr><tr><td>0–1</td><td>Cohesive</td><td>No cohesion restriction</td></tr><tr><td>2</td><td>Disrupted</td><td>Counterattack unavailable</td></tr><tr><td>3</td><td>Disorganized</td><td>Complex action requires Push Through and 1 Command Strain</td></tr></table>
+  <p>Selected cards open a printed response window before the formation completes its next own action. Spend the listed slot immediately or let the effect persist. Recover removes one Friction/Disruption card; Replenish repairs one Destruction card.</p>
+  <h3>Endurance</h3>
+  <table><tr><th>State</th><th>Effect</th></tr><tr><td>Ready</td><td>No state penalty.</td></tr><tr><td>Extended</td><td>High Tempo marks Friction; Recover +1 Time.</td></tr><tr><td>Critical</td><td>Move −1; Heavy unavailable; each complex action marks Friction.</td></tr></table>
+  <p>Move, Search, and Strike are Major Actions. After every third Major Action by a formation, reset its Major-Action track and degrade Endurance one step, to a maximum of Critical. Replenishment and Priority Refuel improve it.</p>
+
+  <h3>Friction deck</h3>
+  <table class="cards friction"><tr><th>ID</th><th>Card</th><th>Implemented effect</th></tr>
+    <tr><td>F-01</td><td>Delayed Execution</td><td>+1 Time before next Action. Response: 1 slot to cancel before next own action.</td></tr><tr><td>F-02</td><td>Staff Overload</td><td>Cannot synchronize until completing another Action. Response: 1 slot to restore immediately.</td></tr><tr><td>F-03</td><td>Confused Priorities</td><td>Changing current Mission costs +1 slot.</td></tr><tr><td>F-04</td><td>Maintenance Backlog</td><td>High Tempo Move or Strike degrades Endurance one step.</td></tr><tr><td>F-05</td><td>Coordination Drift</td><td>Synchronization shifts this formation +1 Time.</td></tr><tr><td>F-06</td><td>Overextended Watchbill</td><td>Recover +1 Time unless in a logistics-supporting hex.</td></tr><tr><td>F-07</td><td>Navigation Drift</td><td>First Move −1 hex. Response: 1 slot restores movement.</td></tr><tr><td>F-08</td><td>Fuel Priority Conflict</td><td>After High Tempo Move, cannot Support until Recover.</td></tr><tr><td>F-09</td><td>Sortie Turnaround Lag</td><td>Strike +1 Time until Recover.</td></tr><tr><td>F-10</td><td>Formation Spread</td><td>First Screen or Support bonus received is ignored.</td></tr><tr><td>F-11</td><td>Checklist Churn</td><td>No High Tempo until Hold or Recover.</td></tr><tr><td>F-12</td><td>Hasty Retasking</td><td>Immediate Mission change adds +1 next Ready Time.</td></tr>
+  </table>
+</section>
+
+<section class="chapter">
+  <h2>Entropy card reference</h2>
+  <h3>Disruption deck</h3>
+  <table class="cards disruption"><tr><th>ID</th><th>Card</th><th>Implemented effect</th></tr>
+    <tr><td>D-01</td><td>Corrupted Track</td><td>Reduce either Location or Identity one level.</td></tr><tr><td>D-02</td><td>Communications Latency</td><td>Mission change arrives 1 Time later; existing Mission continues.</td></tr><tr><td>D-03</td><td>Contradictory Reports</td><td>Add an adjacent second possible-location center to one Contact.</td></tr><tr><td>D-04</td><td>Broken Link</td><td>Cannot receive new orders; use current Mission or authorized trigger.</td></tr><tr><td>D-05</td><td>Sensor Saturation</td><td>Active Search receives no +1 until Recover.</td></tr><tr><td>D-06</td><td>EW Shadow</td><td>First Support bonus received is ignored.</td></tr><tr><td>D-07</td><td>False Emission</td><td>Add a False Contact within 2 hexes of a real Contact.</td></tr><tr><td>D-08</td><td>Jammed Circuits</td><td>Focused Search unavailable until Recover.</td></tr><tr><td>D-09</td><td>Data Gap</td><td>Chosen Contact immediately ages +1.</td></tr><tr><td>D-10</td><td>Identification Doubt</td><td>Chosen Identified Contact becomes General.</td></tr><tr><td>D-11</td><td>Misrouted Orders</td><td>Next Support action is lost.</td></tr><tr><td>D-12</td><td>Compromised Plot</td><td>Cannot synchronize until Recover.</td></tr>
+  </table>
+  <h3>Destruction deck</h3>
+  <table class="cards destruction"><tr><th>ID</th><th>Card</th><th>Implemented effect</th></tr>
+    <tr><td>X-01</td><td>Flight Ops Degraded</td><td>Carrier/Air only: −1 Strike.</td></tr><tr><td>X-02</td><td>Sensor Damage</td><td>−1 Search.</td></tr><tr><td>X-03</td><td>Propulsion Damage</td><td>Maximum movement −1 hex.</td></tr><tr><td>X-04</td><td>Magazine Damage</td><td>Heavy unavailable.</td></tr><tr><td>X-05</td><td>Command Spaces Hit</td><td>−1 local Command.</td></tr><tr><td>X-06</td><td>Escort Lost</td><td>−1 Defense.</td></tr><tr><td>X-07</td><td>Air Defense Hit</td><td>−1 Defense against Strike.</td></tr><tr><td>X-08</td><td>Hangar Damage</td><td>Carrier/Air only: air Support unavailable.</td></tr><tr><td>X-09</td><td>Fire Control Hit</td><td>Counterattack unavailable.</td></tr><tr><td>X-10</td><td>Hull Breach</td><td>Recover and Replenish +1 Time.</td></tr><tr><td>X-11</td><td>Launcher Damage</td><td>Standard counts as Light; Heavy unavailable.</td></tr><tr><td>X-12</td><td>Bridge Casualties</td><td>−1 local Command and +1 next Ready Time.</td></tr>
+  </table>
+</section>
+
+<section class="chapter" id="responses">
+  <h2>8 • Command Responses</h2>
+  <p>Each side shuffles its own 24-card deck and draws 3. Hand limit is 5. Completing a Major Action advances that side's draw track; after every three, draw one if below the limit. Unawarded progress waits until room exists. Played cards go to discard; an empty draw pile is replenished by a deterministic reverse-cut of the discard pile.</p>
+  <p>Play cards during your side's planning window. Reaction preparations are the exception and can be prepared before a committed enemy attack. The game validates targets and then discards the card. All cards listed below are mechanically supported in this snapshot.</p>
+  <table class="cards"><tr><th>ID</th><th>Card</th><th>Play / cost</th></tr>
+    <tr><td>C-01</td><td>Commander's Presence</td><td>Remove one Friction; mark 1 Command Strain.</td></tr><tr><td>C-02</td><td>Prior Planning</td><td>At Synchronized Strike declaration, ignore the first Friction generated.</td></tr><tr><td>C-03</td><td>Mission Command</td><td>Prepare a Broken Link formation to alter Mission by its conditional trigger without Command Attention.</td></tr><tr><td>C-04</td><td>Rapid Replan</td><td>Change one Mission without a slot; +1 next Ready Time.</td></tr><tr><td>C-05</td><td>Directed Telescope</td><td>Prepare one free Focused Search slot cost.</td></tr><tr><td>C-06</td><td>Damage Control Priority</td><td>Suppress Destruction's universal penalty for one Action.</td></tr><tr><td>C-07</td><td>Delegate Authority</td><td>+1 local Command until next Action; cannot change Mission.</td></tr><tr><td>C-08</td><td>Accept the Risk</td><td>Ignore an Entropy restriction for this Action; afterward mark Friction.</td></tr><tr><td>C-09</td><td>Reserve Staff</td><td>Remove Communications Latency or Staff Overload.</td></tr><tr><td>C-10</td><td>Deconfliction Cell</td><td>Named synchronized participant ignores its +1 post-strike Time.</td></tr><tr><td>C-11</td><td>Repair Focus</td><td>Suppress Destruction's universal penalty through the next Action.</td></tr><tr><td>C-12</td><td>Update the Plot</td><td>Set one usable friendly Contact Age to 0; certainty does not improve.</td></tr><tr><td>C-13</td><td>Battle Rhythm</td><td>Remove Delayed Execution or Hasty Retasking.</td></tr><tr><td>C-14</td><td>Prepared Axis</td><td>+1 Move this Action; +1 Signature until next Action.</td></tr><tr><td>C-15</td><td>Circuit Breaker</td><td>Remove Jammed Circuits or Sensor Saturation.</td></tr><tr><td>C-16</td><td>Covering Fires</td><td>Prepare +1 Defense for one Reaction.</td></tr><tr><td>C-17</td><td>Flash Order</td><td>Give a Broken Link formation a new Mission; mark 1 Command Strain.</td></tr><tr><td>C-18</td><td>Orderly Withdrawal</td><td>Prepare one Evade to move up to 2 hexes.</td></tr><tr><td>C-19</td><td>Priority Refuel</td><td>Improve one formation's Endurance one step.</td></tr><tr><td>C-20</td><td>Damage Control Surge</td><td>Damaged formation removes one Friction or Disruption; +1 next Ready.</td></tr><tr><td>C-21</td><td>False Window</td><td>Create an enemy-owned False Contact within 2 hexes of a friendly formation.</td></tr><tr><td>C-22</td><td>Local Initiative</td><td>+1 local Command until next Action.</td></tr><tr><td>C-23</td><td>Trail Recovery</td><td>Improve one usable Contact's Location one level.</td></tr><tr><td>C-24</td><td>Task Group Reshuffle</td><td>Reassign the first eligible Screen or Support to another friendly formation in range.</td></tr>
+  </table>
+</section>
+
+<section class="chapter" id="victory">
+  <h2>9 • Scenarios &amp; victory</h2>
+  <p>Evaluate when the scenario reaches its Horizon. A side with no combat-capable non-logistics formation is eliminated. Otherwise score all achieved objectives:</p>
+  <table><tr><th>Objective</th><th>VP</th><th>Requirement</th></tr>
+    <tr><td>Control</td><td>6</td><td>Sole control of the operational objective: at least one undestroyed, non-Crippled Carrier/Surface/Sub within 1 hex and no such enemy presence.</td></tr><tr><td>Transit</td><td>3</td><td>Combat-capable Carrier/Surface/Sub inside the side's opposing approach region.</td></tr><tr><td>Escort</td><td>3</td><td>A combat-capable Carrier exists with another combat-capable Carrier/Surface/Sub within 2 hexes.</td></tr><tr><td>Denial</td><td>2</td><td>No enemy combat-capable Carrier/Surface/Sub within 2 hexes of the objective.</td></tr><tr><td>Withdrawal</td><td>2</td><td>Carrier remains below Heavy damage; a Heavy-damaged carrier must be in its withdrawal region. Crippled, destroyed, or missing carrier fails.</td></tr>
+  </table>
+  <h3>Victory order</h3>
+  <ol><li>Only one side eliminated</li><li>Higher operational points</li><li>More combat-capable non-logistics formations</li><li>Lower total damage burden across all friendly formations</li><li>Closest surviving operational combatant to the objective</li><li>Otherwise: Operation Contested</li></ol>
+  <h3>Meridian Veil</h3>
+  <p><strong>Horizon T16; clear weather; Mission Command (3 slots) for both sides.</strong> Fictional 12×10 archipelago, objective at hex (6,5). Fixed paired deployment; initial Contact information is asymmetric. West/East Haven port and airfield hexes provide typed logistics. Transit is toward the enemy side; withdrawal is toward the owning side's two-column haven zone.</p>
+  <h3>Northern Gateway</h3>
+  <p><strong>Horizon T24; maritime haze severity 1 until T12; Blue Distributed (2), Red Centralized (4).</strong> Fictional forces on a generalized 24×20 Luzon Strait map, objective at (11,9). Basco hex (11,10) provides Port/Airfield logistics. Two safety-zone hexes are restricted. At T8, Blue's SAG Relay enters from the western approach; at T12 weather clears to severity 0.</p>
+  <div class="callout red"><strong>Scoring uses actual positions.</strong> Hidden enemy presence is not revealed merely to show live control. Final scoring adjudicates it.</div>
+</section>
+
+<section class="chapter" id="interface">
+  <h2>10 • Digital command interface</h2>
+  <h3>Primary 3D play</h3>
+  <p>The active formation has an amber ACTIVE badge and selection treatment. Hover it and right-click to open Formation Orders near the formation. Choose order categories and commitments there; targeted actions highlight legal hexes or eligible Contacts on the 3D map. Left-click the intended map object/hex to commit. Heavy salvo receives a final confirmation.</p>
+  <p>Press <strong>Tab</strong> to turn the peripheral 2D edge HUD on or off. The 3D map, active formation marker, right-click order menu, overlay card hand, event log, and modal workflows remain the primary interface. Press <strong>H</strong> for the physical card table/hand and <strong>L</strong> for the event inspector.</p>
+  <h3>Mouse and camera</h3>
+  <table class="tight"><tr><th>Input</th><th>Command</th></tr><tr><td>Left click</td><td>Select a legal hex, Contact, or relevant formation</td></tr><tr><td>Right click active formation</td><td>Open Formation Orders</td></tr><tr><td>Right drag</td><td>Orbit and tilt freely</td></tr><tr><td>Middle drag</td><td>Pan</td></tr><tr><td>Wheel</td><td>Bounded zoom</td></tr></table>
+  <h3>Keyboard</h3>
+  <div class="grid2">
+    <div class="card"><h3>Orders &amp; overlays</h3><p><strong>1–8</strong> Move, Search, Strike, Recover, Hold, Patrol, Support, Replenish<br><strong>Tab</strong> edge HUD<br><strong>H</strong> card table<br><strong>L</strong> event log<br><strong>G</strong> hex grid<br><strong>Esc</strong> close overlay / operation menu</p></div>
+    <div class="card"><h3>Camera</h3><p><strong>WASD</strong> pan<br><strong>Q/E</strong> yaw<br><strong>R/F</strong> pitch<br><strong>Z/X</strong> or keypad +/− zoom<br><strong>Shift</strong> accelerate<br><strong>Home</strong> reset<br><strong>C</strong> active formation<br><strong>O</strong> objective<br><strong>V</strong> edge scrolling<br><strong>F9/F10</strong> save/recall view</p></div>
+  </div>
+  <p>When the tactical map cursor has focus, arrow keys move its hex cursor and Enter/Space submits. UI focus navigation and gamepad controls remain supported where focus is active.</p>
+  <h3>Information discipline</h3>
+  <p>Each commander sees friendly formations and owned Contacts. Strike preview does not expose exact hidden occupancy or target Defense. Use secure handoff in Local Hotseat. The event log may contain public and side-private entries; inspect it from the proper commander's view.</p>
+</section>
+
+<section class="chapter" id="reference">
+  <h2>Appendix A • Quick reference</h2>
+  <div class="grid2">
+    <div class="card"><h3>Action loop</h3><ol><li>Confirm highlighted Ready formation.</li><li>Manage mission/cards.</li><li>Choose order and commitment.</li><li>Select legal map target.</li><li>Resolve Reaction if struck.</li><li>Apply result and next Ready.</li><li>Reveal/answer Entropy if drawn.</li></ol></div>
+    <div class="card"><h3>State reminders</h3><p><strong>2 Entropy:</strong> Disrupted; no Counterattack.<br><strong>3 Entropy:</strong> Disorganized; Push Through complex actions.<br><strong>3 Major Actions:</strong> Endurance degrades.<br><strong>2 Command Strain:</strong> one slot Strained.<br><strong>Age above 2:</strong> Location degrades with Time.</p></div>
+  </div>
+  <h3>Effective rating reminders</h3>
+  <table class="tight"><tr><th>Rating</th><th>Common current modifiers</th></tr><tr><td>Move</td><td>−1 Critical; −1 Crippled; −1 Propulsion Damage; minimum 1</td></tr><tr><td>Strike</td><td>−1 universal Destruction; −1 Flight Ops Degraded for Carrier/Air</td></tr><tr><td>Search</td><td>−1 universal Disruption; −1 Sensor Damage</td></tr><tr><td>Defense</td><td>−1 Light; −1 Escort Lost; −1 Air Defense Hit; prepared reaction bonus; plus Strike-resolution universal Destruction penalty</td></tr><tr><td>Signature</td><td>+1 Loud; movement/card modifiers; −EW/2; −1 submarine Deep</td></tr><tr><td>Command</td><td>Local bonuses; −1 Command Spaces Hit; −1 Bridge Casualties; minimum 0</td></tr></table>
+  <h3>Prototype implementation notes</h3>
+  <ul>
+    <li>Defense currently receives both the formation's effective Destruction-card reductions and an additional universal −1 when the Destruction source is marked during Strike/interception resolution.</li>
+    <li>Damage Control Priority and Repair Focus currently prepare the same Destruction-suppression state despite their differing card text.</li>
+    <li>Counterattack does not deduct a Light magazine in the current implementation.</li>
+    <li>Air movement currently uses commitment allowance directly, bypassing effective Move penalties from Critical Endurance, Crippled damage, and Propulsion Damage.</li>
+    <li>The optional named protected formation is stored with a Screen, but current Defensive coverage applies to any friendly formation inside the screen area.</li>
+    <li>Map labels, visible 3D wakes, model headings, and pointing are presentation cues; they do not determine legal movement, range, facing, detection, or combat.</li>
+  </ul>
+  <div class="callout violet"><strong>Playtest reporting.</strong> If observed behavior differs from this snapshot, record the scenario, Time, active formation, action, cards/effects, expected rule, and actual result. The authoritative log and exported session are the best evidence for reconciliation.</div>
+  <p class="footer-note">Document generated from the Sea of Uncertainty digital prototype source tree. Revision label: DPR-2026-09-11. This is an internal playtest artifact, not a navigation product or depiction of real-world orders of battle.</p>
+</section>
+</main>
+</body>
+</html>
