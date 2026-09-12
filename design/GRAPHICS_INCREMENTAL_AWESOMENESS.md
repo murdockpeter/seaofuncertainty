@@ -36,9 +36,9 @@ The release-critical backlog remains [`TODO.md`](../TODO.md). An item here becom
 
 These are the preferred near-term sequence, one at a time.
 
-- [ ] **GIA-001 — Wake fidelity:** Make every surface/carrier wake originate at the stern, align with actual formation movement/facing, taper consistently, and disappear when stationary or inappropriate.
-- [ ] **GIA-002 — Air trail fidelity:** Replace ambiguous gray air-group lines with altitude-readable contrails that follow the aircraft heading, fade cleanly, and remain distinct from surface wakes and plotted routes.
-- [ ] **GIA-003 — Elevation-aware land material:** Blend lowland green, upland olive, exposed-rock gray, and slope shading from measured height and gradient without making the theater look like a satellite photograph.
+- [x] **GIA-001 — Wake fidelity:** Surface wakes now originate at the stern only while a carrier, surface group, or logistics group is moving, follow formation-local heading, taper through a widening V, and fade after arrival; submarines and stationary surface formations remain wake-free.
+- [x] **GIA-002 — Air trail fidelity:** Air groups now use paired, tapered blue-white vapor contrails at aircraft altitude, aligned in formation-local space and visually distinct from surface wakes and plotted routes.
+- [x] **GIA-003 — Elevation-aware land material:** The ETOPO grid now drives a theater-scale coastal-green, lowland, upland-olive, and high-rock palette plus subdued aspect and steepness shading from measured local gradients; restrained broad mottling preserves the command-table style. Shared neighboring face normals remove terrain-tile lighting seams while retaining the original 4× relief and interior terrain detail.
 - [ ] **GIA-004 — Sea-state whitecaps:** Add sparse, view-stable whitecaps whose density follows configured sea state and which vanish under Reduced Motion where animation would distract.
 - [ ] **GIA-005 — Label decluttering:** Add priority, collision avoidance, compact leader lines, and distance-based fading for formation and geographic labels.
 

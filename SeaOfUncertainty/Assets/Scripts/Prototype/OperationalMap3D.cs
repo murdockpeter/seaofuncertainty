@@ -91,7 +91,19 @@ namespace SeaOfUncertainty.Prototype
         private CameraPose savedCameraPose;
         private bool hasSavedCameraPose;
 
-        private sealed class Motion { public Transform Transform; public Vector3 Start; public Vector3 End; public Quaternion StartRotation; public Quaternion EndRotation; public float SurfaceOffset; public float Progress; }
+        private sealed class WakeTrail { public LineRenderer Renderer; public Color SternColor; public Color TailColor; }
+        private sealed class Motion
+        {
+            public Transform Transform;
+            public Vector3 Start;
+            public Vector3 End;
+            public Quaternion StartRotation;
+            public Quaternion EndRotation;
+            public float SurfaceOffset;
+            public float Progress;
+            public float WakeAge;
+            public List<WakeTrail> SurfaceWakes;
+        }
         private sealed class LodPair { public GameObject Detail; public GameObject Symbol; }
         private sealed class EffectInstance { public OperationalEffectKind Kind; public GameObject Object; public Vector3 BaseScale; public Vector3 Start; public float Age; public float Duration; }
         private struct MeshTriangle
@@ -122,6 +134,11 @@ namespace SeaOfUncertainty.Prototype
         public int TerrainMeshTileCount { get; private set; }
         public int MaximumTerrainElevationMetres { get; private set; }
         public bool UsesGeographicElevation { get; private set; }
+        public bool UsesElevationAwareTerrainColor { get; private set; }
+        public bool UsesTerrainSlopeShading { get; private set; }
+        public int TerrainColorBandCount { get; private set; }
+        public float TerrainColorLuminanceRange { get; private set; }
+        public bool TerrainTileEdgesUseSharedFaceNormals { get; private set; }
         public float TerrainVerticalExaggeration => Mathf.Max(1f, area.Presentation.ElevationExaggeration);
         public bool UsesGeographicBathymetry { get; private set; }
         public bool HasOceanCurrentBands { get; private set; }
@@ -139,7 +156,10 @@ namespace SeaOfUncertainty.Prototype
         public string WeatherPreset => string.IsNullOrWhiteSpace(area.Presentation.WeatherPreset) ? "Clear" : area.Presentation.WeatherPreset;
         public int PrecipitationStreakCount { get; private set; }
         public int PersistentWakeCount { get; private set; }
+        public int ActiveSurfaceWakeCount { get; private set; }
         public int AircraftContrailCount { get; private set; }
+        public bool AircraftContrailsUseVaporTreatment { get; private set; }
+        public bool AircraftContrailsAreAltitudeCued { get; private set; }
         public bool PersistentTrailsUseFormationSpace { get; private set; }
         public bool CameraIsSettling => cameraPanVelocity.sqrMagnitude > .0001f || Mathf.Abs(cameraYawVelocity) > .01f || Mathf.Abs(cameraPitchVelocity) > .01f || Mathf.Abs(cameraZoomVelocity) > .01f;
         public bool UsesProceduralSurfaceTextures => generatedTextures.Count >= 3;
@@ -329,12 +349,28 @@ namespace SeaOfUncertainty.Prototype
             {
                 Motion motion = motions[i];
                 if (motion.Transform == null) { motions.RemoveAt(i); continue; }
-                motion.Progress = reducedMotion ? 1f : Mathf.Clamp01(motion.Progress + deltaTime * 2.5f);
-                float eased = motion.Progress * motion.Progress * (3f - 2f * motion.Progress);
-                Vector3 chord = Vector3.Lerp(motion.Start, motion.End, eased);
-                motion.Transform.position = SurfacePoint(chord.x, chord.z) + Vector3.up * motion.SurfaceOffset;
-                motion.Transform.rotation = Quaternion.Slerp(motion.StartRotation, motion.EndRotation, eased);
-                if (motion.Progress >= 1f) motions.RemoveAt(i);
+                if (motion.Progress < 1f)
+                {
+                    motion.Progress = reducedMotion ? 1f : Mathf.Clamp01(motion.Progress + deltaTime * 2.5f);
+                    float eased = motion.Progress * motion.Progress * (3f - 2f * motion.Progress);
+                    Vector3 chord = Vector3.Lerp(motion.Start, motion.End, eased);
+                    motion.Transform.position = SurfacePoint(chord.x, chord.z) + Vector3.up * motion.SurfaceOffset;
+                    motion.Transform.rotation = Quaternion.Slerp(motion.StartRotation, motion.EndRotation, eased);
+                }
+                if (motion.Progress < 1f) continue;
+                if (motion.SurfaceWakes == null || motion.SurfaceWakes.Count == 0) { motions.RemoveAt(i); continue; }
+                motion.WakeAge += deltaTime;
+                float wakeVisibility = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(motion.WakeAge / 1.35f));
+                foreach (WakeTrail trail in motion.SurfaceWakes)
+                {
+                    if (trail.Renderer == null) continue;
+                    trail.Renderer.startColor = WithAlpha(trail.SternColor, trail.SternColor.a * wakeVisibility);
+                    trail.Renderer.endColor = WithAlpha(trail.TailColor, trail.TailColor.a * wakeVisibility);
+                }
+                if (motion.WakeAge < 1.35f) continue;
+                foreach (WakeTrail trail in motion.SurfaceWakes) if (trail.Renderer != null) trail.Renderer.gameObject.SetActive(false);
+                ActiveSurfaceWakeCount = Mathf.Max(0, ActiveSurfaceWakeCount - motion.SurfaceWakes.Count);
+                motions.RemoveAt(i);
             }
             for (int i = activeEffects.Count - 1; i >= 0; i--)
             {
@@ -756,6 +792,11 @@ namespace SeaOfUncertainty.Prototype
                 return false;
             }
 
+            highlandMaterial.mainTexture = CreateElevationAwareTerrainTexture(elevation);
+            highlandMaterial.mainTextureScale = Vector2.one;
+            highlandMaterial.mainTextureOffset = Vector2.zero;
+            highlandMaterial.color = Color.white;
+
             double projectionWest = coastline.projectionEast > coastline.projectionWest ? coastline.projectionWest : coastline.west;
             double projectionEast = coastline.projectionEast > coastline.projectionWest ? coastline.projectionEast : coastline.east;
             double projectionSouth = coastline.projectionNorth > coastline.projectionSouth ? coastline.projectionSouth : coastline.south;
@@ -809,21 +850,15 @@ namespace SeaOfUncertainty.Prototype
             {
                 int sourceRow = rowStart + localRow;
                 double latitude = elevation.Latitude(sourceRow);
-                float normalizedZ = (float)((latitude - projectionSouth) / (projectionNorth - projectionSouth));
-                float z = Mathf.LerpUnclamped(projectionBounds.yMin, projectionBounds.yMax, normalizedZ);
                 for (int localColumn = 0; localColumn <= columns; localColumn++)
                 {
                     int sourceColumn = columnStart + localColumn;
                     double longitude = elevation.Longitude(sourceColumn);
-                    float normalizedX = (float)((longitude - projectionWest) / (projectionEast - projectionWest));
-                    float x = Mathf.LerpUnclamped(projectionBounds.xMin, projectionBounds.xMax, normalizedX);
                     short elevationMetres = elevation.ElevationMetres(sourceColumn, sourceRow);
                     int index = localRow * vertexColumns + localColumn;
                     land[index] = elevationMetres > 0;
                     if (land[index]) MaximumTerrainElevationMetres = Mathf.Max(MaximumTerrainElevationMetres, elevationMetres);
-                    Vector3 surface = SurfacePoint(x, z);
-                    float relief = Mathf.Max(0, elevationMetres) * metresToWorld;
-                    vertices[index] = surface + SurfaceNormal(surface) * (GeographicLandSurfaceY + .012f + relief);
+                    vertices[index] = ElevationTerrainPoint(elevation, sourceColumn, sourceRow, projectionBounds, projectionWest, projectionEast, projectionSouth, projectionNorth, metresToWorld);
                     uvs[index] = new Vector2((float)((longitude - elevation.West) / (elevation.East - elevation.West)), (float)((latitude - elevation.South) / (elevation.North - elevation.South)));
                 }
             }
@@ -844,9 +879,76 @@ namespace SeaOfUncertainty.Prototype
             if (triangles.Count == 0) return null;
             var mesh = new Mesh { name = "NOAA ETOPO Geographic Terrain Tile", vertices = vertices, uv = uvs, triangles = triangles.ToArray() };
             mesh.RecalculateNormals();
+            Vector3[] normals = mesh.normals;
+            for (int localRow = 0; localRow <= rows; localRow++)
+            {
+                for (int localColumn = 0; localColumn <= columns; localColumn++)
+                {
+                    if (localColumn != 0 && localColumn != columns && localRow != 0 && localRow != rows) continue;
+                    int index = localRow * vertexColumns + localColumn;
+                    normals[index] = SharedTerrainFaceNormal(elevation, columnStart + localColumn, rowStart + localRow,
+                        projectionBounds, projectionWest, projectionEast, projectionSouth, projectionNorth, metresToWorld, vertices[index]);
+                }
+            }
+            mesh.normals = normals;
             mesh.RecalculateTangents();
             mesh.RecalculateBounds();
+            TerrainTileEdgesUseSharedFaceNormals = true;
             return mesh;
+        }
+
+        private Vector3 SharedTerrainFaceNormal(GeographicElevationGrid elevation, int targetColumn, int targetRow, Rect projectionBounds,
+            double projectionWest, double projectionEast, double projectionSouth, double projectionNorth, float metresToWorld, Vector3 targetPoint)
+        {
+            Vector3 normalSum = Vector3.zero;
+            for (int cellRow = targetRow - 1; cellRow <= targetRow; cellRow++)
+            {
+                if (cellRow < 0 || cellRow >= elevation.Height - 1) continue;
+                for (int cellColumn = targetColumn - 1; cellColumn <= targetColumn; cellColumn++)
+                {
+                    if (cellColumn < 0 || cellColumn >= elevation.Width - 1) continue;
+                    bool landA = elevation.ElevationMetres(cellColumn, cellRow) > 0;
+                    bool landB = elevation.ElevationMetres(cellColumn + 1, cellRow) > 0;
+                    bool landC = elevation.ElevationMetres(cellColumn, cellRow + 1) > 0;
+                    bool landD = elevation.ElevationMetres(cellColumn + 1, cellRow + 1) > 0;
+                    Vector3 a = ElevationTerrainPoint(elevation, cellColumn, cellRow, projectionBounds, projectionWest, projectionEast, projectionSouth, projectionNorth, metresToWorld);
+                    Vector3 b = ElevationTerrainPoint(elevation, cellColumn + 1, cellRow, projectionBounds, projectionWest, projectionEast, projectionSouth, projectionNorth, metresToWorld);
+                    Vector3 c = ElevationTerrainPoint(elevation, cellColumn, cellRow + 1, projectionBounds, projectionWest, projectionEast, projectionSouth, projectionNorth, metresToWorld);
+                    Vector3 d = ElevationTerrainPoint(elevation, cellColumn + 1, cellRow + 1, projectionBounds, projectionWest, projectionEast, projectionSouth, projectionNorth, metresToWorld);
+                    if (landA && landC && landD && IsTriangleVertex(targetColumn, targetRow, cellColumn, cellRow, true)) normalSum += Vector3.Cross(c - a, d - a);
+                    if (landA && landD && landB && IsTriangleVertex(targetColumn, targetRow, cellColumn, cellRow, false)) normalSum += Vector3.Cross(d - a, b - a);
+                }
+            }
+            Vector3 outward = SurfaceNormal(targetPoint);
+            if (normalSum.sqrMagnitude < .000001f) return outward;
+            Vector3 normal = normalSum.normalized;
+            return Vector3.Dot(normal, outward) < 0f ? -normal : normal;
+        }
+
+        private static bool IsTriangleVertex(int targetColumn, int targetRow, int cellColumn, int cellRow, bool firstTriangle)
+        {
+            bool a = targetColumn == cellColumn && targetRow == cellRow;
+            bool d = targetColumn == cellColumn + 1 && targetRow == cellRow + 1;
+            if (a || d) return true;
+            return firstTriangle
+                ? targetColumn == cellColumn && targetRow == cellRow + 1
+                : targetColumn == cellColumn + 1 && targetRow == cellRow;
+        }
+
+        private Vector3 ElevationTerrainPoint(GeographicElevationGrid elevation, int column, int row, Rect projectionBounds,
+            double projectionWest, double projectionEast, double projectionSouth, double projectionNorth, float metresToWorld)
+        {
+            column = Mathf.Clamp(column, 0, elevation.Width - 1);
+            row = Mathf.Clamp(row, 0, elevation.Height - 1);
+            double longitude = elevation.Longitude(column);
+            double latitude = elevation.Latitude(row);
+            float normalizedX = (float)((longitude - projectionWest) / (projectionEast - projectionWest));
+            float normalizedZ = (float)((latitude - projectionSouth) / (projectionNorth - projectionSouth));
+            float x = Mathf.LerpUnclamped(projectionBounds.xMin, projectionBounds.xMax, normalizedX);
+            float z = Mathf.LerpUnclamped(projectionBounds.yMin, projectionBounds.yMax, normalizedZ);
+            Vector3 surface = SurfacePoint(x, z);
+            float relief = Mathf.Max(0, elevation.ElevationMetres(column, row)) * metresToWorld;
+            return surface + SurfaceNormal(surface) * (GeographicLandSurfaceY + .012f + relief);
         }
 
         private bool BuildPolygonCoastline(Vector3 first, Vector3 last)
@@ -1090,7 +1192,10 @@ namespace SeaOfUncertainty.Prototype
             VisibleFormationCount = 0;
             VisibleContactCount = 0;
             PersistentWakeCount = 0;
+            ActiveSurfaceWakeCount = 0;
             AircraftContrailCount = 0;
+            AircraftContrailsUseVaporTreatment = true;
+            AircraftContrailsAreAltitudeCued = true;
             PersistentTrailsUseFormationSpace = true;
             if (game?.Active == null) return;
             Side viewer = game.Active.Side;
@@ -1152,7 +1257,12 @@ namespace SeaOfUncertainty.Prototype
             Quaternion targetRotation = Quaternion.LookRotation(travelDirection.sqrMagnitude > .0001f ? travelDirection.normalized : restingForward.normalized, surfaceUp);
             marker.transform.position = reducedMotion ? destination : start;
             marker.transform.rotation = reducedMotion || !hasPresentedRotation ? targetRotation : previousRotation;
-            if (start != destination) motions.Add(new Motion { Transform = marker.transform, Start = start, End = destination, StartRotation = previousRotation, EndRotation = targetRotation, SurfaceOffset = markerHeight });
+            Motion formationMotion = null;
+            if (start != destination)
+            {
+                formationMotion = new Motion { Transform = marker.transform, Start = start, End = destination, StartRotation = previousRotation, EndRotation = targetRotation, SurfaceOffset = markerHeight };
+                motions.Add(formationMotion);
+            }
             presentedPositions[formation.Id] = formation.Position;
             presentedRotations[formation.Id] = targetRotation;
             Material material = formation.Side == Side.Blue ? blueMaterial : redMaterial;
@@ -1166,7 +1276,8 @@ namespace SeaOfUncertainty.Prototype
                 case FormationKind.LogisticsGroup: BuildLogisticsGroup(detail.transform, material); break;
             }
             AddRecognitionMarking(detail.transform, formation.Kind, material);
-            AddPersistentWake(marker.transform, formation.Kind);
+            List<WakeTrail> movementWakes = AddPersistentWake(marker.transform, formation.Kind, formationMotion != null && !reducedMotion);
+            if (formationMotion != null) formationMotion.SurfaceWakes = movementWakes;
             PrimitiveType symbolType = formation.Kind == FormationKind.Submarine ? PrimitiveType.Sphere : formation.Kind == FormationKind.AirGroup ? PrimitiveType.Cylinder : PrimitiveType.Cube;
             GameObject symbol = Primitive(symbolType, formation.Kind + " Distant Operational Symbol", marker.transform, material);
             symbol.transform.localScale = formation.Kind == FormationKind.CarrierGroup ? new Vector3(.24f, .025f, .42f)
@@ -1206,35 +1317,55 @@ namespace SeaOfUncertainty.Prototype
                 : kind == FormationKind.AirGroup ? new Vector3(.52f, .008f, .035f) : new Vector3(.24f, .008f, .30f);
         }
 
-        private void AddPersistentWake(Transform parent, FormationKind kind)
+        private List<WakeTrail> AddPersistentWake(Transform parent, FormationKind kind, bool isMoving)
         {
-            if (kind == FormationKind.Submarine) return;
+            if (kind == FormationKind.Submarine) return null;
             if (kind == FormationKind.AirGroup)
             {
                 for (int side = -1; side <= 1; side += 2)
                 {
-                    Vector3 start = new Vector3(side * .055f, -.08f, -.38f);
-                    Vector3 end = new Vector3(side * .055f, -.08f, -1.22f);
-                    LineRenderer contrail = LocalTrail(parent, "Persistent Aircraft Contrail", start, end,
-                        new Color(.9f, .97f, 1f, .68f), new Color(.72f, .9f, 1f, .06f), .018f, .07f, lineMaterial);
+                    Vector3[] points =
+                    {
+                        new Vector3(side * .055f, -.045f, -.39f),
+                        new Vector3(side * .056f, -.044f, -.62f),
+                        new Vector3(side * .060f, -.040f, -.91f),
+                        new Vector3(side * .068f, -.034f, -1.24f),
+                        new Vector3(side * .078f, -.026f, -1.52f)
+                    };
+                    LineRenderer contrail = LocalContrailTrail(parent, "Aircraft High-Altitude Vapor Contrail", points, foamMaterial);
                     PersistentTrailsUseFormationSpace &= !contrail.useWorldSpace;
+                    AircraftContrailsUseVaporTreatment &= contrail.sharedMaterial == foamMaterial && contrail.widthCurve.length >= 4;
+                    AircraftContrailsAreAltitudeCued &= parent.position.y > WaterSurfaceY + .8f;
                     PersistentWakeCount++;
                     AircraftContrailCount++;
                 }
-                return;
+                return null;
             }
+            if (!isMoving) return null;
 
-            float length = kind == FormationKind.CarrierGroup ? .92f : kind == FormationKind.LogisticsGroup ? .78f : .72f;
-            float spread = kind == FormationKind.CarrierGroup ? .22f : .13f;
+            float sternZ = kind == FormationKind.CarrierGroup ? -.54f : kind == FormationKind.LogisticsGroup ? -.36f : -.41f;
+            float sternHalfWidth = kind == FormationKind.CarrierGroup ? .095f : kind == FormationKind.LogisticsGroup ? .075f : .06f;
+            float length = kind == FormationKind.CarrierGroup ? 1.38f : kind == FormationKind.LogisticsGroup ? 1.08f : .96f;
+            float spread = kind == FormationKind.CarrierGroup ? .40f : kind == FormationKind.LogisticsGroup ? .28f : .23f;
+            Color sternColor = new Color(.84f, .98f, .97f, .62f);
+            Color tailColor = new Color(.58f, .84f, .88f, .025f);
+            var trails = new List<WakeTrail>(2);
             for (int side = -1; side <= 1; side += 2)
             {
-                Vector3 start = new Vector3(side * spread, .025f, -.22f);
-                Vector3 end = new Vector3(side * spread * 2.2f, .025f, -.22f - length);
-                LineRenderer wake = LocalTrail(parent, "Persistent Surface Wake", start, end,
-                    new Color(.76f, .96f, .96f, .52f), new Color(.62f, .88f, .9f, .05f), .035f, .085f, foamMaterial);
+                Vector3[] points =
+                {
+                    new Vector3(side * sternHalfWidth, .025f, sternZ),
+                    new Vector3(side * (sternHalfWidth + spread * .16f), .025f, sternZ - length * .18f),
+                    new Vector3(side * spread * .72f, .025f, sternZ - length * .58f),
+                    new Vector3(side * spread, .025f, sternZ - length)
+                };
+                LineRenderer wake = LocalWakeTrail(parent, "Movement Surface Wake", points, sternColor, tailColor, foamMaterial);
                 PersistentTrailsUseFormationSpace &= !wake.useWorldSpace;
                 PersistentWakeCount++;
+                ActiveSurfaceWakeCount++;
+                trails.Add(new WakeTrail { Renderer = wake, SternColor = sternColor, TailColor = tailColor });
             }
+            return trails;
         }
 
         private void BuildCarrierGroup(Transform parent, Material sideMaterial)
@@ -1471,20 +1602,53 @@ namespace SeaOfUncertainty.Prototype
             return line;
         }
 
-        private static LineRenderer LocalTrail(Transform parent, string name, Vector3 start, Vector3 end, Color startColor, Color endColor, float startWidth, float endWidth, Material material)
+        private static LineRenderer LocalWakeTrail(Transform parent, string name, Vector3[] positions, Color sternColor, Color tailColor, Material material)
         {
             GameObject lineObject = Child(name, parent);
             LineRenderer line = lineObject.AddComponent<LineRenderer>();
             line.sharedMaterial = material;
             line.useWorldSpace = false;
-            line.positionCount = 2;
-            line.SetPosition(0, start);
-            line.SetPosition(1, end);
-            line.startColor = startColor;
-            line.endColor = endColor;
-            line.startWidth = startWidth;
-            line.endWidth = endWidth;
+            line.positionCount = positions.Length;
+            line.SetPositions(positions);
+            line.startColor = sternColor;
+            line.endColor = tailColor;
+            line.widthCurve = new AnimationCurve(
+                new Keyframe(0f, .028f),
+                new Keyframe(.18f, .07f),
+                new Keyframe(.58f, .095f),
+                new Keyframe(1f, .006f));
+            line.widthMultiplier = 1f;
+            line.numCornerVertices = 2;
+            line.numCapVertices = 2;
             return line;
+        }
+
+        private static LineRenderer LocalContrailTrail(Transform parent, string name, Vector3[] positions, Material material)
+        {
+            GameObject lineObject = Child(name, parent);
+            LineRenderer line = lineObject.AddComponent<LineRenderer>();
+            line.sharedMaterial = material;
+            line.useWorldSpace = false;
+            line.positionCount = positions.Length;
+            line.SetPositions(positions);
+            line.startColor = new Color(.96f, 1f, 1f, .82f);
+            line.endColor = new Color(.60f, .88f, 1f, 0f);
+            line.widthCurve = new AnimationCurve(
+                new Keyframe(0f, .011f),
+                new Keyframe(.16f, .026f),
+                new Keyframe(.58f, .047f),
+                new Keyframe(1f, .004f));
+            line.widthMultiplier = 1f;
+            line.numCornerVertices = 3;
+            line.numCapVertices = 2;
+            line.textureMode = LineTextureMode.Stretch;
+            return line;
+        }
+
+        private static Color WithAlpha(Color color, float alpha)
+        {
+            color.a = alpha;
+            return color;
         }
 
         private void UpdateObjectiveControl()
@@ -1608,6 +1772,90 @@ namespace SeaOfUncertainty.Prototype
             generatedTextures.Add(texture);
             return texture;
         }
+
+        private Texture2D CreateElevationAwareTerrainTexture(GeographicElevationGrid elevation)
+        {
+            var texture = new Texture2D(elevation.Width, elevation.Height, TextureFormat.RGBA32, true)
+            {
+                name = "ETOPO Elevation and Slope Terrain Color",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 6
+            };
+            var colors = new Color[elevation.SampleCount];
+            var observedBands = new bool[4];
+            Color coastal = new Color(.205f, .285f, .145f, 1f);
+            Color lowland = new Color(.265f, .335f, .165f, 1f);
+            Color upland = new Color(.355f, .365f, .205f, 1f);
+            Color rock = new Color(.405f, .405f, .345f, 1f);
+            Color steepRock = new Color(.315f, .325f, .295f, 1f);
+            Vector3 lightToSun = new Vector3(.62f, .68f, .39f).normalized;
+            float latitudeSpacingMetres = Mathf.Max(1f, (float)((elevation.North - elevation.South) / (elevation.Height - 1) * 111320d));
+            float minimumLuminance = float.MaxValue;
+            float maximumLuminance = float.MinValue;
+            int shadedSamples = 0;
+
+            for (int row = 0; row < elevation.Height; row++)
+            {
+                float latitudeRadians = (float)(elevation.Latitude(row) * Math.PI / 180d);
+                float longitudeSpacingMetres = Mathf.Max(1f, (float)((elevation.East - elevation.West) / (elevation.Width - 1) * 111320d * Math.Cos(latitudeRadians)));
+                for (int column = 0; column < elevation.Width; column++)
+                {
+                    float height = Mathf.Max(0f, elevation.ElevationMetres(column, row));
+                    int index = row * elevation.Width + column;
+                    if (height <= 0f)
+                    {
+                        colors[index] = coastal;
+                        continue;
+                    }
+
+                    float west = LandNeighborElevation(elevation, column - 1, row, height);
+                    float east = LandNeighborElevation(elevation, column + 1, row, height);
+                    float south = LandNeighborElevation(elevation, column, row - 1, height);
+                    float north = LandNeighborElevation(elevation, column, row + 1, height);
+                    float eastGradient = (east - west) / (2f * longitudeSpacingMetres);
+                    float northGradient = (north - south) / (2f * latitudeSpacingMetres);
+                    float slopeDegrees = Mathf.Atan(Mathf.Sqrt(eastGradient * eastGradient + northGradient * northGradient)) * Mathf.Rad2Deg;
+
+                    Color terrainColor = Color.Lerp(lowland, upland, Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(120f, 1100f, height)));
+                    terrainColor = Color.Lerp(terrainColor, rock, Mathf.SmoothStep(0f, .86f, Mathf.InverseLerp(1450f, 3100f, height)));
+                    float steepness = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(17f, 38f, slopeDegrees));
+                    terrainColor = Color.Lerp(terrainColor, steepRock, steepness * .44f);
+
+                    Vector3 terrainNormal = new Vector3(-eastGradient, 1f, -northGradient).normalized;
+                    float directionalShade = Mathf.Lerp(.88f, 1.08f, Mathf.Clamp01(Vector3.Dot(terrainNormal, lightToSun)));
+                    float broadVariation = Mathf.PerlinNoise(column * .037f + 19.2f, row * .037f + 7.4f) - .5f;
+                    float fineVariation = Mathf.PerlinNoise(column * .12f + 41.7f, row * .12f + 28.1f) - .5f;
+                    float variation = 1f + broadVariation * .07f + fineVariation * .025f;
+                    terrainColor = MultiplyRgb(terrainColor, directionalShade * variation);
+                    colors[index] = terrainColor;
+
+                    observedBands[height < 250f ? 0 : height < 1000f ? 1 : height < 2200f ? 2 : 3] = true;
+                    if (slopeDegrees > 3f) shadedSamples++;
+                    float luminance = terrainColor.r * .2126f + terrainColor.g * .7152f + terrainColor.b * .0722f;
+                    minimumLuminance = Mathf.Min(minimumLuminance, luminance);
+                    maximumLuminance = Mathf.Max(maximumLuminance, luminance);
+                }
+            }
+
+            texture.SetPixels(colors);
+            texture.Apply(true, false);
+            generatedTextures.Add(texture);
+            TerrainColorBandCount = observedBands.Count(observed => observed);
+            TerrainColorLuminanceRange = maximumLuminance > minimumLuminance ? maximumLuminance - minimumLuminance : 0f;
+            UsesTerrainSlopeShading = shadedSamples > 0;
+            UsesElevationAwareTerrainColor = TerrainColorBandCount >= 3 && UsesTerrainSlopeShading;
+            return texture;
+        }
+
+        private static float LandNeighborElevation(GeographicElevationGrid elevation, int column, int row, float fallback)
+        {
+            float sample = elevation.ElevationMetres(column, row);
+            return sample > 0f ? sample : fallback;
+        }
+
+        private static Color MultiplyRgb(Color color, float multiplier)
+            => new Color(Mathf.Clamp01(color.r * multiplier), Mathf.Clamp01(color.g * multiplier), Mathf.Clamp01(color.b * multiplier), color.a);
 
         private Texture2D CreateOceanSurfaceTexture(string name, int size)
         {
