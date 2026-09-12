@@ -673,27 +673,42 @@ namespace SeaOfUncertainty.Editor
             using (var luzonMap = new OperationalMap3D(luzon.Area, 480, 270))
             {
                 Assert(luzonMap.CoastlinePolygonCount >= 50, "Luzon renderer uses the local Natural Earth polygon coastline library");
+                Assert(luzonMap.CoastlineSurfaceVertexCount >= 1000, "Curved land surfaces are tessellated densely enough to follow the globe without ocean cut-through");
+                Assert(luzonMap.CoastlineMaximumTriangleEdge <= 1.26f, "Curved land triangles remain below the globe-safe maximum span");
                 Assert(luzonMap.OffMapCoastlineVertexCount >= 100, "Authentic Natural Earth land geometry continues beyond the playable projection to the table boundary");
                 Assert(luzonMap.HasDirectionalSun, "3D theater has a directional maritime sun");
                 Assert(Mathf.Approximately(luzonMap.SunSourceAzimuthDegrees, 67.5f), "Maritime sun illuminates the theater from east-northeast");
                 Assert(luzonMap.UsesProceduralSurfaceTextures, "Land, littoral, and ocean use procedural surface textures");
                 Assert(luzonMap.WaterSurfaceVertexCount >= 4000, "Ocean surface has enough geometry for restrained wave relief");
-                Assert(luzonMap.TerrainReliefCount >= 2, "Major polygon land masses receive coastline-aligned dimensional relief");
+                Assert(luzonMap.UsesGeographicElevation, "Geographic theaters render measured elevation instead of procedural landmass ridges");
+                Assert(luzonMap.ElevationSampleCount == 72800 && luzonMap.TerrainMeshTileCount >= 4, "Luzon terrain uses the complete tiled two-arc-minute ETOPO subset");
+                Assert(luzonMap.MaximumTerrainElevationMetres >= 2500, "Measured terrain preserves the theater's major mountain elevations");
+                Assert(Mathf.Approximately(luzonMap.TerrainVerticalExaggeration, 4f), "Operational-scale terrain uses the configured restrained vertical exaggeration");
                 Assert(luzonMap.HasShallowWaterDetail && luzonMap.HasCoastalFoam && luzonMap.HasCoastlineDrivenShelf, "Coastline-driven shelves, bathymetric contours, and coastal foam enrich the sea-land transition");
+                Assert(luzonMap.UsesGeographicBathymetry, "Geographic ocean coloration is driven by measured ETOPO seafloor depth");
+                Assert(luzonMap.HasOceanCurrentBands && luzonMap.OceanColorLuminanceRange > .08f, "Ocean texture combines readable broad color variation with restrained current bands");
                 Assert(luzonMap.HasAtmosphericHaze && luzonMap.CloudShadowCount >= 2 && luzonMap.WeatherPreset == "Haze", "Data-driven haze and moving cloud-shadow layers establish maritime atmosphere");
                 Assert(luzonMap.GeographicLabelCount == luzon.Area.Locations.Count, "Ports, airfields, straits, and objectives receive map-space geographic labels");
                 float renderLuminance = luzonMap.ProbeRenderLuminance();
                 Assert(renderLuminance > .01f && renderLuminance < .95f, "The integrated ocean, terrain, atmosphere, and label camera produces a valid non-black render");
                 Vector3 edge = luzonMap.HexToWorld(new HexCoord(23, 19));
                 Assert(edge.x > 0f && edge.z > 0f, "Floating-origin world coordinates center the theater");
+                Assert(luzonMap.UsesEarthCurvature && luzonMap.EarthCurvatureRadiusWorld > 250f && luzonMap.EarthCurvatureRadiusWorld < 350f, "Operational theater uses the physical Earth radius at the scenario's 20-NM hex scale");
+                Assert(luzonMap.TheaterEdgeDrop > .35f, "Large operational areas visibly fall away from the local tangent plane toward the horizon");
+                Assert(luzonMap.UsesTraditionalFlatTopHexes, "Operational grid uses traditional flat-top hex geometry aligned with its column spacing");
                 Assert(luzonMap.TryWorldToHex(luzonMap.HexToWorld(new HexCoord(11, 9)), out HexCoord roundTrip) && roundTrip.Equals(new HexCoord(11, 9)), "Hex/world conversion round trip");
                 Assert(luzonMap.TryWorldToHex(luzonMap.HexToWorld(new HexCoord(23, 19)), out HexCoord edgeRoundTrip) && edgeRoundTrip.Equals(new HexCoord(23, 19)), "Edge hex selection round trip");
+                var pickRect = new Rect(0f, 0f, 480f, 270f);
+                Vector2 objectiveScreen = luzonMap.Project(luzon.Area.Objective, pickRect);
+                Assert(luzonMap.TryPickHex(objectiveScreen, pickRect, out HexCoord curvedPick) && curvedPick.Equals(luzon.Area.Objective), "Screen picking intersects the curved globe surface at the projected objective");
                 luzonMap.Pan(new Vector2(100000f, -100000f));
                 Assert(luzonMap.FocusWithinBounds, "Camera pan remains inside theater bounds");
             }
             using (var operationalMap = new OperationalMap3D(game.Area, 320, 180))
             {
-                float adjacentWorldDistance = Vector3.Distance(operationalMap.HexToWorld(new HexCoord(0, 0)), operationalMap.HexToWorld(new HexCoord(0, 1)));
+                Vector3 adjacentA = operationalMap.HexToWorld(new HexCoord(0, 0));
+                Vector3 adjacentB = operationalMap.HexToWorld(new HexCoord(0, 1));
+                float adjacentWorldDistance = Vector2.Distance(new Vector2(adjacentA.x, adjacentA.z), new Vector2(adjacentB.x, adjacentB.z));
                 Assert(Mathf.Approximately(adjacentWorldDistance, Mathf.Sqrt(3f)), "3D world coordinates preserve adjacent hex spacing");
                 operationalMap.SetState(game, ToolkitActionMode.Move, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
                 operationalMap.SetHoverHex(new HexCoord(2, 3));

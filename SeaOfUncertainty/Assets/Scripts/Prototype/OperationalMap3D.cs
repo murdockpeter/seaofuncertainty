@@ -14,6 +14,7 @@ namespace SeaOfUncertainty.Prototype
     {
         private const int MapLayer = 30;
         private const float HexRadius = 1f;
+        private const float EarthRadiusNauticalMiles = 3440.065f;
         private const float WaterSurfaceY = -.08f;
         private const float GeographicLandSurfaceY = -.05f;
         private const float ShoalSurfaceY = .015f;
@@ -81,6 +82,7 @@ namespace SeaOfUncertainty.Prototype
         private Transform waterSurfaceTransform;
         private Transform cloudShadowRoot;
         private Transform sunTransform;
+        private GeographicElevationGrid geographicElevation;
         private readonly List<Transform> billboardLabels = new List<Transform>();
         private Vector3 cameraPanVelocity;
         private float cameraYawVelocity;
@@ -89,9 +91,17 @@ namespace SeaOfUncertainty.Prototype
         private CameraPose savedCameraPose;
         private bool hasSavedCameraPose;
 
-        private sealed class Motion { public Transform Transform; public Vector3 Start; public Vector3 End; public Quaternion StartRotation; public Quaternion EndRotation; public float Progress; }
+        private sealed class Motion { public Transform Transform; public Vector3 Start; public Vector3 End; public Quaternion StartRotation; public Quaternion EndRotation; public float SurfaceOffset; public float Progress; }
         private sealed class LodPair { public GameObject Detail; public GameObject Symbol; }
         private sealed class EffectInstance { public OperationalEffectKind Kind; public GameObject Object; public Vector3 BaseScale; public Vector3 Start; public float Age; public float Duration; }
+        private struct MeshTriangle
+        {
+            public int A;
+            public int B;
+            public int C;
+            public int Depth;
+            public MeshTriangle(int a, int b, int c, int depth) { A = a; B = b; C = c; Depth = depth; }
+        }
         private struct CameraPose { public Vector3 Focus; public float Yaw; public float Pitch; public float Distance; }
 
         public RenderTexture Texture => targetTexture;
@@ -104,8 +114,18 @@ namespace SeaOfUncertainty.Prototype
         public int PooledEffectCount => effectPools.Values.Sum(pool => pool.Count);
         public int PooledMarkerCount => markerPool.Count;
         public int CoastlinePolygonCount { get; private set; }
+        public int CoastlineSurfaceVertexCount { get; private set; }
+        public float CoastlineMaximumTriangleEdge { get; private set; }
         public int OffMapCoastlineVertexCount { get; private set; }
         public int TerrainReliefCount { get; private set; }
+        public int ElevationSampleCount { get; private set; }
+        public int TerrainMeshTileCount { get; private set; }
+        public int MaximumTerrainElevationMetres { get; private set; }
+        public bool UsesGeographicElevation { get; private set; }
+        public float TerrainVerticalExaggeration => Mathf.Max(1f, area.Presentation.ElevationExaggeration);
+        public bool UsesGeographicBathymetry { get; private set; }
+        public bool HasOceanCurrentBands { get; private set; }
+        public float OceanColorLuminanceRange { get; private set; }
         public int WaterSurfaceVertexCount { get; private set; }
         public bool HasDirectionalSun { get; private set; }
         public float SunSourceAzimuthDegrees { get; private set; }
@@ -124,7 +144,19 @@ namespace SeaOfUncertainty.Prototype
         public bool CameraIsSettling => cameraPanVelocity.sqrMagnitude > .0001f || Mathf.Abs(cameraYawVelocity) > .01f || Mathf.Abs(cameraPitchVelocity) > .01f || Mathf.Abs(cameraZoomVelocity) > .01f;
         public bool UsesProceduralSurfaceTextures => generatedTextures.Count >= 3;
         public bool PermanentGridVisible => hexLines.Any(pair => pair.Value != null && pair.Value.enabled && !pair.Key.Equals(area.Objective));
+        public bool UsesTraditionalFlatTopHexes => true;
         public bool HasActiveFormationPulse => activeFormationRing != null;
+        public bool UsesEarthCurvature => true;
+        public float EarthCurvatureRadiusWorld => CurvatureRadiusWorld;
+        public float TheaterEdgeDrop
+        {
+            get
+            {
+                Vector3 first = HexToWorld(new HexCoord(0, 0));
+                Vector3 last = HexToWorld(new HexCoord(area.Width - 1, area.Height - 1));
+                return Mathf.Max(-first.y, -last.y);
+            }
+        }
         public bool ContainsRenderedName(string fragment)
         {
             if (string.IsNullOrEmpty(fragment)) return false;
@@ -196,7 +228,7 @@ namespace SeaOfUncertainty.Prototype
             }
             Vector3 first = HexToWorld(new HexCoord(0, 0));
             Vector3 last = HexToWorld(new HexCoord(area.Width - 1, area.Height - 1));
-            focus = (first + last) * .5f;
+            focus = SurfacePoint((first.x + last.x) * .5f, (first.z + last.z) * .5f);
             pitch = area.Presentation.CameraPitch;
             yaw = area.Presentation.CameraYaw;
             distance = Mathf.Max(area.Width, area.Height) * area.Presentation.CameraZoomMultiplier;
@@ -299,7 +331,8 @@ namespace SeaOfUncertainty.Prototype
                 if (motion.Transform == null) { motions.RemoveAt(i); continue; }
                 motion.Progress = reducedMotion ? 1f : Mathf.Clamp01(motion.Progress + deltaTime * 2.5f);
                 float eased = motion.Progress * motion.Progress * (3f - 2f * motion.Progress);
-                motion.Transform.position = Vector3.Lerp(motion.Start, motion.End, eased);
+                Vector3 chord = Vector3.Lerp(motion.Start, motion.End, eased);
+                motion.Transform.position = SurfacePoint(chord.x, chord.z) + Vector3.up * motion.SurfaceOffset;
                 motion.Transform.rotation = Quaternion.Slerp(motion.StartRotation, motion.EndRotation, eased);
                 if (motion.Progress >= 1f) motions.RemoveAt(i);
             }
@@ -429,8 +462,29 @@ namespace SeaOfUncertainty.Prototype
             float lastZ = (area.Height - 1 + ((area.Width - 1) & 1) * .5f) * HexRadius * Mathf.Sqrt(3f);
             float x = rawX - lastX * .5f;
             float z = rawZ - lastZ * .5f;
-            return new Vector3(x, 0f, z);
+            return SurfacePoint(x, z);
         }
+
+        private float CurvatureRadiusWorld
+            => EarthRadiusNauticalMiles * (Mathf.Sqrt(3f) * HexRadius / Mathf.Max(1f, area.NauticalMilesPerHex));
+
+        private float CurvatureHeight(float x, float z)
+        {
+            float radius = CurvatureRadiusWorld;
+            float radialSquared = x * x + z * z;
+            return Mathf.Sqrt(Mathf.Max(.001f, radius * radius - radialSquared)) - radius;
+        }
+
+        private Vector3 SurfacePoint(float x, float z, float normalOffset = 0f)
+        {
+            float y = CurvatureHeight(x, z);
+            Vector3 point = new Vector3(x, y, z);
+            if (Mathf.Abs(normalOffset) < .0001f) return point;
+            return point + SurfaceNormal(point) * normalOffset;
+        }
+
+        private Vector3 SurfaceNormal(Vector3 surfacePoint)
+            => new Vector3(surfacePoint.x, surfacePoint.y + CurvatureRadiusWorld, surfacePoint.z).normalized;
 
         public bool TryPickHex(Vector2 localPosition, Rect contentRect, out HexCoord hex)
         {
@@ -438,8 +492,15 @@ namespace SeaOfUncertainty.Prototype
             if (contentRect.width < 1f || contentRect.height < 1f) return false;
             Vector3 viewport = new Vector3(localPosition.x / contentRect.width, 1f - localPosition.y / contentRect.height, 0f);
             Ray ray = camera.ViewportPointToRay(viewport);
-            var plane = new Plane(Vector3.up, Vector3.zero);
-            if (!plane.Raycast(ray, out float enter)) return false;
+            Vector3 sphereCenter = new Vector3(0f, -CurvatureRadiusWorld, 0f);
+            Vector3 originToCenter = ray.origin - sphereCenter;
+            float projected = Vector3.Dot(originToCenter, ray.direction);
+            float discriminant = projected * projected - (originToCenter.sqrMagnitude - CurvatureRadiusWorld * CurvatureRadiusWorld);
+            if (discriminant < 0f) return false;
+            float root = Mathf.Sqrt(discriminant);
+            float enter = -projected - root;
+            if (enter < 0f) enter = -projected + root;
+            if (enter < 0f) return false;
             Vector3 point = ray.GetPoint(enter);
             float nearest = float.MaxValue;
             for (int q = 0; q < area.Width; q++)
@@ -585,12 +646,13 @@ namespace SeaOfUncertainty.Prototype
         {
             Vector3 first = HexToWorld(new HexCoord(0, 0));
             Vector3 last = HexToWorld(new HexCoord(area.Width - 1, area.Height - 1));
-            Vector3 center = (first + last) * .5f;
-            GameObject water = Primitive(PrimitiveType.Cube, "Deep Operational Water", root.transform, waterMaterial);
-            water.transform.position = center + Vector3.up * (WaterSurfaceY - .30f);
-            water.transform.localScale = new Vector3(last.x - first.x + 3.2f, .48f, last.z - first.z + 3.2f);
+            Vector3 center = SurfacePoint((first.x + last.x) * .5f, (first.z + last.z) * .5f);
             float waterWidth = last.x - first.x + 12f;
             float waterDepth = last.z - first.z + 12f;
+            float lowestOcean = CurvatureHeight(waterWidth * .5f, waterDepth * .5f) + WaterSurfaceY;
+            GameObject water = Primitive(PrimitiveType.Cube, "Deep Operational Water", root.transform, waterMaterial);
+            water.transform.position = new Vector3(center.x, lowestOcean - .54f, center.z);
+            water.transform.localScale = new Vector3(waterWidth, 1f, waterDepth);
             Mesh waterSurfaceMesh = CreateWaterSurfaceMesh(waterWidth, waterDepth, 72, 56);
             WaterSurfaceVertexCount = waterSurfaceMesh.vertexCount;
             GameObject waterSurface = MeshObject("Sunlit Ocean Surface", root.transform, waterMaterial, waterSurfaceMesh);
@@ -654,12 +716,15 @@ namespace SeaOfUncertainty.Prototype
                 float polygonWidth = maxX - minX, polygonDepth = maxZ - minZ;
                 if (polygonWidth < 1.8f || polygonDepth < 1.8f) continue;
                 Vector3 center = shoreline.Aggregate(Vector3.zero, (sum, point) => sum + point) / shoreline.Length;
-                float width = Mathf.Clamp(polygonWidth * .42f, .9f, 3.2f);
-                float depth = Mathf.Clamp(polygonDepth * .42f, .9f, 3.2f);
-                float height = Mathf.Clamp(Mathf.Min(width, depth) * .13f, .14f, .34f);
+                float reliefScale = .58f;
+                float largestReliefSpan = Mathf.Max(polygonWidth, polygonDepth) * reliefScale;
+                if (largestReliefSpan > 5.8f) reliefScale *= 5.8f / largestReliefSpan;
+                float width = Mathf.Max(.9f, polygonWidth * reliefScale);
+                float depth = Mathf.Max(.9f, polygonDepth * reliefScale);
+                float height = Mathf.Clamp(Mathf.Min(width, depth) * .095f, .11f, .32f);
                 int seed = shoreline.Length * 397 ^ Mathf.RoundToInt(center.x * 100f) ^ Mathf.RoundToInt(center.z * 100f);
                 GameObject ridge = MeshObject("Major Landmass Ridge", reliefRoot.transform, highlandMaterial, CreateTerrainRidgeMesh(width, depth, height, seed));
-                ridge.transform.position = new Vector3(center.x, GeographicLandSurfaceY, center.z);
+                ridge.transform.position = new Vector3(center.x, center.y, center.z);
                 ridge.transform.rotation = Quaternion.Euler(0f, Mathf.Atan2(polygonWidth, polygonDepth) * Mathf.Rad2Deg * .18f, 0f);
                 Renderer renderer = ridge.GetComponent<Renderer>();
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
@@ -669,7 +734,9 @@ namespace SeaOfUncertainty.Prototype
                 {
                     float side = shoulderIndex == 0 ? -1f : 1f;
                     GameObject shoulder = MeshObject("Terrain Shoulder", reliefRoot.transform, shoulderIndex == 0 ? landMaterial : highlandMaterial, CreateTerrainRidgeMesh(width * .54f, depth * .48f, height * .56f, seed + 97 + shoulderIndex * 131));
-                    shoulder.transform.position = new Vector3(center.x + side * width * .18f, GeographicLandSurfaceY, center.z + side * depth * .12f);
+                    float shoulderX = center.x + side * width * .18f;
+                    float shoulderZ = center.z + side * depth * .12f;
+                    shoulder.transform.position = new Vector3(shoulderX, CurvatureHeight(shoulderX, shoulderZ) + GeographicLandSurfaceY, shoulderZ);
                     shoulder.transform.rotation = Quaternion.Euler(0f, side * 17f, 0f);
                     Renderer shoulderRenderer = shoulder.GetComponent<Renderer>();
                     shoulderRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
@@ -677,6 +744,109 @@ namespace SeaOfUncertainty.Prototype
                     TerrainReliefCount++;
                 }
             }
+        }
+
+        private bool BuildGeographicElevationTerrain(CoastlineData coastline, Rect projectionBounds)
+        {
+            string resourceName = area.Presentation == null ? null : area.Presentation.ElevationResource;
+            if (string.IsNullOrWhiteSpace(resourceName)) return false;
+            if (!TryGetGeographicElevation(out GeographicElevationGrid elevation, out string error))
+            {
+                Debug.LogWarning($"Could not load geographic elevation for {area.DisplayName}: {error}");
+                return false;
+            }
+
+            double projectionWest = coastline.projectionEast > coastline.projectionWest ? coastline.projectionWest : coastline.west;
+            double projectionEast = coastline.projectionEast > coastline.projectionWest ? coastline.projectionEast : coastline.east;
+            double projectionSouth = coastline.projectionNorth > coastline.projectionSouth ? coastline.projectionSouth : coastline.south;
+            double projectionNorth = coastline.projectionNorth > coastline.projectionSouth ? coastline.projectionNorth : coastline.north;
+            GameObject terrainRoot = Child("ETOPO 2022 Geographic Terrain", root.transform);
+            const int tileCells = 48;
+            for (int row = 0; row < elevation.Height - 1; row += tileCells)
+            {
+                int rowEnd = Mathf.Min(row + tileCells, elevation.Height - 1);
+                for (int column = 0; column < elevation.Width - 1; column += tileCells)
+                {
+                    int columnEnd = Mathf.Min(column + tileCells, elevation.Width - 1);
+                    Mesh tile = CreateElevationTerrainTile(elevation, column, columnEnd, row, rowEnd, projectionBounds, projectionWest, projectionEast, projectionSouth, projectionNorth);
+                    if (tile == null) continue;
+                    GameObject terrain = MeshObject($"ETOPO Terrain {column / tileCells}-{row / tileCells}", terrainRoot.transform, highlandMaterial, tile);
+                    Renderer renderer = terrain.GetComponent<Renderer>();
+                    renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+                    renderer.receiveShadows = true;
+                    TerrainMeshTileCount++;
+                    TerrainReliefCount++;
+                }
+            }
+            ElevationSampleCount = elevation.SampleCount;
+            UsesGeographicElevation = TerrainMeshTileCount > 0;
+            if (UsesGeographicElevation)
+                Debug.Log($"Rendered {ElevationSampleCount} NOAA ETOPO elevation samples as {TerrainMeshTileCount} curved terrain tiles for {area.DisplayName}; maximum land elevation {MaximumTerrainElevationMetres} m at {TerrainVerticalExaggeration:0.#}x vertical exaggeration.");
+            return UsesGeographicElevation;
+        }
+
+        private bool TryGetGeographicElevation(out GeographicElevationGrid elevation, out string error)
+        {
+            if (geographicElevation != null) { elevation = geographicElevation; error = null; return true; }
+            string resourceName = area.Presentation == null ? null : area.Presentation.ElevationResource;
+            if (string.IsNullOrWhiteSpace(resourceName)) { elevation = null; error = "No elevation resource is configured."; return false; }
+            TextAsset source = Resources.Load<TextAsset>(resourceName);
+            if (!GeographicElevationGrid.TryLoad(source, out elevation, out error)) return false;
+            geographicElevation = elevation;
+            return true;
+        }
+
+        private Mesh CreateElevationTerrainTile(GeographicElevationGrid elevation, int columnStart, int columnEnd, int rowStart, int rowEnd, Rect projectionBounds, double projectionWest, double projectionEast, double projectionSouth, double projectionNorth)
+        {
+            int columns = columnEnd - columnStart;
+            int rows = rowEnd - rowStart;
+            int vertexColumns = columns + 1;
+            var vertices = new Vector3[(columns + 1) * (rows + 1)];
+            var uvs = new Vector2[vertices.Length];
+            var land = new bool[vertices.Length];
+            float metresToWorld = Mathf.Sqrt(3f) * HexRadius / Mathf.Max(1f, area.NauticalMilesPerHex) / 1852f * TerrainVerticalExaggeration;
+            for (int localRow = 0; localRow <= rows; localRow++)
+            {
+                int sourceRow = rowStart + localRow;
+                double latitude = elevation.Latitude(sourceRow);
+                float normalizedZ = (float)((latitude - projectionSouth) / (projectionNorth - projectionSouth));
+                float z = Mathf.LerpUnclamped(projectionBounds.yMin, projectionBounds.yMax, normalizedZ);
+                for (int localColumn = 0; localColumn <= columns; localColumn++)
+                {
+                    int sourceColumn = columnStart + localColumn;
+                    double longitude = elevation.Longitude(sourceColumn);
+                    float normalizedX = (float)((longitude - projectionWest) / (projectionEast - projectionWest));
+                    float x = Mathf.LerpUnclamped(projectionBounds.xMin, projectionBounds.xMax, normalizedX);
+                    short elevationMetres = elevation.ElevationMetres(sourceColumn, sourceRow);
+                    int index = localRow * vertexColumns + localColumn;
+                    land[index] = elevationMetres > 0;
+                    if (land[index]) MaximumTerrainElevationMetres = Mathf.Max(MaximumTerrainElevationMetres, elevationMetres);
+                    Vector3 surface = SurfacePoint(x, z);
+                    float relief = Mathf.Max(0, elevationMetres) * metresToWorld;
+                    vertices[index] = surface + SurfaceNormal(surface) * (GeographicLandSurfaceY + .012f + relief);
+                    uvs[index] = new Vector2((float)((longitude - elevation.West) / (elevation.East - elevation.West)), (float)((latitude - elevation.South) / (elevation.North - elevation.South)));
+                }
+            }
+
+            var triangles = new List<int>(columns * rows * 3);
+            for (int row = 0; row < rows; row++)
+            {
+                for (int column = 0; column < columns; column++)
+                {
+                    int a = row * vertexColumns + column;
+                    int b = a + 1;
+                    int c = a + vertexColumns;
+                    int d = c + 1;
+                    if (land[a] && land[c] && land[d]) { triangles.Add(a); triangles.Add(c); triangles.Add(d); }
+                    if (land[a] && land[d] && land[b]) { triangles.Add(a); triangles.Add(d); triangles.Add(b); }
+                }
+            }
+            if (triangles.Count == 0) return null;
+            var mesh = new Mesh { name = "NOAA ETOPO Geographic Terrain Tile", vertices = vertices, uv = uvs, triangles = triangles.ToArray() };
+            mesh.RecalculateNormals();
+            mesh.RecalculateTangents();
+            mesh.RecalculateBounds();
+            return mesh;
         }
 
         private bool BuildPolygonCoastline(Vector3 first, Vector3 last)
@@ -688,8 +858,12 @@ namespace SeaOfUncertainty.Prototype
             var projectionBounds = Rect.MinMaxRect(Mathf.Min(first.x, last.x) - 1f, Mathf.Min(first.z, last.z) - .87f, Mathf.Max(first.x, last.x) + 1f, Mathf.Max(first.z, last.z) + .87f);
             Mesh mesh = CoastlinePolygonMesh.Create(coastline, projectionBounds, GeographicLandSurfaceY, out List<Vector3[]> shorelines);
             if (mesh == null) { Debug.LogError("Coastline resource produced no valid polygon mesh: " + area.CoastlineResource); return false; }
+            ApplyCurvatureToMesh(mesh);
+            CoastlineSurfaceVertexCount = mesh.vertexCount;
+            CoastlineMaximumTriangleEdge = MaximumTriangleEdge(mesh);
+            shorelines = shorelines.Select(shoreline => shoreline.Select(point => new Vector3(point.x, point.y + CurvatureHeight(point.x, point.z), point.z)).ToArray()).ToList();
             MeshObject("Natural Earth Land", root.transform, landMaterial, mesh);
-            ApplyCoastlineDrivenShelf(shorelines, first, last);
+            ApplyCoastlineDrivenShelf(shorelines, first, last, coastline, projectionBounds);
             foreach (Vector3[] shoreline in shorelines)
             {
                 GameObject foamObject = Child("Natural Earth Coastal Foam", root.transform);
@@ -712,7 +886,7 @@ namespace SeaOfUncertainty.Prototype
                 line.SetPositions(shoreline.Select(point => point + Vector3.up * .012f).ToArray());
                 HasCoastalFoam = true;
             }
-            BuildCoastlineTerrainRelief(shorelines);
+            if (!BuildGeographicElevationTerrain(coastline, projectionBounds)) BuildCoastlineTerrainRelief(shorelines);
             CoastlinePolygonCount = shorelines.Count;
             OffMapCoastlineVertexCount = shorelines.Sum(shoreline => shoreline.Count(point => point.x < projectionBounds.xMin || point.x > projectionBounds.xMax || point.z < projectionBounds.yMin || point.z > projectionBounds.yMax));
             Debug.Log($"Loaded {shorelines.Count} Natural Earth coastline polygons for {area.DisplayName}; {OffMapCoastlineVertexCount} authentic vertices continue beyond the playable projection.");
@@ -820,8 +994,14 @@ namespace SeaOfUncertainty.Prototype
                     line.widthMultiplier = .025f;
                     for (int i = 0; i < 6; i++)
                     {
-                        float angle = Mathf.Deg2Rad * (30f + i * 60f);
-                        Vector3 point = HexToWorld(hex) + new Vector3(Mathf.Cos(angle), .06f, Mathf.Sin(angle)) * HexRadius;
+                        // Center spacing is the traditional flat-top layout: 1.5 radii across
+                        // columns and sqrt(3) radii down rows. Starting vertices at 0 degrees
+                        // makes adjacent outlines share edges instead of overlapping pointy hexes.
+                        float angle = Mathf.Deg2Rad * (i * 60f);
+                        Vector3 hexCenter = HexToWorld(hex);
+                        float x = hexCenter.x + Mathf.Cos(angle) * HexRadius;
+                        float z = hexCenter.z + Mathf.Sin(angle) * HexRadius;
+                        Vector3 point = SurfacePoint(x, z, .06f);
                         line.SetPosition(i, point);
                     }
                     hexLines[hex] = line;
@@ -962,13 +1142,17 @@ namespace SeaOfUncertainty.Prototype
             float markerHeight = formation.Kind == FormationKind.AirGroup ? 1.15f : formation.Kind == FormationKind.Submarine ? .025f : .015f;
             Vector3 destination = HexToWorld(formation.Position) + Vector3.up * markerHeight;
             Vector3 start = presentedPositions.TryGetValue(formation.Id, out HexCoord oldHex) ? HexToWorld(oldHex) + Vector3.up * markerHeight : destination;
-            Quaternion previousRotation = presentedRotations.TryGetValue(formation.Id, out Quaternion storedRotation) ? storedRotation : Quaternion.identity;
+            bool hasPresentedRotation = presentedRotations.TryGetValue(formation.Id, out Quaternion storedRotation);
+            Quaternion previousRotation = hasPresentedRotation ? storedRotation : Quaternion.identity;
             Vector3 travelDirection = destination - start;
-            travelDirection.y = 0f;
-            Quaternion targetRotation = travelDirection.sqrMagnitude > .0001f ? Quaternion.LookRotation(travelDirection.normalized, Vector3.up) : previousRotation;
+            Vector3 surfaceUp = SurfaceNormal(HexToWorld(formation.Position));
+            travelDirection = Vector3.ProjectOnPlane(travelDirection, surfaceUp);
+            Vector3 restingForward = Vector3.ProjectOnPlane(previousRotation * Vector3.forward, surfaceUp);
+            if (restingForward.sqrMagnitude < .0001f) restingForward = Vector3.ProjectOnPlane(Vector3.forward, surfaceUp);
+            Quaternion targetRotation = Quaternion.LookRotation(travelDirection.sqrMagnitude > .0001f ? travelDirection.normalized : restingForward.normalized, surfaceUp);
             marker.transform.position = reducedMotion ? destination : start;
-            marker.transform.rotation = reducedMotion ? targetRotation : previousRotation;
-            if (start != destination) motions.Add(new Motion { Transform = marker.transform, Start = start, End = destination, StartRotation = previousRotation, EndRotation = targetRotation });
+            marker.transform.rotation = reducedMotion || !hasPresentedRotation ? targetRotation : previousRotation;
+            if (start != destination) motions.Add(new Motion { Transform = marker.transform, Start = start, End = destination, StartRotation = previousRotation, EndRotation = targetRotation, SurfaceOffset = markerHeight });
             presentedPositions[formation.Id] = formation.Position;
             presentedRotations[formation.Id] = targetRotation;
             Material material = formation.Side == Side.Blue ? blueMaterial : redMaterial;
@@ -1357,10 +1541,13 @@ namespace SeaOfUncertainty.Prototype
         private void SetRingPositions(LineRenderer ring, HexCoord hex, float radius, float height)
         {
             ring.positionCount = 32;
+            Vector3 center = HexToWorld(hex);
             for (int i = 0; i < 32; i++)
             {
                 float angle = i / 32f * Mathf.PI * 2f;
-                ring.SetPosition(i, HexToWorld(hex) + new Vector3(Mathf.Cos(angle) * radius, height, Mathf.Sin(angle) * radius));
+                float x = center.x + Mathf.Cos(angle) * radius;
+                float z = center.z + Mathf.Sin(angle) * radius;
+                ring.SetPosition(i, SurfacePoint(x, z, height));
             }
         }
 
@@ -1426,19 +1613,32 @@ namespace SeaOfUncertainty.Prototype
         {
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, true) { name = name, wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear, anisoLevel = 4 };
             var colors = new Color[size * size];
-            Color deepLow = new Color(.012f, .075f, .12f), deepHigh = new Color(.026f, .16f, .19f);
+            Color abyss = new Color(.007f, .052f, .105f), basin = new Color(.014f, .125f, .185f), openWater = new Color(.025f, .205f, .225f), currentColor = new Color(.055f, .285f, .285f);
             for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
             {
                 float u = x / (float)(size - 1), v = y / (float)(size - 1);
-                float broad = Mathf.PerlinNoise(u * 4.7f + 12.4f, v * 4.7f + 31.6f);
-                float detail = Mathf.PerlinNoise(u * 17.3f + 47.1f, v * 17.3f + 8.9f);
-                float variation = Mathf.Clamp01(.32f + broad * .46f + detail * .22f);
-                colors[y * size + x] = Color.Lerp(deepLow, deepHigh, variation);
+                float macro = Mathf.PerlinNoise(u * 2.15f + 12.4f, v * 2.15f + 31.6f);
+                float regional = Mathf.PerlinNoise(u * 5.7f + 47.1f, v * 5.7f + 8.9f);
+                float detail = Mathf.PerlinNoise(u * 21.3f + 5.8f, v * 21.3f + 61.2f);
+                float basinMix = Mathf.SmoothStep(.12f, .92f, macro * .68f + regional * .32f);
+                Color color = Color.Lerp(abyss, basin, basinMix);
+                float warmWater = Mathf.SmoothStep(0f, 1f, 1f - v) * Mathf.Lerp(.35f, 1f, regional);
+                color = Color.Lerp(color, openWater, warmWater * .2f);
+                float warp = (regional - .5f) * .34f + (detail - .5f) * .08f;
+                float flow = .5f + .5f * Mathf.Sin((u * 2.1f + v * .72f + warp) * Mathf.PI * 2f);
+                float current = Mathf.Pow(Mathf.Clamp01(flow), 7f) * Mathf.Lerp(.45f, 1f, macro);
+                color = Color.Lerp(color, currentColor, current * .16f);
+                color *= Mathf.Lerp(.965f, 1.035f, detail);
+                color.a = 1f;
+                colors[y * size + x] = color;
             }
-            texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture); return texture;
+            texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture);
+            HasOceanCurrentBands = true;
+            UpdateOceanColorRange(texture);
+            return texture;
         }
 
-        private void ApplyCoastlineDrivenShelf(IEnumerable<Vector3[]> shorelines, Vector3 first, Vector3 last)
+        private void ApplyCoastlineDrivenShelf(IEnumerable<Vector3[]> shorelines, Vector3 first, Vector3 last, CoastlineData coastline, Rect projectionBounds)
         {
             if (!(waterMaterial.mainTexture is Texture2D texture)) return;
             int width = texture.width, height = texture.height;
@@ -1492,22 +1692,65 @@ namespace SeaOfUncertainty.Prototype
             }
 
             Color[] colors = texture.GetPixels();
-            Color shelfColor = new Color(.045f, .285f, .31f, 1f);
+            Color shorelineColor = new Color(.06f, .345f, .33f, 1f);
+            Color shallowColor = new Color(.04f, .285f, .305f, 1f);
+            Color slopeColor = new Color(.018f, .145f, .215f, 1f);
+            Color abyssColor = new Color(.006f, .045f, .095f, 1f);
+            bool hasBathymetry = TryGetGeographicElevation(out GeographicElevationGrid elevation, out _);
+            double projectionWest = coastline.projectionEast > coastline.projectionWest ? coastline.projectionWest : coastline.west;
+            double projectionEast = coastline.projectionEast > coastline.projectionWest ? coastline.projectionEast : coastline.east;
+            double projectionSouth = coastline.projectionNorth > coastline.projectionSouth ? coastline.projectionSouth : coastline.south;
+            double projectionNorth = coastline.projectionNorth > coastline.projectionSouth ? coastline.projectionNorth : coastline.north;
             for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
             {
                 float u = x / (float)(width - 1), v = y / (float)(height - 1);
                 float broad = Mathf.PerlinNoise(u * 4.1f + 19.7f, v * 4.1f + 7.3f);
                 float detail = Mathf.PerlinNoise(u * 13.7f + 3.8f, v * 13.7f + 31.2f);
+                if (hasBathymetry)
+                {
+                    float worldX = worldCenter.x + (u - .5f) * worldWidth;
+                    float worldZ = worldCenter.z + (v - .5f) * worldDepth;
+                    double longitude = projectionWest + (worldX - projectionBounds.xMin) / projectionBounds.width * (projectionEast - projectionWest);
+                    double latitude = projectionSouth + (worldZ - projectionBounds.yMin) / projectionBounds.height * (projectionNorth - projectionSouth);
+                    if (elevation.Contains(longitude, latitude))
+                    {
+                        float metres = elevation.SampleMetres(longitude, latitude);
+                        if (metres <= 0f)
+                        {
+                            float depth = -metres;
+                            Color depthColor = depth < 900f
+                                ? Color.Lerp(shallowColor, slopeColor, Mathf.SmoothStep(0f, 1f, depth / 900f))
+                                : Color.Lerp(slopeColor, abyssColor, Mathf.SmoothStep(0f, 1f, (depth - 900f) / 5100f));
+                            colors[y * width + x] = Color.Lerp(colors[y * width + x], depthColor, .52f);
+                        }
+                    }
+                }
                 float shelfWidth = Mathf.Lerp(.38f, 1.42f, broad * .76f + detail * .24f);
                 float shelf = Mathf.Clamp01(1f - distanceToCoast[y * width + x] / shelfWidth);
                 shelf = Mathf.SmoothStep(0f, 1f, shelf);
                 float mottling = Mathf.Lerp(.76f, 1f, detail);
-                colors[y * width + x] = Color.Lerp(colors[y * width + x], shelfColor, shelf * .43f * mottling);
+                colors[y * width + x] = Color.Lerp(colors[y * width + x], shorelineColor, shelf * .48f * mottling);
             }
             texture.SetPixels(colors);
             texture.Apply(true, false);
+            UsesGeographicBathymetry = hasBathymetry;
+            UpdateOceanColorRange(texture);
             HasCoastlineDrivenShelf = true;
             HasShallowWaterDetail = true;
+        }
+
+        private void UpdateOceanColorRange(Texture2D texture)
+        {
+            Color[] colors = texture.GetPixels();
+            float minimum = float.MaxValue, maximum = float.MinValue;
+            for (int index = 0; index < colors.Length; index++)
+            {
+                Color color = colors[index];
+                float luminance = color.r * .2126f + color.g * .7152f + color.b * .0722f;
+                minimum = Mathf.Min(minimum, luminance);
+                maximum = Mathf.Max(maximum, luminance);
+            }
+            OceanColorLuminanceRange = maximum - minimum;
         }
 
         private Texture2D CreateNormalTexture(string name, int size, int seed, bool waves, float strength)
@@ -1567,7 +1810,7 @@ namespace SeaOfUncertainty.Prototype
             material.EnableKeyword("_NORMALMAP");
         }
 
-        private static Mesh CreateWaterSurfaceMesh(float width, float depth, int columns, int rows)
+        private Mesh CreateWaterSurfaceMesh(float width, float depth, int columns, int rows)
         {
             var vertices = new Vector3[(columns + 1) * (rows + 1)];
             var uvs = new Vector2[vertices.Length];
@@ -1582,7 +1825,9 @@ namespace SeaOfUncertainty.Prototype
                     float detail = Mathf.PerlinNoise(u * 13.1f + 29.4f, v * 11.7f + 3.6f) - .5f;
                     float wave = broad * .006f + detail * .002f;
                     int vertex = row * (columns + 1) + column;
-                    vertices[vertex] = new Vector3((u - .5f) * width, wave, (v - .5f) * depth);
+                    float x = (u - .5f) * width;
+                    float z = (v - .5f) * depth;
+                    vertices[vertex] = new Vector3(x, CurvatureHeight(x, z) + wave, z);
                     uvs[vertex] = new Vector2(u, v);
                 }
             }
@@ -1604,6 +1849,109 @@ namespace SeaOfUncertainty.Prototype
             mesh.RecalculateTangents();
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        private void ApplyCurvatureToMesh(Mesh mesh)
+        {
+            if (mesh == null) return;
+            SubdivideLongTriangles(mesh, 1.25f);
+            Vector3[] vertices = mesh.vertices;
+            for (int index = 0; index < vertices.Length; index++)
+            {
+                Vector3 vertex = vertices[index];
+                vertex.y += CurvatureHeight(vertex.x, vertex.z);
+                vertices[index] = vertex;
+            }
+            mesh.vertices = vertices;
+            mesh.RecalculateNormals();
+            mesh.RecalculateTangents();
+            mesh.RecalculateBounds();
+        }
+
+        private static void SubdivideLongTriangles(Mesh mesh, float maximumEdgeLength)
+        {
+            var vertices = new List<Vector3>(mesh.vertices);
+            Vector2[] sourceUvs = mesh.uv;
+            var uvs = sourceUvs != null && sourceUvs.Length == vertices.Count
+                ? new List<Vector2>(sourceUvs)
+                : Enumerable.Repeat(Vector2.zero, vertices.Count).ToList();
+            int[] sourceTriangles = mesh.triangles;
+            var pending = new Stack<MeshTriangle>();
+            for (int index = 0; index + 2 < sourceTriangles.Length; index += 3)
+                pending.Push(new MeshTriangle(sourceTriangles[index], sourceTriangles[index + 1], sourceTriangles[index + 2], 0));
+
+            float maximumEdgeSquared = maximumEdgeLength * maximumEdgeLength;
+            var midpointCache = new Dictionary<ulong, int>();
+            var triangles = new List<int>(sourceTriangles.Length * 2);
+            while (pending.Count > 0)
+            {
+                MeshTriangle triangle = pending.Pop();
+                float ab = (vertices[triangle.A] - vertices[triangle.B]).sqrMagnitude;
+                float bc = (vertices[triangle.B] - vertices[triangle.C]).sqrMagnitude;
+                float ca = (vertices[triangle.C] - vertices[triangle.A]).sqrMagnitude;
+                float longest = Mathf.Max(ab, Mathf.Max(bc, ca));
+                if (longest <= maximumEdgeSquared || triangle.Depth >= 12)
+                {
+                    triangles.Add(triangle.A); triangles.Add(triangle.B); triangles.Add(triangle.C);
+                    continue;
+                }
+
+                int nextDepth = triangle.Depth + 1;
+                if (ab >= bc && ab >= ca)
+                {
+                    int midpoint = MeshMidpoint(triangle.A, triangle.B, vertices, uvs, midpointCache);
+                    pending.Push(new MeshTriangle(midpoint, triangle.B, triangle.C, nextDepth));
+                    pending.Push(new MeshTriangle(triangle.A, midpoint, triangle.C, nextDepth));
+                }
+                else if (bc >= ca)
+                {
+                    int midpoint = MeshMidpoint(triangle.B, triangle.C, vertices, uvs, midpointCache);
+                    pending.Push(new MeshTriangle(triangle.A, midpoint, triangle.C, nextDepth));
+                    pending.Push(new MeshTriangle(triangle.A, triangle.B, midpoint, nextDepth));
+                }
+                else
+                {
+                    int midpoint = MeshMidpoint(triangle.C, triangle.A, vertices, uvs, midpointCache);
+                    pending.Push(new MeshTriangle(midpoint, triangle.B, triangle.C, nextDepth));
+                    pending.Push(new MeshTriangle(triangle.A, triangle.B, midpoint, nextDepth));
+                }
+            }
+
+            string meshName = mesh.name;
+            mesh.Clear();
+            if (vertices.Count > ushort.MaxValue) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            mesh.name = meshName;
+            mesh.SetVertices(vertices);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(triangles, 0);
+        }
+
+        private static int MeshMidpoint(int first, int second, List<Vector3> vertices, List<Vector2> uvs, Dictionary<ulong, int> cache)
+        {
+            uint low = (uint)Mathf.Min(first, second);
+            uint high = (uint)Mathf.Max(first, second);
+            ulong key = ((ulong)low << 32) | high;
+            if (cache.TryGetValue(key, out int existing)) return existing;
+            int midpoint = vertices.Count;
+            vertices.Add((vertices[first] + vertices[second]) * .5f);
+            uvs.Add((uvs[first] + uvs[second]) * .5f);
+            cache[key] = midpoint;
+            return midpoint;
+        }
+
+        private static float MaximumTriangleEdge(Mesh mesh)
+        {
+            Vector3[] vertices = mesh.vertices;
+            int[] triangles = mesh.triangles;
+            float maximum = 0f;
+            for (int index = 0; index + 2 < triangles.Length; index += 3)
+            {
+                Vector3 a = vertices[triangles[index]];
+                Vector3 b = vertices[triangles[index + 1]];
+                Vector3 c = vertices[triangles[index + 2]];
+                maximum = Mathf.Max(maximum, Vector3.Distance(a, b), Vector3.Distance(b, c), Vector3.Distance(c, a));
+            }
+            return maximum;
         }
 
         private static Mesh CreateTerrainRidgeMesh(float width, float depth, float height, int seed)
@@ -1763,7 +2111,7 @@ namespace SeaOfUncertainty.Prototype
             Vector3 last = HexToWorld(new HexCoord(area.Width - 1, area.Height - 1));
             focus.x = Mathf.Clamp(focus.x, Mathf.Min(first.x, last.x) - area.Presentation.PanPadding, Mathf.Max(first.x, last.x) + area.Presentation.PanPadding);
             focus.z = Mathf.Clamp(focus.z, Mathf.Min(first.z, last.z) - area.Presentation.PanPadding, Mathf.Max(first.z, last.z) + area.Presentation.PanPadding);
-            focus.y = 0f;
+            focus.y = CurvatureHeight(focus.x, focus.z);
         }
 
         private static Material MaterialFor(string resourceName, string shaderName, Color color, float metallic = 0f, float smoothness = .3f)

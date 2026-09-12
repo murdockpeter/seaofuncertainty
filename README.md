@@ -99,9 +99,9 @@ Full keyboard camera controls work anywhere on the operation screen when no moda
 - `Z/X` or keypad `+/-`: zoom in/out;
 - hold `Shift`: accelerate keyboard camera movement.
 
-The 3D theater uses multi-scale procedural surface normals, sun glint, shallow-water coloration, bathymetric contours, coastline foam, layered terrain relief, horizon haze, moving cloud shadows, and data-driven weather hooks. Map-space labels and distinct port/airfield geometry remain presentation-only and do not alter hex terrain or rules.
+The 3D theater uses a physical Earth-radius spherical cap at the scenario's nautical-mile scale, plus multi-scale procedural surface normals, sun glint, depth-driven ocean coloration, subtle current bands, coastline foam, horizon haze, moving cloud shadows, and data-driven weather hooks. Geographic theaters can render tiled measured elevation along the globe normal; the Luzon theater uses a baked two-arc-minute subset of NOAA NCEI ETOPO 2022 for both seafloor color zones and land relief, with 4x land vertical exaggeration for legibility at the 20-NM hex scale. Curved picking, overlays, formations, and movement remain aligned to the authoritative hex grid; map-space labels and distinct port/airfield geometry remain presentation-only and do not alter hex terrain or rules.
 
-The command bar's **HEXES OFF / HEXES ON** control provides the same persistent grid toggle, and the preference is saved between sessions.
+The command bar's **HEXES OFF / HEXES ON** control provides the same persistent grid toggle. The overlay uses traditional flat-top hexes at the authoritative 20-NM scale, and the visibility preference is saved between sessions.
 
 Gamepad and joystick UI navigation uses dedicated axes, configurable dead-zone filtering, and one-step focus movement after the stick recenters.
 

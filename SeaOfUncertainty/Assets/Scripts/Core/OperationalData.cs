@@ -56,6 +56,7 @@ namespace SeaOfUncertainty.Core
         public string WeatherPreset = "Clear";
         public float Precipitation;
         public string ElevationResource;
+        public float ElevationExaggeration = 4f;
     }
 
     public enum ColorProfile { Maritime, NightOperations, HighContrast }
@@ -269,7 +270,7 @@ namespace SeaOfUncertainty.Core
                 Id = "luzon-strait-northern-approaches",
                 DisplayName = "Luzon Strait — Northern Approaches",
                 Version = "MVP-1",
-                Attribution = "Coastline geometry generalized from Natural Earth public-domain data. Bathymetry categories informed by GEBCO Grid; GEBCO Compilation Group. Not for navigation.",
+                Attribution = "Coastline geometry generalized from Natural Earth public-domain data. Land elevation from NOAA NCEI ETOPO 2022 (doi:10.25921/fd45-gt74). Bathymetry categories informed by GEBCO Grid; GEBCO Compilation Group. Not for navigation.",
                 Width = 24,
                 Height = 20,
                 NauticalMilesPerHex = 20,
@@ -279,7 +280,7 @@ namespace SeaOfUncertainty.Core
                 CoastlineResource = "Geography/luzon-strait-coastline",
                 GridOrientationDegrees = 0,
                 Objective = new HexCoord(11, 9),
-                Presentation = new PresentationProfileDefinition { CameraPitch = 58f, CameraYaw = 0, CameraZoomMultiplier = 1.65f, LightingProfile = "MaritimeHaze", WaterProfile = "PhilippineSea", TerrainAssetSet = "LuzonMvp", TimeOfDay = 16f, Visibility = .72f, SeaState = .42f, CloudCover = .28f, HazeDensity = .38f, WeatherPreset = "Haze" }
+                Presentation = new PresentationProfileDefinition { CameraPitch = 58f, CameraYaw = 0, CameraZoomMultiplier = 1.65f, LightingProfile = "MaritimeHaze", WaterProfile = "PhilippineSea", TerrainAssetSet = "LuzonMvp", TimeOfDay = 16f, Visibility = .72f, SeaState = .42f, CloudCover = .28f, HazeDensity = .38f, WeatherPreset = "Haze", ElevationResource = "Geography/luzon-strait-etopo-2022", ElevationExaggeration = 4f }
             };
 
             AddBlock(area, OperationalTerrain.Land, "Southern Taiwan", 0, 0, 7, 3);

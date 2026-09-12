@@ -1,0 +1,18 @@
+{
+    "title":  "Luzon Strait ETOPO 2022 two-arc-minute elevation subset",
+    "source":  "NOAA National Centers for Environmental Information, ETOPO 2022 15 Arc-Second Global Relief Model",
+    "doi":  "10.25921/fd45-gt74",
+    "sourceUrl":  "https://coastwatch.pfeg.noaa.gov/erddap/griddap/ETOPO_2022_v1_15s.csv0?z[(16.43221148938834):8:(25.06778851061166)][(117.5):8:(126.8)]",
+    "accessedUtc":  "2026-09-11",
+    "stride":  8,
+    "sourceResolutionArcSeconds":  15,
+    "bakedResolutionArcSeconds":  120,
+    "width":  280,
+    "height":  260,
+    "west":  117.50208333333333,
+    "east":  126.80208333333333,
+    "south":  16.43125,
+    "north":  25.064583333333331,
+    "sampleCount":  72800,
+    "license":  "United States government work; source attribution retained. Not for navigation."
+}
