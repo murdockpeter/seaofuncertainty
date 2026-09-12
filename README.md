@@ -111,10 +111,11 @@ The public-prototype presentation is code-owned: procedural formation models, ma
 
 ## Design documents
 
-- Primary development backlog: `TODO.md`
+- 1.0 beta closure plan and primary development backlog: `TODO.md`
 - Approved 20 nm prototype rulings: `design/20NM_SCALE_RULES.md`
 - 3D MVP budgets and acceptance: `design/3D_MVP_BUDGETS_AND_ACCEPTANCE.md`
 - 3D MVP go/no-go review: `design/3D_GO_NO_GO_REVIEW.md`
+- Incremental graphics polish backlog: `design/GRAPHICS_INCREMENTAL_AWESOMENESS.md`
 
 Regenerate the packaged Luzon coastline from the existing local campaign polygon library with:
 
