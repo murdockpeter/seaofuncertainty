@@ -53,6 +53,7 @@ namespace SeaOfUncertainty.Prototype
         private readonly Material landMaterial;
         private readonly Material littoralMaterial;
         private readonly Material highlandMaterial;
+        private readonly Material fictionalTerrainMaterial;
         private readonly Material blueMaterial;
         private readonly Material redMaterial;
         private readonly Material navalHullMaterial;
@@ -182,6 +183,11 @@ namespace SeaOfUncertainty.Prototype
         public int TerrainColorBandCount { get; private set; }
         public float TerrainColorLuminanceRange { get; private set; }
         public bool TerrainTileEdgesUseSharedFaceNormals { get; private set; }
+        public bool TerrainNormalsAreSmoothed { get; private set; }
+        public bool HasVegetationDensityVariation { get; private set; }
+        public bool HasValleyReadabilityHints { get; private set; }
+        public bool HasCoastalCliffTreatment { get; private set; }
+        public bool UsesFictionalTerrainTreatment { get; private set; }
         public float TerrainVerticalExaggeration => Mathf.Max(1f, area.Presentation.ElevationExaggeration);
         public bool UsesGeographicBathymetry { get; private set; }
         public bool HasOceanCurrentBands { get; private set; }
@@ -294,6 +300,10 @@ namespace SeaOfUncertainty.Prototype
             landMaterial = MaterialFor("CommandLand", "Standard", new Color(.27f, .34f, .19f, 1f), .02f, .34f);
             littoralMaterial = MaterialFor("CommandLittoral", "Standard", new Color(.08f, .36f, .34f, 1f), .04f, .58f);
             highlandMaterial = MaterialFor("CommandHighland", "Standard", new Color(.29f, .31f, .16f, 1f), .01f, .26f);
+            // GIA-027: fictional (no-ETOPO) theaters get their own deliberately schematic, contour-ring
+            // treatment rather than reusing the photographic ETOPO-derived land materials — it should never
+            // look like measured geography it isn't.
+            fictionalTerrainMaterial = MaterialFor("FictionalTerrain", "Standard", Color.white, 0f, .18f);
             blueMaterial = MaterialFor("CommandBlue", "Standard", new Color(.08f, .72f, .95f, 1f), .28f, .45f);
             redMaterial = MaterialFor("CommandRed", "Standard", new Color(.94f, .25f, .18f, 1f), .2f, .48f);
             navalHullMaterial = MaterialFor("FormationHull", "Standard", new Color(.16f, .22f, .24f, 1f), .32f, .42f);
@@ -839,6 +849,17 @@ namespace SeaOfUncertainty.Prototype
             }
 
             bool usesPolygonCoastline = BuildPolygonCoastline(first, last);
+            if (!usesPolygonCoastline)
+            {
+                // GIA-027: this hex-based landform path only runs for theaters with no Natural Earth coastline
+                // resource at all (the actual "fictional theater" case — Luzon-style theaters always take the
+                // polygon-coastline path above and never reach here), so give it its own deliberately schematic
+                // contour-map material instead of the photographic ETOPO-derived land materials.
+                fictionalTerrainMaterial.mainTexture = CreateFictionalTerrainTexture(192);
+                fictionalTerrainMaterial.mainTextureScale = Vector2.one;
+                fictionalTerrainMaterial.color = Color.white;
+                UsesFictionalTerrainTreatment = true;
+            }
             foreach (TerrainHexDefinition terrain in area.Terrain)
             {
                 if (terrain.Terrain == OperationalTerrain.DeepWater || terrain.Terrain == OperationalTerrain.Strait) continue;
@@ -853,12 +874,12 @@ namespace SeaOfUncertainty.Prototype
                 {
                     int reliefSeed = terrain.Name == null ? 0 : terrain.Name.Aggregate(17, (value, character) => value * 31 + character);
                     float height = .16f + Mathf.Abs(reliefSeed % 3) * .025f;
-                    GameObject island = MeshObject(terrain.Name + " " + terrain.Hex, root.transform, landMaterial, CreateLandformMesh(terrain.Q, terrain.R, 1.03f, height, WaterSurfaceY - .06f, 14));
+                    GameObject island = MeshObject(terrain.Name + " " + terrain.Hex, root.transform, fictionalTerrainMaterial, CreateLandformMesh(terrain.Q, terrain.R, 1.03f, height, WaterSurfaceY - .06f, 14));
                     island.transform.position = position;
                     island.transform.rotation = Quaternion.Euler(0f, (terrain.Q * 31 + terrain.R * 19) % 30, 0f);
                     if (Mathf.Abs(terrain.Q * 17 + terrain.R * 11 + reliefSeed) % 5 == 0)
                     {
-                        GameObject ridge = Primitive(PrimitiveType.Sphere, "Sparse Relief", island.transform, landMaterial);
+                        GameObject ridge = Primitive(PrimitiveType.Sphere, "Sparse Relief", island.transform, fictionalTerrainMaterial);
                         ridge.transform.localPosition = new Vector3(.08f, height + .015f, -.06f);
                         ridge.transform.localScale = new Vector3(.32f, .09f, .28f);
                     }
@@ -1007,6 +1028,13 @@ namespace SeaOfUncertainty.Prototype
             var mesh = new Mesh { name = "NOAA ETOPO Geographic Terrain Tile", vertices = vertices, uv = uvs, triangles = triangles.ToArray() };
             mesh.RecalculateNormals();
             Vector3[] normals = mesh.normals;
+            // GIA-020: Unity's default per-vertex normal is only an average of the triangles meeting at that
+            // exact vertex, so a single unusually steep triangle on a ridge can still read as a faceted spike
+            // at low camera pitch even though neighboring normals are smooth. Blending each interior normal
+            // with its four grid neighbors (majority weight kept on its own normal) softens that without
+            // flattening the ridge's overall shape or touching any vertex position — measured elevation is
+            // untouched, only the shading normal used to light it.
+            SmoothInteriorTerrainNormals(normals, vertexColumns, rows, columns);
             for (int localRow = 0; localRow <= rows; localRow++)
             {
                 for (int localColumn = 0; localColumn <= columns; localColumn++)
@@ -1021,7 +1049,23 @@ namespace SeaOfUncertainty.Prototype
             mesh.RecalculateTangents();
             mesh.RecalculateBounds();
             TerrainTileEdgesUseSharedFaceNormals = true;
+            TerrainNormalsAreSmoothed = true;
             return mesh;
+        }
+
+        private static void SmoothInteriorTerrainNormals(Vector3[] normals, int vertexColumns, int rows, int columns)
+        {
+            if (rows < 2 || columns < 2) return;
+            Vector3[] source = (Vector3[])normals.Clone();
+            for (int localRow = 1; localRow < rows; localRow++)
+            {
+                for (int localColumn = 1; localColumn < columns; localColumn++)
+                {
+                    int index = localRow * vertexColumns + localColumn;
+                    Vector3 neighborSum = source[index - 1] + source[index + 1] + source[index - vertexColumns] + source[index + vertexColumns];
+                    normals[index] = (source[index] * .62f + neighborSum * .095f).normalized;
+                }
+            }
         }
 
         private Vector3 SharedTerrainFaceNormal(GeographicElevationGrid elevation, int targetColumn, int targetRow, Rect projectionBounds,
@@ -2106,6 +2150,16 @@ namespace SeaOfUncertainty.Prototype
             return color;
         }
 
+        // Mathf.SmoothStep(from, to, t) is NOT the GLSL-style smoothstep(edge0, edge1, x) its argument order
+        // suggests: Unity treats t as an already-normalized [0,1] factor and from/to as the OUTPUT range, i.e.
+        // it is a smoothed Lerp, not a threshold/edge mask. Calling it directly with two edge values against a
+        // raw, not-yet-normalized signal (as this file did in several places) silently compresses the output
+        // into the narrow [from,to] numeric range instead of spanning [0,1] — in one case collapsing it to an
+        // always-negative value that Clamp01 then crushed to a constant 0 every time, which is what made an
+        // entire fictional-theater terrain texture render as a single flat color regardless of any tuning.
+        // This is the correct GLSL-equivalent: normalize against the edges first, then smooth.
+        private static float EdgeSmoothStep(float edge0, float edge1, float x) => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(edge0, edge1, x));
+
         private void UpdateObjectiveControl()
         {
             if (objectiveRing == null || game == null) return;
@@ -2265,7 +2319,7 @@ namespace SeaOfUncertainty.Prototype
                     float fine = TileableNoise(u, v, 29f, 4.6f, 61.3f, 9.8f);
                     // Steeper, lower-floor breakup so the mist reads as separated, broken wisps with visible
                     // gaps rather than one smooth soft-edged gradient blob.
-                    float breakup = Mathf.Lerp(.04f, 1f, Mathf.SmoothStep(.36f, .68f, broad * .58f + wisps * .28f + fine * .14f));
+                    float breakup = Mathf.Lerp(.04f, 1f, EdgeSmoothStep(.36f, .68f, broad * .58f + wisps * .28f + fine * .14f));
                     float asymmetricEdge = Mathf.Lerp(.7f, 1f, TileableNoise(u, v, 7f, 3f, 7.9f, 29.6f));
                     // Baked near (u=0, at the aircraft) to far (u=1, oldest/most dissipated) fade. The LineRenderer
                     // uses Stretch mode so this maps once across the whole trail — this IS the misty taper, since
@@ -2298,8 +2352,8 @@ namespace SeaOfUncertainty.Prototype
                 {
                     float along = x / (float)(width - 1);
                     float broken = Mathf.PerlinNoise(along * 13f + 7.1f, y * .31f + 19.4f);
-                    float pulse = Mathf.SmoothStep(.38f, .72f, broken);
-                    float endFade = Mathf.SmoothStep(0f, .12f, along) * Mathf.SmoothStep(0f, .18f, 1f - along);
+                    float pulse = EdgeSmoothStep(.38f, .72f, broken);
+                    float endFade = EdgeSmoothStep(0f, .12f, along) * EdgeSmoothStep(0f, .18f, 1f - along);
                     colors[y * width + x] = new Color(1f, 1f, 1f, feather * pulse * endFade);
                 }
             }
@@ -2374,11 +2428,22 @@ namespace SeaOfUncertainty.Prototype
             Color upland = new Color(.355f, .365f, .205f, 1f);
             Color rock = new Color(.405f, .405f, .345f, 1f);
             Color steepRock = new Color(.315f, .325f, .295f, 1f);
+            // GIA-022: broad (macro-scale, not per-pixel noisy) canopy-density patches, strongest where
+            // vegetation would actually thrive — low elevation, gentle slope — and absent on exposed rock.
+            Color denseCanopy = new Color(.145f, .245f, .105f, 1f);
+            Color sparseScrub = new Color(.335f, .355f, .195f, 1f);
+            // GIA-023: a cheap valley/drainage-line proxy from the same gradient samples already computed for
+            // slope shading, darkened toward a moister tone wherever a cell sits notably below its neighbors.
+            Color valleyTint = new Color(.135f, .205f, .145f, 1f);
+            // GIA-024: exposed pale rock where meaningfully elevated land drops straight into the sea, distinct
+            // from a gently sloped beach — cosmetic only, and never implies which coast is actually landable.
+            Color cliffColor = new Color(.315f, .3f, .27f, 1f);
             Vector3 lightToSun = new Vector3(.62f, .68f, .39f).normalized;
             float latitudeSpacingMetres = Mathf.Max(1f, (float)((elevation.North - elevation.South) / (elevation.Height - 1) * 111320d));
             float minimumLuminance = float.MaxValue;
             float maximumLuminance = float.MinValue;
             int shadedSamples = 0;
+            bool anyVegetationPatch = false, anyValleyHint = false, anyCliff = false;
 
             for (int row = 0; row < elevation.Height; row++)
             {
@@ -2407,6 +2472,37 @@ namespace SeaOfUncertainty.Prototype
                     float steepness = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(17f, 38f, slopeDegrees));
                     terrainColor = Color.Lerp(terrainColor, steepRock, steepness * .44f);
 
+                    // GIA-022: vegetation cover patches — a single broad (few-cycle) noise field picks denser
+                    // canopy vs sparser scrub, weighted by how suitable the ground actually is for growth.
+                    float vegetationPatch = Mathf.PerlinNoise(column * .0065f + 71.3f, row * .0065f + 12.9f);
+                    float vegetationSuitability = Mathf.Clamp01(Mathf.InverseLerp(1500f, 200f, height)) * (1f - steepness);
+                    if (vegetationSuitability > .02f)
+                    {
+                        Color vegetationTint = Color.Lerp(sparseScrub, denseCanopy, vegetationPatch);
+                        terrainColor = Color.Lerp(terrainColor, vegetationTint, vegetationSuitability * .3f);
+                        anyVegetationPatch = true;
+                    }
+
+                    // GIA-023: valley/drainage-line hint — cells sitting notably below their four neighbors
+                    // read as a local depression, i.e. a plausible drainage channel, without simulating hydrology.
+                    float neighborAverage = (west + east + north + south) * .25f;
+                    float valleyDepth = Mathf.Max(0f, neighborAverage - height);
+                    float valleyFactor = Mathf.Clamp01(valleyDepth / 55f);
+                    if (valleyFactor > .02f) { terrainColor = Color.Lerp(terrainColor, valleyTint, valleyFactor * .4f); anyValleyHint = true; }
+
+                    // GIA-024: coastal cliff hint — land adjacent to open water (checked against the RAW sample,
+                    // not the inland-only LandNeighborElevation substitute used for slope shading) that still
+                    // carries meaningful elevation right at the shore reads as an exposed rock face rather than
+                    // a beach.
+                    bool adjacentToWater = elevation.ElevationMetres(column - 1, row) <= 0 || elevation.ElevationMetres(column + 1, row) <= 0
+                        || elevation.ElevationMetres(column, row - 1) <= 0 || elevation.ElevationMetres(column, row + 1) <= 0;
+                    if (adjacentToWater && height > 25f)
+                    {
+                        float cliffStrength = Mathf.Clamp01(height / 220f);
+                        terrainColor = Color.Lerp(terrainColor, cliffColor, cliffStrength * .4f);
+                        anyCliff = true;
+                    }
+
                     Vector3 terrainNormal = new Vector3(-eastGradient, 1f, -northGradient).normalized;
                     float directionalShade = Mathf.Lerp(.88f, 1.08f, Mathf.Clamp01(Vector3.Dot(terrainNormal, lightToSun)));
                     float broadVariation = Mathf.PerlinNoise(column * .037f + 19.2f, row * .037f + 7.4f) - .5f;
@@ -2430,6 +2526,42 @@ namespace SeaOfUncertainty.Prototype
             TerrainColorLuminanceRange = maximumLuminance > minimumLuminance ? maximumLuminance - minimumLuminance : 0f;
             UsesTerrainSlopeShading = shadedSamples > 0;
             UsesElevationAwareTerrainColor = TerrainColorBandCount >= 3 && UsesTerrainSlopeShading;
+            HasVegetationDensityVariation = anyVegetationPatch;
+            HasValleyReadabilityHints = anyValleyHint;
+            HasCoastalCliffTreatment = anyCliff;
+            return texture;
+        }
+
+        // GIA-027: a bold diagonal band — the schematic cartographic idiom for illustrative/unsurveyed
+        // landmass — rather than the photographic ETOPO terrain texture, so a fictional theater never
+        // masquerades as measured geography. Root-caused via an in-game texture/material dump: the hex
+        // landform mesh this paints only has 14 segments around its ring, so a multi-cycle pattern is
+        // under-resolved — two adjacent sparse vertices can straddle an entire band without either one
+        // landing near its peak color, and linear interpolation between them then never reaches it. A single
+        // transition (matching what a plain half/half color split was confirmed to render correctly at this
+        // same resolution) avoids that entirely.
+        private Texture2D CreateFictionalTerrainTexture(int size)
+        {
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "Fictional Theater Hachure Terrain", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, anisoLevel = 1 };
+            var colors = new Color[size * size];
+            Color baseTone = new Color(.44f, .43f, .24f, 1f);
+            Color hachureTone = new Color(.1f, .12f, .06f, 1f);
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float u = x / (float)(size - 1);
+                    float hachure = EdgeSmoothStep(.4f, .6f, u);
+                    Color color = Color.Lerp(baseTone, hachureTone, hachure);
+                    float v = y / (float)(size - 1);
+                    float noise = Mathf.PerlinNoise(u * 9f + 7.3f, v * 9f + 2.1f);
+                    color *= Mathf.Lerp(.95f, 1.05f, noise);
+                    colors[y * size + x] = color;
+                }
+            }
+            texture.SetPixels(colors);
+            texture.Apply(false, false);
+            generatedTextures.Add(texture);
             return texture;
         }
 
@@ -2460,7 +2592,7 @@ namespace SeaOfUncertainty.Prototype
                 float macro = Mathf.PerlinNoise(u * 2.15f + 12.4f, v * 2.15f + 31.6f);
                 float regional = Mathf.PerlinNoise(u * 5.7f + 47.1f, v * 5.7f + 8.9f);
                 float detail = Mathf.PerlinNoise(u * 21.3f + 5.8f, v * 21.3f + 61.2f);
-                float basinMix = Mathf.Lerp(.5f, Mathf.SmoothStep(.12f, .92f, macro * .68f + regional * .32f), basinStrength);
+                float basinMix = Mathf.Lerp(.5f, EdgeSmoothStep(.12f, .92f, macro * .68f + regional * .32f), basinStrength);
                 Color color = Color.Lerp(abyss, basin, basinMix);
                 float warmWater = Mathf.SmoothStep(0f, 1f, 1f - v) * Mathf.Lerp(.35f, 1f, regional);
                 color = Color.Lerp(color, openWater, warmWater * .2f);
@@ -2472,7 +2604,7 @@ namespace SeaOfUncertainty.Prototype
                 float alongWind = u * windCos + v * windSin;
                 float acrossWind = -u * windSin + v * windCos;
                 float streakNoise = Mathf.PerlinNoise(alongWind * 3.4f + 8.3f, acrossWind * 27f + 14.7f);
-                float streak = Mathf.SmoothStep(.45f, .82f, streakNoise);
+                float streak = EdgeSmoothStep(.45f, .82f, streakNoise);
                 color = Color.Lerp(color, streakColor, streak * Mathf.Lerp(0f, .22f, seaState));
 
                 color *= Mathf.Lerp(.965f, 1.035f, detail);
@@ -2603,7 +2735,7 @@ namespace SeaOfUncertainty.Prototype
                             {
                                 depthColor = Color.Lerp(shoalColor, shallowColor, Mathf.SmoothStep(0f, 1f, depth / 40f));
                                 float reefNoise = Mathf.PerlinNoise(u * 41f + 53.1f, v * 41f + 21.7f);
-                                float reefPatch = Mathf.SmoothStep(.6f, .78f, reefNoise) * Mathf.SmoothStep(1f, 0f, depth / 32f);
+                                float reefPatch = EdgeSmoothStep(.6f, .78f, reefNoise) * Mathf.SmoothStep(1f, 0f, depth / 32f);
                                 if (reefPatch > 0f) { depthColor = Color.Lerp(depthColor, reefColor, reefPatch * .55f); anyReefHint = true; }
                                 observedDepthBands[0] = true;
                             }
@@ -2903,7 +3035,9 @@ namespace SeaOfUncertainty.Prototype
         {
             var random = new System.Random(q * 73856093 ^ r * 19349663 ^ segments * 83492791);
             var vertices = new Vector3[1 + segments * 3];
+            var uvs = new Vector2[vertices.Length];
             vertices[0] = new Vector3(0f, top, 0f);
+            uvs[0] = new Vector2(.5f, .5f);
             for (int i = 0; i < segments; i++)
             {
                 float angle = i / (float)segments * Mathf.PI * 2f;
@@ -2914,6 +3048,12 @@ namespace SeaOfUncertainty.Prototype
                 vertices[1 + i] = new Vector3(x, top, z);
                 vertices[1 + segments + i] = new Vector3(x, top, z);
                 vertices[1 + segments * 2 + i] = new Vector3(x * 1.06f, bottom, z * 1.06f);
+                // Radial UV centered on the peak (unused by the plain materials this mesh usually carries, but
+                // needed so a radial texture like the GIA-027 fictional-terrain contour map projects correctly).
+                Vector2 uv = new Vector2(x / (radius * 2f) + .5f, z / (radius * 2f) + .5f);
+                uvs[1 + i] = uv;
+                uvs[1 + segments + i] = uv;
+                uvs[1 + segments * 2 + i] = uv;
             }
 
             var triangles = new int[segments * 9];
@@ -2934,6 +3074,7 @@ namespace SeaOfUncertainty.Prototype
 
             var mesh = new Mesh { name = $"Landform {q},{r}" };
             mesh.vertices = vertices;
+            mesh.uv = uvs;
             mesh.triangles = triangles;
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
@@ -3198,7 +3339,7 @@ namespace SeaOfUncertainty.Prototype
             whitecapMaterialInstances.Clear();
             foreach (Material instance in coastalFoamMaterialInstances) DestroyObject(instance);
             coastalFoamMaterialInstances.Clear();
-            DestroyObject(lineMaterial); DestroyObject(waterMaterial); DestroyObject(landMaterial); DestroyObject(littoralMaterial); DestroyObject(highlandMaterial);
+            DestroyObject(lineMaterial); DestroyObject(waterMaterial); DestroyObject(landMaterial); DestroyObject(littoralMaterial); DestroyObject(highlandMaterial); DestroyObject(fictionalTerrainMaterial);
             DestroyObject(blueMaterial); DestroyObject(redMaterial); DestroyObject(navalHullMaterial); DestroyObject(navalDeckMaterial); DestroyObject(canopyMaterial);
             DestroyObject(foamMaterial); DestroyObject(whitecapMaterial); DestroyObject(contrailMistMaterial); DestroyObject(contrailCoreMaterial); DestroyObject(coastalFoamMaterial); DestroyObject(wetShoreMaterial); DestroyObject(shallowWaterMaterial); DestroyObject(atmosphericMaterial); DestroyObject(cloudShadowMaterial);
             DestroyObject(contactMaterial); DestroyObject(warningMaterial);

@@ -687,6 +687,10 @@ namespace SeaOfUncertainty.Editor
                 Assert(luzonMap.UsesElevationAwareTerrainColor && luzonMap.TerrainColorBandCount == 4, "ETOPO height drives distinct coastal, lowland, upland, and high-mountain terrain colors");
                 Assert(luzonMap.UsesTerrainSlopeShading && luzonMap.TerrainColorLuminanceRange > .08f, "Measured terrain gradients provide restrained slope shading and readable tonal separation");
                 Assert(luzonMap.TerrainTileEdgesUseSharedFaceNormals, "Terrain tile boundaries share neighboring ETOPO face normals without changing terrain height or interior relief");
+                Assert(luzonMap.TerrainNormalsAreSmoothed, "Interior terrain normals are blended with their grid neighbors to soften faceted ridgeline spikes without moving any vertex");
+                Assert(luzonMap.HasVegetationDensityVariation, "Broad, elevation- and slope-weighted vegetation density patches vary land color without added high-frequency noise");
+                Assert(luzonMap.HasValleyReadabilityHints, "Local depressions relative to their neighbors read as plausible drainage/valley lines");
+                Assert(luzonMap.HasCoastalCliffTreatment, "Elevated land meeting open water directly carries a restrained exposed-rock cliff hint distinct from a beach");
                 Assert(luzonMap.HasShallowWaterDetail && luzonMap.HasCoastalFoam && luzonMap.HasCoastlineDrivenShelf, "Coastline-driven shelves, bathymetric contours, and coastal foam enrich the sea-land transition");
                 Assert(luzonMap.HasWetShoreBand && luzonMap.UsesBrokenCoastalFoam && luzonMap.CoastalFoamMaskAlphaRange > .55f, $"Coastlines layer a narrow wet-shore band beneath a high-contrast static broken-foam mask (wet={luzonMap.HasWetShoreBand}, broken={luzonMap.UsesBrokenCoastalFoam}, alpha range={luzonMap.CoastalFoamMaskAlphaRange:F3})");
                 Assert(luzonMap.CoastlineStrokesAvoidTableEdges && luzonMap.SuppressedTableEdgeShorelineSegmentCount > 0, "Coastline strokes omit artificial polygon closures wherever land exits the theater bounds");
@@ -724,6 +728,7 @@ namespace SeaOfUncertainty.Editor
                 Vector3 adjacentB = operationalMap.HexToWorld(new HexCoord(0, 1));
                 float adjacentWorldDistance = Vector2.Distance(new Vector2(adjacentA.x, adjacentA.z), new Vector2(adjacentB.x, adjacentB.z));
                 Assert(Mathf.Approximately(adjacentWorldDistance, Mathf.Sqrt(3f)), "3D world coordinates preserve adjacent hex spacing");
+                Assert(operationalMap.UsesFictionalTerrainTreatment && !operationalMap.UsesGeographicElevation, "The no-ETOPO Meridian Veil theater uses the deliberately schematic fictional-terrain material, not the photographic ETOPO land textures");
                 operationalMap.SetState(game, ToolkitActionMode.Move, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
                 operationalMap.SetHoverHex(new HexCoord(2, 3));
                 operationalMap.SetState(game, ToolkitActionMode.Search, MoveMode.Normal, SearchMode.Active, Salvo.Standard);
