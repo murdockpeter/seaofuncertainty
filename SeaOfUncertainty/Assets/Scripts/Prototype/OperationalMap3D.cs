@@ -92,6 +92,10 @@ namespace SeaOfUncertainty.Prototype
         private readonly List<Transform> billboardLabels = new List<Transform>();
         private readonly List<GeographicLabel> geographicLabels = new List<GeographicLabel>();
         private readonly List<Whitecap> whitecaps = new List<Whitecap>();
+        private readonly List<Material> whitecapMaterialInstances = new List<Material>();
+        private float whitecapSeaState;
+        private float whitecapMinX, whitecapMaxX, whitecapMinZ, whitecapMaxZ;
+        private Vector3 whitecapWind, whitecapCross;
         private Vector3 cameraPanVelocity;
         private float cameraYawVelocity;
         private float cameraPitchVelocity;
@@ -100,7 +104,17 @@ namespace SeaOfUncertainty.Prototype
         private bool hasSavedCameraPose;
 
         private sealed class WakeTrail { public LineRenderer Renderer; public Color SternColor; public Color TailColor; }
-        private sealed class Whitecap { public LineRenderer Renderer; public float BaseAlpha; public float Phase; }
+        private enum WhitecapPhase { FadeIn, Hold, FadeOut, Gap }
+        private sealed class Whitecap
+        {
+            public LineRenderer Renderer;
+            public Material MaterialInstance;
+            public float BaseAlpha;
+            public float BaseWidthMultiplier;
+            public WhitecapPhase Phase;
+            public float PhaseTimer;
+            public float PhaseDuration;
+        }
         private sealed class GeographicLabel
         {
             public Transform Transform;
@@ -269,16 +283,19 @@ namespace SeaOfUncertainty.Prototype
             navalDeckMaterial = MaterialFor("FormationDeck", "Standard", new Color(.075f, .105f, .115f, 1f), .18f, .3f);
             canopyMaterial = MaterialFor("FormationCanopy", "Standard", new Color(.025f, .10f, .15f, 1f), .48f, .72f);
             foamMaterial = TransparentMaterialFor("CoastalFoam", new Color(.74f, .92f, .9f, .34f), .08f, .52f);
-            whitecapMaterial = TransparentMaterialFor("SeaStateWhitecaps", new Color(.82f, .95f, .96f, .42f), 0f, .18f);
+            // Standard, not a vertex-color-aware shader: this build only reliably renders shaders already
+            // proven elsewhere in the project (a shader found only by name here, unused by anything else,
+            // rendered as nothing at all — its GPU variant was evidently stripped despite Shader.Find succeeding).
+            // So per-whitecap animation drives each cap's own instanced material tint (see Update()), and the
+            // contrail fade is baked directly into the texture's alpha instead of a LineRenderer color gradient.
+            whitecapMaterial = TransparentMaterialFor("SeaStateWhitecaps", new Color(.82f, .95f, .96f, 1f), 0f, .05f);
             whitecapMaterial.mainTexture = CreateWhitecapTexture(96, 12);
             whitecapMaterial.mainTextureScale = new Vector2(1.8f, 1f);
             Texture2D contrailMistTexture = CreateContrailMistTexture(128, 16);
-            contrailMistMaterial = TransparentMaterialFor("ContrailMist", new Color(.82f, .94f, 1f, .68f), 0f, .08f);
+            contrailMistMaterial = TransparentMaterialFor("ContrailMist", new Color(.82f, .94f, 1f, .58f), 0f, .05f);
             contrailMistMaterial.mainTexture = contrailMistTexture;
-            contrailMistMaterial.mainTextureScale = new Vector2(2.4f, 1f);
-            contrailCoreMaterial = TransparentMaterialFor("ContrailVaporCore", new Color(.94f, .99f, 1f, .56f), 0f, .12f);
+            contrailCoreMaterial = TransparentMaterialFor("ContrailVaporCore", new Color(.96f, .99f, 1f, .62f), 0f, .05f);
             contrailCoreMaterial.mainTexture = contrailMistTexture;
-            contrailCoreMaterial.mainTextureScale = new Vector2(3.1f, 1f);
             coastalFoamMaterial = TransparentMaterialFor("BrokenCoastalFoam", new Color(.84f, .97f, .94f, .82f), .02f, .34f);
             coastalFoamMaterial.mainTexture = CreateCoastalFoamMask(128);
             coastalFoamMaterial.mainTextureScale = Vector2.one;
@@ -402,10 +419,18 @@ namespace SeaOfUncertainty.Prototype
                 {
                     Whitecap whitecap = whitecaps[i];
                     if (whitecap.Renderer == null) continue;
-                    float breathing = .78f + Mathf.Sin(Time.time * .72f + whitecap.Phase) * .22f;
-                    Color color = new Color(.82f, .95f, .96f, whitecap.BaseAlpha * breathing);
-                    whitecap.Renderer.startColor = color;
-                    whitecap.Renderer.endColor = WithAlpha(color, color.a * .08f);
+                    AdvanceWhitecap(whitecap, deltaTime);
+                    bool visible = whitecap.Phase != WhitecapPhase.Gap;
+                    whitecap.Renderer.enabled = visible;
+                    if (!visible) continue;
+                    float envelope = WhitecapEnvelope(whitecap);
+                    // Standard (the shader every whitecap material actually renders with) ignores LineRenderer's
+                    // per-vertex startColor/endColor gradient entirely, so the visible alpha has to be driven
+                    // through each cap's own instanced material tint instead — that property Standard does read.
+                    Color color = whitecap.MaterialInstance.color;
+                    color.a = whitecap.BaseAlpha * envelope;
+                    whitecap.MaterialInstance.color = color;
+                    whitecap.Renderer.widthMultiplier = whitecap.BaseWidthMultiplier * Mathf.Lerp(.55f, 1f, envelope);
                 }
             }
             UpdateActiveFormationPulse(deltaTime);
@@ -1536,53 +1561,126 @@ namespace SeaOfUncertainty.Prototype
         private void BuildSeaStateWhitecaps()
         {
             whitecapRoot = Child("Sea-State Whitecaps", root.transform).transform;
-            float seaState = Mathf.Clamp01(area.Presentation.SeaState);
-            int targetCount = Mathf.RoundToInt(Mathf.Lerp(6f, 48f, seaState));
-            WhitecapDensityFollowsSeaState = targetCount == Mathf.RoundToInt(6f + seaState * 42f);
+            whitecapSeaState = Mathf.Clamp01(area.Presentation.SeaState);
+            int targetCount = Mathf.RoundToInt(Mathf.Lerp(6f, 48f, whitecapSeaState));
+            WhitecapDensityFollowsSeaState = targetCount == Mathf.RoundToInt(6f + whitecapSeaState * 42f);
             Vector3 first = HexToWorld(new HexCoord(0, 0));
             Vector3 last = HexToWorld(new HexCoord(area.Width - 1, area.Height - 1));
-            float minX = Mathf.Min(first.x, last.x) - .65f;
-            float maxX = Mathf.Max(first.x, last.x) + .65f;
-            float minZ = Mathf.Min(first.z, last.z) - .55f;
-            float maxZ = Mathf.Max(first.z, last.z) + .55f;
+            whitecapMinX = Mathf.Min(first.x, last.x) - .65f;
+            whitecapMaxX = Mathf.Max(first.x, last.x) + .65f;
+            whitecapMinZ = Mathf.Min(first.z, last.z) - .55f;
+            whitecapMaxZ = Mathf.Max(first.z, last.z) + .55f;
             int seed = area.Id == null ? 1949 : area.Id.Aggregate(1949, (value, character) => value * 31 + character);
             var random = new System.Random(seed);
             float windRadians = 32f * Mathf.Deg2Rad;
-            Vector3 wind = new Vector3(Mathf.Sin(windRadians), 0f, Mathf.Cos(windRadians));
-            Vector3 cross = new Vector3(wind.z, 0f, -wind.x);
+            whitecapWind = new Vector3(Mathf.Sin(windRadians), 0f, Mathf.Cos(windRadians));
+            whitecapCross = new Vector3(whitecapWind.z, 0f, -whitecapWind.x);
 
             for (int attempt = 0; attempt < targetCount * 24 && whitecaps.Count < targetCount; attempt++)
             {
-                float x = Mathf.Lerp(minX, maxX, (float)random.NextDouble());
-                float z = Mathf.Lerp(minZ, maxZ, (float)random.NextDouble());
+                float x = Mathf.Lerp(whitecapMinX, whitecapMaxX, (float)random.NextDouble());
+                float z = Mathf.Lerp(whitecapMinZ, whitecapMaxZ, (float)random.NextDouble());
                 Vector3 sample = SurfacePoint(x, z, WaterSurfaceY + .032f);
                 if (!TryWorldToHex(sample, out HexCoord hex) || area.TerrainAt(hex) != OperationalTerrain.DeepWater) continue;
                 if (whitecaps.Any(existing => existing.Renderer != null && Vector3.Distance(existing.Renderer.GetPosition(1), sample) < .82f)) continue;
 
-                float length = Mathf.Lerp(.18f, .46f, (float)random.NextDouble()) * Mathf.Lerp(.82f, 1.18f, seaState);
-                float bend = Mathf.Lerp(-.055f, .055f, (float)random.NextDouble());
-                Vector3 start = SurfacePoint(x - wind.x * length * .5f, z - wind.z * length * .5f, WaterSurfaceY + .032f);
-                Vector3 middle = SurfacePoint(x + cross.x * bend, z + cross.z * bend, WaterSurfaceY + .034f);
-                Vector3 end = SurfacePoint(x + wind.x * length * .5f, z + wind.z * length * .5f, WaterSurfaceY + .032f);
                 GameObject capObject = Child("World-Anchored Sea-State Whitecap", whitecapRoot);
                 LineRenderer line = capObject.AddComponent<LineRenderer>();
                 line.sharedMaterial = whitecapMaterial;
                 line.useWorldSpace = true;
                 line.positionCount = 3;
-                line.SetPositions(new[] { start, middle, end });
-                line.widthCurve = new AnimationCurve(new Keyframe(0f, .018f), new Keyframe(.42f, .052f), new Keyframe(1f, .008f));
-                line.widthMultiplier = Mathf.Lerp(.72f, 1.15f, seaState);
+                line.widthCurve = new AnimationCurve(new Keyframe(0f, .012f), new Keyframe(.42f, .034f), new Keyframe(1f, .005f));
                 line.numCornerVertices = 2;
                 line.numCapVertices = 2;
                 line.textureMode = LineTextureMode.Tile;
-                float alpha = Mathf.Lerp(.07f, .19f, seaState) * Mathf.Lerp(.72f, 1f, (float)random.NextDouble());
-                Color color = new Color(.82f, .95f, .96f, alpha);
-                line.startColor = color;
-                line.endColor = WithAlpha(color, alpha * .08f);
-                whitecaps.Add(new Whitecap { Renderer = line, BaseAlpha = alpha, Phase = (float)random.NextDouble() * Mathf.PI * 2f });
+                // Give this cap its own material instance: Standard reads a material's own _Color tint every
+                // frame, so animating this instance (not the shared, dead LineRenderer vertex gradient) works.
+                Material instance = line.material;
+                whitecapMaterialInstances.Add(instance);
+                var whitecap = new Whitecap { Renderer = line, MaterialInstance = instance };
+                PlaceWhitecap(whitecap, x, z);
+                whitecap.Phase = WhitecapPhase.FadeIn;
+                whitecap.PhaseDuration = UnityEngine.Random.Range(.8f, 1.6f);
+                whitecap.PhaseTimer = 0f;
+                // Stagger the initial population across a full life cycle so the sea doesn't visibly "switch on"
+                // in unison the moment the map loads — fast-forward each cap by a random amount right away.
+                AdvanceWhitecap(whitecap, UnityEngine.Random.value * 14f);
+                whitecaps.Add(whitecap);
             }
             SeaStateWhitecapCount = whitecaps.Count;
             WhitecapsAreWorldAnchored = whitecaps.Count > 0 && whitecaps.All(item => item.Renderer != null && item.Renderer.useWorldSpace);
+        }
+
+        private void PlaceWhitecap(Whitecap whitecap, float x, float z)
+        {
+            float length = UnityEngine.Random.Range(.13f, .32f) * Mathf.Lerp(.82f, 1.18f, whitecapSeaState);
+            float bend = UnityEngine.Random.Range(-.055f, .055f);
+            Vector3 start = SurfacePoint(x - whitecapWind.x * length * .5f, z - whitecapWind.z * length * .5f, WaterSurfaceY + .032f);
+            Vector3 middle = SurfacePoint(x + whitecapCross.x * bend, z + whitecapCross.z * bend, WaterSurfaceY + .034f);
+            Vector3 end = SurfacePoint(x + whitecapWind.x * length * .5f, z + whitecapWind.z * length * .5f, WaterSurfaceY + .032f);
+            whitecap.Renderer.SetPositions(new[] { start, middle, end });
+            whitecap.BaseWidthMultiplier = Mathf.Lerp(.55f, .92f, whitecapSeaState) * UnityEngine.Random.Range(.85f, 1.15f);
+            whitecap.BaseAlpha = Mathf.Lerp(.15f, .31f, whitecapSeaState) * UnityEngine.Random.Range(.72f, 1f);
+        }
+
+        private bool TryFindDeepWaterPoint(out float x, out float z)
+        {
+            for (int attempt = 0; attempt < 40; attempt++)
+            {
+                x = Mathf.Lerp(whitecapMinX, whitecapMaxX, UnityEngine.Random.value);
+                z = Mathf.Lerp(whitecapMinZ, whitecapMaxZ, UnityEngine.Random.value);
+                Vector3 sample = SurfacePoint(x, z, WaterSurfaceY + .032f);
+                if (!TryWorldToHex(sample, out HexCoord hex) || area.TerrainAt(hex) != OperationalTerrain.DeepWater) continue;
+                if (whitecaps.Any(existing => existing.Phase != WhitecapPhase.Gap && existing.Renderer != null
+                    && Vector3.Distance(existing.Renderer.GetPosition(1), sample) < .6f)) continue;
+                return true;
+            }
+            x = Mathf.Lerp(whitecapMinX, whitecapMaxX, UnityEngine.Random.value);
+            z = Mathf.Lerp(whitecapMinZ, whitecapMaxZ, UnityEngine.Random.value);
+            return false;
+        }
+
+        private void AdvanceWhitecap(Whitecap whitecap, float deltaTime)
+        {
+            whitecap.PhaseTimer += deltaTime;
+            while (whitecap.PhaseTimer >= whitecap.PhaseDuration)
+            {
+                whitecap.PhaseTimer -= whitecap.PhaseDuration;
+                switch (whitecap.Phase)
+                {
+                    case WhitecapPhase.FadeIn:
+                        whitecap.Phase = WhitecapPhase.Hold;
+                        whitecap.PhaseDuration = UnityEngine.Random.Range(2.5f, 5.5f);
+                        break;
+                    case WhitecapPhase.Hold:
+                        whitecap.Phase = WhitecapPhase.FadeOut;
+                        whitecap.PhaseDuration = UnityEngine.Random.Range(1.2f, 2.4f);
+                        break;
+                    case WhitecapPhase.FadeOut:
+                        whitecap.Phase = WhitecapPhase.Gap;
+                        whitecap.PhaseDuration = UnityEngine.Random.Range(1.5f, 4f);
+                        break;
+                    case WhitecapPhase.Gap:
+                    default:
+                        TryFindDeepWaterPoint(out float x, out float z);
+                        PlaceWhitecap(whitecap, x, z);
+                        whitecap.Phase = WhitecapPhase.FadeIn;
+                        whitecap.PhaseDuration = UnityEngine.Random.Range(.8f, 1.6f);
+                        break;
+                }
+            }
+        }
+
+        private static float WhitecapEnvelope(Whitecap whitecap)
+        {
+            float t = whitecap.PhaseDuration > .0001f ? Mathf.Clamp01(whitecap.PhaseTimer / whitecap.PhaseDuration) : 1f;
+            switch (whitecap.Phase)
+            {
+                case WhitecapPhase.FadeIn: return Mathf.SmoothStep(0f, 1f, t);
+                case WhitecapPhase.Hold: return 1f;
+                case WhitecapPhase.FadeOut: return Mathf.SmoothStep(1f, 0f, t);
+                default: return 0f;
+            }
         }
 
         private void BuildCarrierGroup(Transform parent, Material sideMaterial)
@@ -1856,7 +1954,6 @@ namespace SeaOfUncertainty.Prototype
             mist.useWorldSpace = false;
             mist.positionCount = mistPoints.Length;
             mist.SetPositions(mistPoints);
-            mist.colorGradient = VaporGradient(new Color(.94f, .99f, 1f), new Color(.55f, .79f, .92f), .23f, .0175f);
             mist.widthCurve = new AnimationCurve(
                 new Keyframe(0f, .018f),
                 new Keyframe(.16f, .048f),
@@ -1865,7 +1962,7 @@ namespace SeaOfUncertainty.Prototype
             mist.widthMultiplier = 1f;
             mist.numCornerVertices = 4;
             mist.numCapVertices = 3;
-            mist.textureMode = LineTextureMode.Tile;
+            mist.textureMode = LineTextureMode.Stretch;
 
             GameObject coreObject = Child(name + " Contrail Vapor Core", parent);
             LineRenderer core = coreObject.AddComponent<LineRenderer>();
@@ -1873,7 +1970,6 @@ namespace SeaOfUncertainty.Prototype
             core.useWorldSpace = false;
             core.positionCount = positions.Length;
             core.SetPositions(positions.Select(point => point + Vector3.up * .004f).ToArray());
-            core.colorGradient = VaporGradient(Color.white, new Color(.69f, .88f, .98f), .27f, 0f);
             core.widthCurve = new AnimationCurve(
                 new Keyframe(0f, .008f),
                 new Keyframe(.18f, .016f),
@@ -1882,28 +1978,8 @@ namespace SeaOfUncertainty.Prototype
             core.widthMultiplier = 1f;
             core.numCornerVertices = 3;
             core.numCapVertices = 2;
-            core.textureMode = LineTextureMode.Tile;
+            core.textureMode = LineTextureMode.Stretch;
             return mist;
-        }
-
-        private static Gradient VaporGradient(Color nearColor, Color farColor, float nearAlpha, float farAlpha)
-        {
-            var gradient = new Gradient();
-            gradient.SetKeys(
-                new[]
-                {
-                    new GradientColorKey(nearColor, 0f),
-                    new GradientColorKey(Color.Lerp(nearColor, farColor, .42f), .46f),
-                    new GradientColorKey(farColor, 1f)
-                },
-                new[]
-                {
-                    new GradientAlphaKey(nearAlpha, 0f),
-                    new GradientAlphaKey(nearAlpha * .82f, .18f),
-                    new GradientAlphaKey(nearAlpha * .46f, .58f),
-                    new GradientAlphaKey(farAlpha, 1f)
-                });
-            return gradient;
         }
 
         private static Color WithAlpha(Color color, float alpha)
@@ -2039,7 +2115,7 @@ namespace SeaOfUncertainty.Prototype
             var texture = new Texture2D(width, height, TextureFormat.RGBA32, true)
             {
                 name = "Layered Contrail Mist",
-                wrapMode = TextureWrapMode.Repeat,
+                wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Trilinear,
                 anisoLevel = 4
             };
@@ -2055,7 +2131,11 @@ namespace SeaOfUncertainty.Prototype
                     float wisps = TileableNoise(u, v, 13f, 2.3f, 43.1f, 16.4f);
                     float breakup = Mathf.Lerp(.18f, 1f, Mathf.SmoothStep(.28f, .78f, broad * .7f + wisps * .3f));
                     float asymmetricEdge = Mathf.Lerp(.78f, 1f, TileableNoise(u, v, 7f, 3f, 7.9f, 29.6f));
-                    colors[y * width + x] = new Color(.91f, .98f, 1f, feather * breakup * asymmetricEdge);
+                    // Baked near (u=0, at the aircraft) to far (u=1, oldest/most dissipated) fade. The LineRenderer
+                    // uses Stretch mode so this maps once across the whole trail — this IS the misty taper, since
+                    // the "Standard" shader this renders with can't use LineRenderer's per-vertex color gradient.
+                    float lengthFade = Mathf.SmoothStep(1f, 0f, Mathf.Clamp01((u - .05f) / .85f));
+                    colors[y * width + x] = new Color(.91f, .98f, 1f, feather * breakup * asymmetricEdge * lengthFade);
                 }
             }
             texture.SetPixels(colors);
@@ -2848,6 +2928,7 @@ namespace SeaOfUncertainty.Prototype
             return material;
         }
 
+
         private static GameObject Child(string name, Transform parent)
         {
             var child = new GameObject(name) { layer = MapLayer };
@@ -2915,6 +2996,8 @@ namespace SeaOfUncertainty.Prototype
             formationMeshes.Clear();
             foreach (Texture2D texture in generatedTextures) DestroyObject(texture);
             generatedTextures.Clear();
+            foreach (Material instance in whitecapMaterialInstances) DestroyObject(instance);
+            whitecapMaterialInstances.Clear();
             DestroyObject(lineMaterial); DestroyObject(waterMaterial); DestroyObject(landMaterial); DestroyObject(littoralMaterial); DestroyObject(highlandMaterial);
             DestroyObject(blueMaterial); DestroyObject(redMaterial); DestroyObject(navalHullMaterial); DestroyObject(navalDeckMaterial); DestroyObject(canopyMaterial);
             DestroyObject(foamMaterial); DestroyObject(whitecapMaterial); DestroyObject(contrailMistMaterial); DestroyObject(contrailCoreMaterial); DestroyObject(coastalFoamMaterial); DestroyObject(wetShoreMaterial); DestroyObject(shallowWaterMaterial); DestroyObject(atmosphericMaterial); DestroyObject(cloudShadowMaterial);
