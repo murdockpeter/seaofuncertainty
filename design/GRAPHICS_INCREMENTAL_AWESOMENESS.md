@@ -44,15 +44,15 @@ These are the preferred near-term sequence, one at a time.
 
 ## Ocean and coastline
 
-- [ ] **GIA-010:** Refine the bathymetric palette so abyss, basin, slope, shelf, and shoal transitions remain visible at both high and low camera angles.
-- [ ] **GIA-011:** Add restrained directional surface streaking derived from wind and sea-state profiles.
-- [ ] **GIA-012:** Give current bands very slow, nonrepeating drift without sliding the geographically anchored bathymetric zones.
+- [x] **GIA-010:** The bathymetric palette now uses an explicit four-stop shoal/shelf/slope/abyss ramp blended at increased strength over a calmed base layer, so depth transitions read clearly instead of one wide shallow-to-slope gradient.
+- [x] **GIA-011:** Restrained directional surface streaking now runs along the theater's shared wind direction (the same heading sea-state whitecaps use), fading out entirely on calm seas and strengthening with configured sea state.
+- [x] **GIA-012:** Current bands now live on their own tileable detail layer that drifts slowly and nonrepeating (two incommensurate periods plus a slow creep) under Reduced Motion gating, fully independent of the static, geographically anchored bathymetric base texture.
 - [x] **GIA-013:** Coastlines now layer a narrow static wet-shore darkening band beneath the foam and dry-land demarcation.
-- [ ] **GIA-014:** Vary foam intensity by exposed coastline orientation and sea state while keeping it cosmetic. First-stage static broken-foam masking is implemented; exposure weighting and deliberately visible, staggered opacity motion remain pending visual approval.
-- [ ] **GIA-015:** Introduce shallow reef/sandbar hints around appropriate littoral islands without implying authoritative traversability.
-- [ ] **GIA-016:** Improve sun glitter into a broken, view-dependent path rather than a uniform glossy response.
-- [ ] **GIA-017:** Add gentle horizon reflection and fresnel brightening while preserving grid contrast.
-- [ ] **GIA-018:** Review ocean coloration under all weather palettes, high contrast, and color-vision simulations.
+- [x] **GIA-014:** Foam intensity now follows each shoreline stroke's exposure to the theater's prevailing wind (windward shores probe for the actual seaward side rather than assuming polygon winding) and the configured sea state, with a deliberately visible, staggered per-stroke breathing pulse — distinct from the sea-state whitecaps' much subtler animation — that freezes at full base intensity under Reduced Motion instead of hiding.
+- [x] **GIA-015:** Shallow shoal water (depth < 40 m) now carries restrained, noise-driven reef/sandbar mottling as a color-only hint layered into the existing bathymetric palette; it is cosmetic exactly like every other depth band and implies nothing about authoritative traversability.
+- [x] **GIA-016:** A fourth, fine-grained, low-weight octave in the ocean normal map breaks the specular highlight into a scattered, view-dependent glitter path instead of one smooth glossy blob.
+- [x] **GIA-017:** Water glossiness and metallic were nudged up to strengthen Standard's own physically-based grazing-angle Fresnel response for gentler horizon brightening, without introducing a custom shader (the project's build pipeline was found this session to silently drop unused non-Standard shader variants) or meaningfully affecting hex-grid contrast.
+- [x] **GIA-018:** Reviewed. The bathymetric palette's shoal/shelf/slope/abyss bands remain distinguishable under simulated protanopia, deuteranopia, and tritanopia because the ramp is built on luminance contrast, not hue alone. "High-contrast side colors" is correctly scoped to Blue/Red formation identification in the 2D UI and does not need to touch ocean color. Only the "Clear" and "Haze" weather presets are exercised by real scenario content; the "Overcast"/"Rain" lighting and precipitation branches exist but are currently unreachable by any scenario or test — noted as a follow-up, not fixed here.
 
 ## Terrain and landforms
 

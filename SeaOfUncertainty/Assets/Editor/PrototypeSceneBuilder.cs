@@ -692,6 +692,12 @@ namespace SeaOfUncertainty.Editor
                 Assert(luzonMap.CoastlineStrokesAvoidTableEdges && luzonMap.SuppressedTableEdgeShorelineSegmentCount > 0, "Coastline strokes omit artificial polygon closures wherever land exits the theater bounds");
                 Assert(luzonMap.UsesGeographicBathymetry, "Geographic ocean coloration is driven by measured ETOPO seafloor depth");
                 Assert(luzonMap.HasOceanCurrentBands && luzonMap.OceanColorLuminanceRange > .08f, "Ocean texture combines readable broad color variation with restrained current bands");
+                Assert(luzonMap.UsesFourStopBathymetricPalette && luzonMap.BathymetricDepthBandCount >= 3, $"Measured seafloor depth drives a distinct shoal/shelf/slope/abyss palette (bands observed={luzonMap.BathymetricDepthBandCount})");
+                Assert(luzonMap.HasWindAlignedSurfaceStreaks, "Open ocean carries restrained directional streaking aligned to the theater's prevailing wind");
+                Assert(luzonMap.OceanCurrentBandsAnimateIndependently, "Current bands drift on their own detail layer rather than the geographically anchored bathymetric base texture");
+                Assert(luzonMap.CoastalFoamVariesByExposureAndSeaState && luzonMap.HasStaggeredCoastalFoamMotion, $"Coastal foam intensity varies by shoreline exposure and sea state with a deliberately visible staggered pulse (exposure range={luzonMap.CoastalFoamExposureRange:F3})");
+                Assert(luzonMap.HasShallowReefHints, "Shallow shoal water carries restrained reef/sandbar mottling hints without implying authoritative traversability");
+                Assert(luzonMap.HasScatteredSunGlitter && luzonMap.HasHorizonFresnelBrightening, "Ocean specular response uses a broken, scattered glitter path with gentle grazing-angle brightening");
                 Assert(luzonMap.SeaStateWhitecapCount >= 12 && luzonMap.WhitecapDensityFollowsSeaState && luzonMap.WhitecapsAreWorldAnchored && luzonMap.ContainsRenderedName("World-Anchored Sea-State Whitecap"), "Configured sea state produces sparse, deterministic whitecaps anchored to the curved ocean surface");
                 Assert(luzonMap.HasAtmosphericHaze && luzonMap.CloudShadowCount >= 2 && luzonMap.WeatherPreset == "Haze", "Data-driven haze and moving cloud-shadow layers establish maritime atmosphere");
                 Assert(luzonMap.GeographicLabelCount == luzon.Area.Locations.Count, "Ports, airfields, straits, and objectives receive map-space geographic labels");

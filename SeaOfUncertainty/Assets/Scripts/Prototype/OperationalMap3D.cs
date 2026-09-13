@@ -16,6 +16,9 @@ namespace SeaOfUncertainty.Prototype
         private const float HexRadius = 1f;
         private const float EarthRadiusNauticalMiles = 3440.065f;
         private const float WaterSurfaceY = -.08f;
+        // Shared theater wind direction: aligns sea-state whitecaps (GIA-004) and surface streaking (GIA-011)
+        // to the same prevailing wind rather than two independently invented directions.
+        private const float OceanWindDirectionDegrees = 32f;
         private const float GeographicLandSurfaceY = -.05f;
         private const float ShoalSurfaceY = .015f;
         private readonly OperationalAreaDefinition area;
@@ -84,6 +87,7 @@ namespace SeaOfUncertainty.Prototype
         private bool reducedMotion;
         private bool showPermanentGrid;
         private float waterScroll;
+        private float oceanCurrentDriftTime;
         private Transform waterSurfaceTransform;
         private Transform whitecapRoot;
         private Transform cloudShadowRoot;
@@ -93,6 +97,8 @@ namespace SeaOfUncertainty.Prototype
         private readonly List<GeographicLabel> geographicLabels = new List<GeographicLabel>();
         private readonly List<Whitecap> whitecaps = new List<Whitecap>();
         private readonly List<Material> whitecapMaterialInstances = new List<Material>();
+        private readonly List<CoastalFoamStroke> coastalFoamStrokes = new List<CoastalFoamStroke>();
+        private readonly List<Material> coastalFoamMaterialInstances = new List<Material>();
         private float whitecapSeaState;
         private float whitecapMinX, whitecapMaxX, whitecapMinZ, whitecapMaxZ;
         private Vector3 whitecapWind, whitecapCross;
@@ -125,6 +131,7 @@ namespace SeaOfUncertainty.Prototype
             public int Priority;
         }
         private sealed class ShorelineStroke { public Vector3[] Points; public bool Closed; }
+        private sealed class CoastalFoamStroke { public LineRenderer Renderer; public Material MaterialInstance; public float BaseAlpha; public float Phase; public float Speed; }
         private sealed class Motion
         {
             public Transform Transform;
@@ -178,7 +185,17 @@ namespace SeaOfUncertainty.Prototype
         public float TerrainVerticalExaggeration => Mathf.Max(1f, area.Presentation.ElevationExaggeration);
         public bool UsesGeographicBathymetry { get; private set; }
         public bool HasOceanCurrentBands { get; private set; }
+        public bool OceanCurrentBandsAnimateIndependently { get; private set; }
+        public bool HasWindAlignedSurfaceStreaks { get; private set; }
+        public int BathymetricDepthBandCount { get; private set; }
+        public bool UsesFourStopBathymetricPalette => BathymetricDepthBandCount >= 3;
         public float OceanColorLuminanceRange { get; private set; }
+        public bool CoastalFoamVariesByExposureAndSeaState { get; private set; }
+        public bool HasStaggeredCoastalFoamMotion { get; private set; }
+        public float CoastalFoamExposureRange { get; private set; }
+        public bool HasShallowReefHints { get; private set; }
+        public bool HasScatteredSunGlitter { get; private set; }
+        public bool HasHorizonFresnelBrightening { get; private set; }
         public int WaterSurfaceVertexCount { get; private set; }
         public bool HasDirectionalSun { get; private set; }
         public float SunSourceAzimuthDegrees { get; private set; }
@@ -411,6 +428,15 @@ namespace SeaOfUncertainty.Prototype
                 if (waterMaterial.HasProperty("_BumpMap")) waterMaterial.SetTextureOffset("_BumpMap", new Vector2(waterScroll, waterScroll * .43f));
                 if (waterSurfaceTransform != null) waterSurfaceTransform.localPosition = new Vector3(0f, WaterSurfaceY + Mathf.Sin(waterScroll * Mathf.PI * 18f) * .008f, 0f);
                 if (sunTransform != null) sunTransform.position = new Vector3(waterScroll * 1.8f, 0f, waterScroll * .72f);
+                // GIA-012: current bands drift slowly and never repeat on an obvious cycle (two incommensurate
+                // sine periods plus a slow linear creep), while _MainTex (the bathymetric zones) stays untouched.
+                if (OceanCurrentBandsAnimateIndependently)
+                {
+                    oceanCurrentDriftTime += deltaTime;
+                    float driftX = Mathf.Sin(oceanCurrentDriftTime * .0165f) * .6f + oceanCurrentDriftTime * .0027f;
+                    float driftY = Mathf.Cos(oceanCurrentDriftTime * .0113f) * .6f + oceanCurrentDriftTime * .0019f;
+                    waterMaterial.SetTextureOffset("_DetailAlbedoMap", new Vector2(driftX, driftY));
+                }
             }
             UpdateGeographicLabelLayout();
             if (!reducedMotion)
@@ -432,6 +458,18 @@ namespace SeaOfUncertainty.Prototype
                     whitecap.MaterialInstance.color = color;
                     whitecap.Renderer.widthMultiplier = whitecap.BaseWidthMultiplier * Mathf.Lerp(.55f, 1f, envelope);
                 }
+            }
+            // GIA-014: a deliberately visible (not "very subtle" like whitecap breathing) per-stroke pulse, each
+            // on its own staggered phase/speed. Frozen at full base intensity under Reduced Motion rather than
+            // hidden, since coastal foam is a permanent shoreline feature, not a discretionary sea-state extra.
+            for (int i = 0; i < coastalFoamStrokes.Count; i++)
+            {
+                CoastalFoamStroke foam = coastalFoamStrokes[i];
+                if (foam.Renderer == null) continue;
+                float breathing = reducedMotion ? 1f : .55f + Mathf.Sin(Time.time * foam.Speed + foam.Phase) * .45f;
+                Color color = foam.MaterialInstance.color;
+                color.a = foam.BaseAlpha * breathing;
+                foam.MaterialInstance.color = color;
             }
             UpdateActiveFormationPulse(deltaTime);
             for (int i = motions.Count - 1; i >= 0; i--)
@@ -1065,6 +1103,7 @@ namespace SeaOfUncertainty.Prototype
             MeshObject("Natural Earth Land", root.transform, landMaterial, mesh);
             ApplyCoastlineDrivenShelf(shorelines, first, last, coastline, projectionBounds);
             CoastlineStrokesAvoidTableEdges = true;
+            float minExposure = float.MaxValue, maxExposure = float.MinValue;
             foreach (Vector3[] shoreline in shorelines)
             {
                 List<ShorelineStroke> strokes = VisibleShorelineStrokes(shoreline, coastlineClipBounds, out int suppressedSegments);
@@ -1072,12 +1111,18 @@ namespace SeaOfUncertainty.Prototype
                 foreach (ShorelineStroke stroke in strokes)
                 {
                     CreateShorelineRenderer("Natural Earth Wet Shore Darkening", stroke, wetShoreMaterial, .036f, new Color(.12f, .17f, .105f, .42f), .007f, false);
-                    CreateShorelineRenderer("Natural Earth Broken Coastal Foam", stroke, coastalFoamMaterial, .024f, new Color(.84f, .97f, .94f, .46f), .012f, true);
+                    float exposure = ComputeShorelineExposure(stroke);
+                    minExposure = Mathf.Min(minExposure, exposure);
+                    maxExposure = Mathf.Max(maxExposure, exposure);
+                    CreateCoastalFoamStroke(stroke, exposure);
                     CreateShorelineRenderer("Natural Earth Sandy Shoreline", stroke, lineMaterial, .0105f, new Color(.68f, .69f, .43f, .58f), .016f, false);
                     HasCoastalFoam = true;
                     HasWetShoreBand = true;
                 }
             }
+            CoastalFoamExposureRange = maxExposure > minExposure ? maxExposure - minExposure : 0f;
+            CoastalFoamVariesByExposureAndSeaState = CoastalFoamExposureRange > .25f;
+            HasStaggeredCoastalFoamMotion = coastalFoamStrokes.Count > 0;
             if (!BuildGeographicElevationTerrain(coastline, projectionBounds)) BuildCoastlineTerrainRelief(shorelines);
             CoastlinePolygonCount = shorelines.Count;
             OffMapCoastlineVertexCount = shorelines.Sum(shoreline => shoreline.Count(point => point.x < projectionBounds.xMin || point.x > projectionBounds.xMax || point.z < projectionBounds.yMin || point.z > projectionBounds.yMax));
@@ -1157,6 +1202,50 @@ namespace SeaOfUncertainty.Prototype
             if (textured) line.textureMode = LineTextureMode.Tile;
             line.SetPositions(stroke.Points.Select(point => point + Vector3.up * heightOffset).ToArray());
             return line;
+        }
+
+        // GIA-014: how exposed a stretch of coastline is to the prevailing wind/sea, in [0,1]. Probes a short
+        // distance to either side of the stroke's midpoint to find which side is actually water (robust to
+        // polygon winding), then compares that seaward direction against the shared theater wind.
+        private float ComputeShorelineExposure(ShorelineStroke stroke)
+        {
+            if (stroke.Points.Length < 2) return .5f;
+            Vector3 start = stroke.Points[0];
+            Vector3 end = stroke.Points[stroke.Points.Length - 1];
+            Vector3 mid = stroke.Points[stroke.Points.Length / 2];
+            Vector3 tangent = end - start;
+            tangent.y = 0f;
+            if (tangent.sqrMagnitude < .0001f) tangent = Vector3.forward;
+            tangent.Normalize();
+            Vector3 normal = new Vector3(tangent.z, 0f, -tangent.x);
+            Vector3 probeA = mid + normal * .14f;
+            Vector3 probeB = mid - normal * .14f;
+            bool aIsWater = TryWorldToHex(probeA, out HexCoord hexA) && area.TerrainAt(hexA) != OperationalTerrain.Land;
+            bool bIsWater = TryWorldToHex(probeB, out HexCoord hexB) && area.TerrainAt(hexB) != OperationalTerrain.Land;
+            Vector3 seaward = bIsWater && !aIsWater ? -normal : normal;
+            float windAngle = OceanWindDirectionDegrees * Mathf.Deg2Rad;
+            Vector3 windDirection = new Vector3(Mathf.Sin(windAngle), 0f, Mathf.Cos(windAngle));
+            return Mathf.Clamp01(Vector3.Dot(windDirection, -seaward) * .5f + .5f);
+        }
+
+        // GIA-014: foam intensity now follows exposure (windward shores break harder than sheltered ones) and
+        // configured sea state, with a deliberately visible per-stroke breathing pulse rather than a flat mask.
+        private void CreateCoastalFoamStroke(ShorelineStroke stroke, float exposure)
+        {
+            float seaState = Mathf.Clamp01(area.Presentation.SeaState);
+            float baseAlpha = Mathf.Clamp01(Mathf.Lerp(.22f, .95f, exposure) * Mathf.Lerp(.55f, 1.15f, seaState));
+            LineRenderer line = CreateShorelineRenderer("Natural Earth Broken Coastal Foam", stroke, coastalFoamMaterial, .024f, new Color(.84f, .97f, .94f, baseAlpha), .012f, true);
+            Material instance = line.material;
+            instance.color = new Color(.84f, .97f, .94f, baseAlpha);
+            coastalFoamMaterialInstances.Add(instance);
+            coastalFoamStrokes.Add(new CoastalFoamStroke
+            {
+                Renderer = line,
+                MaterialInstance = instance,
+                BaseAlpha = baseAlpha,
+                Phase = UnityEngine.Random.value * Mathf.PI * 2f,
+                Speed = UnityEngine.Random.Range(1.4f, 2.6f)
+            });
         }
 
         private void BuildLocations()
@@ -1512,13 +1601,18 @@ namespace SeaOfUncertainty.Prototype
             {
                 for (int side = -1; side <= 1; side += 2)
                 {
+                    // Wingtip vortex trails: AddSweptWing places each wing at local (side*.19, 0, -.015), scaled
+                    // .42 along its own X and yawed side*19 degrees, which puts its outer tip at roughly
+                    // (side*.39, 0, .05) relative to the aircraft. Trails originate there and drift slightly
+                    // inward/down heading aft, rather than at the fuselage centerline.
+                    float tipX = side * .37f;
                     Vector3[] points =
                     {
-                        new Vector3(side * .055f, -.045f, -.39f),
-                        new Vector3(side * .056f, -.044f, -.62f),
-                        new Vector3(side * .060f, -.040f, -.91f),
-                        new Vector3(side * .068f, -.034f, -1.24f),
-                        new Vector3(side * .078f, -.026f, -1.52f)
+                        new Vector3(tipX, -.01f, .02f),
+                        new Vector3(tipX * .99f, -.03f, -.28f),
+                        new Vector3(tipX * .97f, -.05f, -.62f),
+                        new Vector3(tipX * .93f, -.07f, -.98f),
+                        new Vector3(tipX * .88f, -.09f, -1.34f)
                     };
                     LineRenderer contrail = LocalContrailTrail(parent, "Aircraft High-Altitude Vapor Contrail Mist", points, contrailMistMaterial, contrailCoreMaterial);
                     PersistentTrailsUseFormationSpace &= !contrail.useWorldSpace;
@@ -1572,7 +1666,7 @@ namespace SeaOfUncertainty.Prototype
             whitecapMaxZ = Mathf.Max(first.z, last.z) + .55f;
             int seed = area.Id == null ? 1949 : area.Id.Aggregate(1949, (value, character) => value * 31 + character);
             var random = new System.Random(seed);
-            float windRadians = 32f * Mathf.Deg2Rad;
+            float windRadians = OceanWindDirectionDegrees * Mathf.Deg2Rad;
             whitecapWind = new Vector3(Mathf.Sin(windRadians), 0f, Mathf.Cos(windRadians));
             whitecapCross = new Vector3(whitecapWind.z, 0f, -whitecapWind.x);
 
@@ -1940,27 +2034,42 @@ namespace SeaOfUncertainty.Prototype
 
         private static LineRenderer LocalContrailTrail(Transform parent, string name, Vector3[] positions, Material mistMaterial, Material coreMaterial)
         {
-            var mistPoints = new Vector3[positions.Length];
             float side = Mathf.Sign(positions[0].x);
-            for (int index = 0; index < positions.Length; index++)
+            // A handful of hand-placed control points can't show off a bumpy width curve: with only ~5 vertices,
+            // the strip's edges are straight lines BETWEEN them, so any puff/neck detail the curve describes
+            // between two sparse points is simply cut off. Subdividing first gives enough real geometry for the
+            // irregular "chain of puffs" silhouette below to actually render instead of getting linearly smoothed
+            // back into one clean wedge — which is what was reading as a solid raindrop rather than cloudy mist.
+            Vector3[] densePositions = SubdivideLinePath(positions, 6);
+            int count = densePositions.Length;
+            var mistPoints = new Vector3[count];
+            var mistWidths = new Keyframe[count];
+            var coreWidths = new Keyframe[count];
+            for (int index = 0; index < count; index++)
             {
-                float disturbance = index == 0 ? 0f : (index % 2 == 0 ? .006f : -.004f) * side;
-                mistPoints[index] = positions[index] + new Vector3(disturbance, .002f, 0f);
+                float t = index / (float)(count - 1);
+                float wave = Mathf.Sin(t * 11f) * .010f + Mathf.Sin(t * 23f + 1.3f) * .006f;
+                float bob = Mathf.Sin(t * 17f + 2f) * .0015f;
+                mistPoints[index] = densePositions[index] + new Vector3(t < .02f ? 0f : wave * side, bob, 0f);
+
+                // Cloud-chain silhouette: an overall aging taper (narrow near the wingtip, wider toward the
+                // dissipating tail) modulated by irregular bulge/neck lumps instead of one smooth wedge.
+                float baseWidth = Mathf.Lerp(.014f, .09f, t);
+                float puff = .5f + .5f * Mathf.Sin(t * 12.5f) * Mathf.Sin(t * 4.7f + .6f);
+                float mistWidth = Mathf.Max(.004f, baseWidth * Mathf.Lerp(.42f, 1f, puff));
+                mistWidths[index] = new Keyframe(t, mistWidth);
+                coreWidths[index] = new Keyframe(t, Mathf.Max(.0018f, mistWidth * .3f));
             }
 
             GameObject mistObject = Child(name, parent);
             LineRenderer mist = mistObject.AddComponent<LineRenderer>();
             mist.sharedMaterial = mistMaterial;
             mist.useWorldSpace = false;
-            mist.positionCount = mistPoints.Length;
+            mist.positionCount = count;
             mist.SetPositions(mistPoints);
-            mist.widthCurve = new AnimationCurve(
-                new Keyframe(0f, .018f),
-                new Keyframe(.16f, .048f),
-                new Keyframe(.58f, .092f),
-                new Keyframe(1f, .145f));
+            mist.widthCurve = new AnimationCurve(mistWidths);
             mist.widthMultiplier = 1f;
-            mist.numCornerVertices = 4;
+            mist.numCornerVertices = 3;
             mist.numCapVertices = 3;
             mist.textureMode = LineTextureMode.Stretch;
 
@@ -1968,18 +2077,27 @@ namespace SeaOfUncertainty.Prototype
             LineRenderer core = coreObject.AddComponent<LineRenderer>();
             core.sharedMaterial = coreMaterial;
             core.useWorldSpace = false;
-            core.positionCount = positions.Length;
-            core.SetPositions(positions.Select(point => point + Vector3.up * .004f).ToArray());
-            core.widthCurve = new AnimationCurve(
-                new Keyframe(0f, .008f),
-                new Keyframe(.18f, .016f),
-                new Keyframe(.62f, .027f),
-                new Keyframe(1f, .042f));
+            core.positionCount = count;
+            core.SetPositions(mistPoints.Select(point => point + Vector3.up * .004f).ToArray());
+            core.widthCurve = new AnimationCurve(coreWidths);
             core.widthMultiplier = 1f;
-            core.numCornerVertices = 3;
+            core.numCornerVertices = 2;
             core.numCapVertices = 2;
             core.textureMode = LineTextureMode.Stretch;
             return mist;
+        }
+
+        private static Vector3[] SubdivideLinePath(Vector3[] points, int segmentsPerSpan)
+        {
+            if (points.Length < 2 || segmentsPerSpan < 2) return points;
+            var result = new List<Vector3>((points.Length - 1) * segmentsPerSpan + 1);
+            for (int i = 0; i < points.Length - 1; i++)
+            {
+                Vector3 a = points[i], b = points[i + 1];
+                for (int step = 0; step < segmentsPerSpan; step++) result.Add(Vector3.Lerp(a, b, step / (float)segmentsPerSpan));
+            }
+            result.Add(points[points.Length - 1]);
+            return result.ToArray();
         }
 
         private static Color WithAlpha(Color color, float alpha)
@@ -2054,17 +2172,32 @@ namespace SeaOfUncertainty.Prototype
 
         private void ConfigureSurfaceMaterials()
         {
-            Texture2D waterTexture = CreateOceanSurfaceTexture("Theater Ocean Color and Depth", 512);
+            bool hasBathymetry = TryGetGeographicElevation(out _, out _);
+            Texture2D waterTexture = CreateOceanSurfaceTexture("Theater Ocean Color and Depth", 512, hasBathymetry);
             Texture2D landTexture = CreateSurfaceTexture("Procedural Land Detail", 192, new Color(.11f, .15f, .06f), new Color(.33f, .34f, .16f), 41, false);
             Texture2D littoralTexture = CreateSurfaceTexture("Procedural Littoral Detail", 128, new Color(.025f, .19f, .21f), new Color(.18f, .52f, .42f), 73, false);
             Texture2D waterNormal = CreateNormalTexture("Multi-scale Ocean Normals", 256, 17, true, .72f + area.Presentation.SeaState * .32f);
             Texture2D landNormal = CreateNormalTexture("Terrain Relief Normals", 192, 41, false, 2.3f);
+            Texture2D currentDetail = CreateOceanCurrentDetailTexture(256);
             waterMaterial.mainTexture = waterTexture;
             waterMaterial.mainTextureScale = Vector2.one;
             waterMaterial.color = Color.white;
             ApplyNormalMap(waterMaterial, waterNormal, .055f + area.Presentation.SeaState * .065f);
-            if (waterMaterial.HasProperty("_Glossiness")) waterMaterial.SetFloat("_Glossiness", .36f);
-            if (waterMaterial.HasProperty("_Metallic")) waterMaterial.SetFloat("_Metallic", .025f);
+            // GIA-016/017: a touch more glossiness concentrates the specular highlight (so the added fine normal
+            // octave above reads as scattered glitter rather than a diffuse glow) and, combined with a slightly
+            // higher metallic value, strengthens Standard's own grazing-angle Fresnel response for a gentler
+            // horizon brightening — both stay well short of looking like a mirror or fighting grid contrast.
+            if (waterMaterial.HasProperty("_Glossiness")) waterMaterial.SetFloat("_Glossiness", .5f);
+            if (waterMaterial.HasProperty("_Metallic")) waterMaterial.SetFloat("_Metallic", .05f);
+            HasScatteredSunGlitter = true;
+            HasHorizonFresnelBrightening = true;
+            if (waterMaterial.HasProperty("_DetailAlbedoMap"))
+            {
+                waterMaterial.SetTexture("_DetailAlbedoMap", currentDetail);
+                waterMaterial.SetTextureScale("_DetailAlbedoMap", new Vector2(2.4f, 2.4f));
+                if (waterMaterial.HasProperty("_UVSec")) waterMaterial.SetFloat("_UVSec", 0f);
+                OceanCurrentBandsAnimateIndependently = true;
+            }
             landMaterial.mainTexture = landTexture;
             landMaterial.mainTextureScale = new Vector2(4f, 4f);
             landMaterial.color = Color.white;
@@ -2129,8 +2262,11 @@ namespace SeaOfUncertainty.Prototype
                     float u = x / (float)(width - 1);
                     float broad = TileableNoise(u, v, 4f, 1.4f, 18.2f, 5.7f);
                     float wisps = TileableNoise(u, v, 13f, 2.3f, 43.1f, 16.4f);
-                    float breakup = Mathf.Lerp(.18f, 1f, Mathf.SmoothStep(.28f, .78f, broad * .7f + wisps * .3f));
-                    float asymmetricEdge = Mathf.Lerp(.78f, 1f, TileableNoise(u, v, 7f, 3f, 7.9f, 29.6f));
+                    float fine = TileableNoise(u, v, 29f, 4.6f, 61.3f, 9.8f);
+                    // Steeper, lower-floor breakup so the mist reads as separated, broken wisps with visible
+                    // gaps rather than one smooth soft-edged gradient blob.
+                    float breakup = Mathf.Lerp(.04f, 1f, Mathf.SmoothStep(.36f, .68f, broad * .58f + wisps * .28f + fine * .14f));
+                    float asymmetricEdge = Mathf.Lerp(.7f, 1f, TileableNoise(u, v, 7f, 3f, 7.9f, 29.6f));
                     // Baked near (u=0, at the aircraft) to far (u=1, oldest/most dissipated) fade. The LineRenderer
                     // uses Stretch mode so this maps once across the whole trail — this IS the misty taper, since
                     // the "Standard" shader this renders with can't use LineRenderer's per-vertex color gradient.
@@ -2306,32 +2442,71 @@ namespace SeaOfUncertainty.Prototype
         private static Color MultiplyRgb(Color color, float multiplier)
             => new Color(Mathf.Clamp01(color.r * multiplier), Mathf.Clamp01(color.g * multiplier), Mathf.Clamp01(color.b * multiplier), color.a);
 
-        private Texture2D CreateOceanSurfaceTexture(string name, int size)
+        private Texture2D CreateOceanSurfaceTexture(string name, int size, bool hasBathymetry)
         {
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, true) { name = name, wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear, anisoLevel = 4 };
             var colors = new Color[size * size];
-            Color abyss = new Color(.007f, .052f, .105f), basin = new Color(.014f, .125f, .185f), openWater = new Color(.025f, .205f, .225f), currentColor = new Color(.055f, .285f, .285f);
+            Color abyss = new Color(.007f, .052f, .105f), basin = new Color(.014f, .125f, .185f), openWater = new Color(.025f, .205f, .225f), streakColor = new Color(.048f, .235f, .245f);
+            float seaState = Mathf.Clamp01(area.Presentation.SeaState);
+            // GIA-010: when measured bathymetry will drive the real depth palette (in ApplyCoastlineDrivenShelf),
+            // keep this base layer's own fake abyss/basin noise muted so it doesn't fight the real depth bands.
+            // Theaters without bathymetry (e.g. future fictional maps) keep the full procedural range as a fallback.
+            float basinStrength = hasBathymetry ? .22f : 1f;
+            float windAngle = OceanWindDirectionDegrees * Mathf.Deg2Rad;
+            float windCos = Mathf.Cos(windAngle), windSin = Mathf.Sin(windAngle);
             for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
             {
                 float u = x / (float)(size - 1), v = y / (float)(size - 1);
                 float macro = Mathf.PerlinNoise(u * 2.15f + 12.4f, v * 2.15f + 31.6f);
                 float regional = Mathf.PerlinNoise(u * 5.7f + 47.1f, v * 5.7f + 8.9f);
                 float detail = Mathf.PerlinNoise(u * 21.3f + 5.8f, v * 21.3f + 61.2f);
-                float basinMix = Mathf.SmoothStep(.12f, .92f, macro * .68f + regional * .32f);
+                float basinMix = Mathf.Lerp(.5f, Mathf.SmoothStep(.12f, .92f, macro * .68f + regional * .32f), basinStrength);
                 Color color = Color.Lerp(abyss, basin, basinMix);
                 float warmWater = Mathf.SmoothStep(0f, 1f, 1f - v) * Mathf.Lerp(.35f, 1f, regional);
                 color = Color.Lerp(color, openWater, warmWater * .2f);
-                float warp = (regional - .5f) * .34f + (detail - .5f) * .08f;
-                float flow = .5f + .5f * Mathf.Sin((u * 2.1f + v * .72f + warp) * Mathf.PI * 2f);
-                float current = Mathf.Pow(Mathf.Clamp01(flow), 7f) * Mathf.Lerp(.45f, 1f, macro);
-                color = Color.Lerp(color, currentColor, current * .16f);
+
+                // GIA-011: restrained directional streaking elongated along the shared theater wind direction,
+                // fading out entirely on calm seas and strengthening with configured sea state. Current bands
+                // (GIA-012) live in a separate, independently drifting detail layer rather than here, so they
+                // never slide the geographically anchored bathymetric zones painted into this base texture.
+                float alongWind = u * windCos + v * windSin;
+                float acrossWind = -u * windSin + v * windCos;
+                float streakNoise = Mathf.PerlinNoise(alongWind * 3.4f + 8.3f, acrossWind * 27f + 14.7f);
+                float streak = Mathf.SmoothStep(.45f, .82f, streakNoise);
+                color = Color.Lerp(color, streakColor, streak * Mathf.Lerp(0f, .22f, seaState));
+
                 color *= Mathf.Lerp(.965f, 1.035f, detail);
                 color.a = 1f;
                 colors[y * size + x] = color;
             }
             texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture);
-            HasOceanCurrentBands = true;
+            HasWindAlignedSurfaceStreaks = true;
             UpdateOceanColorRange(texture);
+            return texture;
+        }
+
+        private Texture2D CreateOceanCurrentDetailTexture(int size)
+        {
+            // GIA-012: current bands as a separate, tileable overlay on Standard's detail-albedo slot so they can
+            // scroll independently in Tick() without ever moving the geographically anchored bathymetric colors
+            // baked into _MainTex. Values stay close to neutral gray because Standard's detail blend is an
+            // albedo * (detail * 2) overlay — a small deviation from .5 already reads as a restrained tint shift.
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, true) { name = "Drifting Current Bands", wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Trilinear, anisoLevel = 4 };
+            var colors = new Color[size * size];
+            Color neutral = new Color(.5f, .5f, .5f, 1f);
+            Color currentTint = new Color(.56f, .585f, .565f, 1f);
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+            {
+                float u = x / (float)(size - 1), v = y / (float)(size - 1);
+                float macro = Mathf.PerlinNoise(u * 2.15f + 91.4f, v * 2.15f + 8.6f);
+                float detail = Mathf.PerlinNoise(u * 21.3f + 5.8f, v * 21.3f + 61.2f);
+                float warp = (detail - .5f) * .12f;
+                float flow = .5f + .5f * Mathf.Sin((u * 2.1f + v * .72f + warp) * Mathf.PI * 2f);
+                float current = Mathf.Pow(Mathf.Clamp01(flow), 7f) * Mathf.Lerp(.45f, 1f, macro);
+                colors[y * size + x] = Color.Lerp(neutral, currentTint, current * .55f);
+            }
+            texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture);
+            HasOceanCurrentBands = true;
             return texture;
         }
 
@@ -2390,9 +2565,17 @@ namespace SeaOfUncertainty.Prototype
 
             Color[] colors = texture.GetPixels();
             Color shorelineColor = new Color(.06f, .345f, .33f, 1f);
+            // GIA-010: an explicit four-stop depth ramp (shoal/shelf/slope/abyss) so each transition stays
+            // legible instead of one wide shallow-to-slope gradient blurring shoal and shelf together.
+            Color shoalColor = new Color(.085f, .40f, .365f, 1f);
             Color shallowColor = new Color(.04f, .285f, .305f, 1f);
             Color slopeColor = new Color(.018f, .145f, .215f, 1f);
             Color abyssColor = new Color(.006f, .045f, .095f, 1f);
+            // GIA-015: scattered reef/sandbar mottling within the shoal band only — purely a bathymetry-driven
+            // color hint (like every other depth band here), never exposed as authoritative traversability info.
+            Color reefColor = new Color(.135f, .375f, .30f, 1f);
+            var observedDepthBands = new bool[4];
+            bool anyReefHint = false;
             bool hasBathymetry = TryGetGeographicElevation(out GeographicElevationGrid elevation, out _);
             double projectionWest = coastline.projectionEast > coastline.projectionWest ? coastline.projectionWest : coastline.west;
             double projectionEast = coastline.projectionEast > coastline.projectionWest ? coastline.projectionEast : coastline.east;
@@ -2415,10 +2598,19 @@ namespace SeaOfUncertainty.Prototype
                         if (metres <= 0f)
                         {
                             float depth = -metres;
-                            Color depthColor = depth < 900f
-                                ? Color.Lerp(shallowColor, slopeColor, Mathf.SmoothStep(0f, 1f, depth / 900f))
-                                : Color.Lerp(slopeColor, abyssColor, Mathf.SmoothStep(0f, 1f, (depth - 900f) / 5100f));
-                            colors[y * width + x] = Color.Lerp(colors[y * width + x], depthColor, .52f);
+                            Color depthColor;
+                            if (depth < 40f)
+                            {
+                                depthColor = Color.Lerp(shoalColor, shallowColor, Mathf.SmoothStep(0f, 1f, depth / 40f));
+                                float reefNoise = Mathf.PerlinNoise(u * 41f + 53.1f, v * 41f + 21.7f);
+                                float reefPatch = Mathf.SmoothStep(.6f, .78f, reefNoise) * Mathf.SmoothStep(1f, 0f, depth / 32f);
+                                if (reefPatch > 0f) { depthColor = Color.Lerp(depthColor, reefColor, reefPatch * .55f); anyReefHint = true; }
+                                observedDepthBands[0] = true;
+                            }
+                            else if (depth < 300f) { depthColor = Color.Lerp(shallowColor, slopeColor, Mathf.SmoothStep(0f, 1f, (depth - 40f) / 260f)); observedDepthBands[1] = true; }
+                            else if (depth < 1800f) { depthColor = Color.Lerp(slopeColor, abyssColor, Mathf.SmoothStep(0f, 1f, (depth - 300f) / 1500f)); observedDepthBands[2] = true; }
+                            else { depthColor = abyssColor; observedDepthBands[3] = true; }
+                            colors[y * width + x] = Color.Lerp(colors[y * width + x], depthColor, .74f);
                         }
                     }
                 }
@@ -2431,6 +2623,8 @@ namespace SeaOfUncertainty.Prototype
             texture.SetPixels(colors);
             texture.Apply(true, false);
             UsesGeographicBathymetry = hasBathymetry;
+            BathymetricDepthBandCount = observedDepthBands.Count(observed => observed);
+            HasShallowReefHints = anyReefHint;
             UpdateOceanColorRange(texture);
             HasCoastlineDrivenShelf = true;
             HasShallowWaterDetail = true;
@@ -2458,9 +2652,13 @@ namespace SeaOfUncertainty.Prototype
             {
                 float u = x / (float)size, v = y / (float)size;
                 heights[y * size + x] = waves
-                    ? TileableNoise(u, v, 4f, 7f, seed * .13f, seed * .29f) * .52f
-                        + TileableNoise(u, v, 11f, 17f, seed * .41f, seed * .07f) * .31f
-                        + TileableNoise(u, v, 23f, 31f, seed * .19f, seed * .53f) * .17f
+                    ? TileableNoise(u, v, 4f, 7f, seed * .13f, seed * .29f) * .47f
+                        + TileableNoise(u, v, 11f, 17f, seed * .41f, seed * .07f) * .28f
+                        + TileableNoise(u, v, 23f, 31f, seed * .19f, seed * .53f) * .16f
+                        // GIA-016: a fine, low-weight fourth octave breaks the specular highlight into a
+                        // scattered, view-dependent glitter path instead of one smooth glossy blob, without
+                        // meaningfully changing the broader wave shape the first three octaves establish.
+                        + TileableNoise(u, v, 61f, 83f, seed * .71f, seed * .37f) * .09f
                     : Mathf.PerlinNoise(u * 6f + seed, v * 6f + seed * .31f) * .72f + Mathf.PerlinNoise(u * 24f + seed * .17f, v * 24f + seed * .53f) * .28f;
             }
             var colors = new Color[size * size];
@@ -2998,6 +3196,8 @@ namespace SeaOfUncertainty.Prototype
             generatedTextures.Clear();
             foreach (Material instance in whitecapMaterialInstances) DestroyObject(instance);
             whitecapMaterialInstances.Clear();
+            foreach (Material instance in coastalFoamMaterialInstances) DestroyObject(instance);
+            coastalFoamMaterialInstances.Clear();
             DestroyObject(lineMaterial); DestroyObject(waterMaterial); DestroyObject(landMaterial); DestroyObject(littoralMaterial); DestroyObject(highlandMaterial);
             DestroyObject(blueMaterial); DestroyObject(redMaterial); DestroyObject(navalHullMaterial); DestroyObject(navalDeckMaterial); DestroyObject(canopyMaterial);
             DestroyObject(foamMaterial); DestroyObject(whitecapMaterial); DestroyObject(contrailMistMaterial); DestroyObject(contrailCoreMaterial); DestroyObject(coastalFoamMaterial); DestroyObject(wetShoreMaterial); DestroyObject(shallowWaterMaterial); DestroyObject(atmosphericMaterial); DestroyObject(cloudShadowMaterial);
