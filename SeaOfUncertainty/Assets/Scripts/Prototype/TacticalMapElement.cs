@@ -12,6 +12,8 @@ namespace SeaOfUncertainty.Prototype
     public sealed class TacticalMapElement : VisualElement
     {
         private readonly List<Label> markers = new List<Label>();
+        private readonly List<MarkerLayout> markerLayouts = new List<MarkerLayout>();
+        private readonly MarkerLeaderOverlay markerLeaders;
         private readonly HashSet<KeyCode> cameraKeys = new HashSet<KeyCode>();
         private PrototypeGame game;
         private ToolkitActionMode actionMode;
@@ -29,12 +31,61 @@ namespace SeaOfUncertainty.Prototype
         private bool reducedMotion;
         private Vector2 edgePanInput;
 
+        private sealed class MarkerLayout
+        {
+            public Label Label;
+            public Vector2 Anchor;
+            public Vector2 Size;
+            public int Priority;
+        }
+
+        private sealed class MarkerLeaderOverlay : VisualElement
+        {
+            private readonly List<Vector4> lines = new List<Vector4>();
+
+            public MarkerLeaderOverlay()
+            {
+                name = "map-marker-leaders";
+                pickingMode = PickingMode.Ignore;
+                style.position = Position.Absolute;
+                style.left = 0f;
+                style.right = 0f;
+                style.top = 0f;
+                style.bottom = 0f;
+                generateVisualContent += DrawLines;
+            }
+
+            public void SetLines(IEnumerable<Vector4> values)
+            {
+                lines.Clear();
+                lines.AddRange(values);
+                MarkDirtyRepaint();
+            }
+
+            private void DrawLines(MeshGenerationContext context)
+            {
+                Painter2D painter = context.painter2D;
+                painter.lineWidth = 1.15f;
+                painter.strokeColor = new Color(.38f, .78f, .84f, .38f);
+                foreach (Vector4 line in lines)
+                {
+                    painter.BeginPath();
+                    painter.MoveTo(new Vector2(line.x, line.y));
+                    painter.LineTo(new Vector2(line.z, line.w));
+                    painter.Stroke();
+                }
+            }
+        }
+
         public Action<HexCoord> HexChosen;
         public Action<ContactState> ContactChosen;
         public Action<ContactState> ContactHovered;
         public Action<Vector2> ActiveFormationContextRequested;
         public bool CameraInputActive => cameraKeys.Count > 0;
         public bool EdgeScrollEnabled { get; private set; }
+        public int DeclutteredMarkerCount { get; private set; }
+        public int MarkerLeaderLineCount { get; private set; }
+        public bool LabelsUseDistanceFade { get; private set; }
 
         public TacticalMapElement()
         {
@@ -50,6 +101,8 @@ namespace SeaOfUncertainty.Prototype
             commandHud.Add(hexReadout);
             commandHud.Add(headingReadout);
             Add(commandHud);
+            markerLeaders = new MarkerLeaderOverlay();
+            Add(markerLeaders);
             RegisterCallback<AttachToPanelEvent>(_ => EnsurePresentation());
             RegisterCallback<DetachFromPanelEvent>(_ => DisposePresentation());
             RegisterCallback<GeometryChangedEvent>(evt =>
@@ -106,12 +159,17 @@ namespace SeaOfUncertainty.Prototype
         {
             foreach (Label marker in markers) marker.RemoveFromHierarchy();
             markers.Clear();
+            markerLayouts.Clear();
+            markerLeaders.SetLines(Array.Empty<Vector4>());
+            DeclutteredMarkerCount = 0;
+            MarkerLeaderLineCount = 0;
+            LabelsUseDistanceFade = false;
             if (game?.Active == null || presentation == null || contentRect.width < 10f) return;
             Side viewer = game.Active.Side;
             foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed && f.Side == viewer))
             {
                 bool active = formation == game.Active;
-                Label marker = Marker(formation.Position, active ? "ACTIVE\n" + Code(formation.Kind) : Code(formation.Kind), "map-marker", formation.Side == Side.Blue ? "blue" : "red");
+                Label marker = Marker(formation.Position, active ? "ACTIVE\n" + Code(formation.Kind) : Code(formation.Kind), active ? 100 : 50, active ? new Vector2(72f, 58f) : new Vector2(54f, 42f), "map-marker", formation.Side == Side.Blue ? "blue" : "red");
                 if (active) marker.AddToClassList("active-formation");
                 marker.tooltip = $"{formation.Name}\n{formation.Kind} • Ready T{formation.ReadyTime:00}\n{formation.Cohesion}{(active ? "\nACTIVE — right-click for orders" : string.Empty)}";
             }
@@ -120,30 +178,82 @@ namespace SeaOfUncertainty.Prototype
                 bool eligible = actionMode == ToolkitActionMode.Search ? SearchEligible(contact) : actionMode == ToolkitActionMode.Strike && StrikeEligible(contact);
                 FormationState target = game.Find(contact.TargetId);
                 string contactCode = contact.Identity == IdentityQuality.Identified && target != null ? Code(target.Kind) : "?";
-                Label marker = Marker(contact.LastKnownPosition, $"◇ {contactCode}\n{contact.Location.ToString()[0]} A{contact.Age}", "map-marker", "contact");
+                Label marker = Marker(contact.LastKnownPosition, $"◇ {contactCode}\n{contact.Location.ToString()[0]} A{contact.Age}", eligible ? 88 : 76, new Vector2(64f, 52f), "map-marker", "contact");
                 if (eligible) marker.AddToClassList("eligible");
                 int radius = Rules.ContactUncertaintyRadius(contact);
                 int possibleHexes = game.ContactPossibleHexes(contact).Count;
                 marker.tooltip = $"{contact.Summary}\nLast known {contact.LastKnownPosition}\nPossible area: {possibleHexes} hex{(possibleHexes == 1 ? string.Empty : "es")} within radius {radius} • Age or observed movement expands the estimate\n{(eligible ? "Eligible — click to commit" : "Not eligible for selected action")}";
                 if (contact.HasContradictoryPosition)
                 {
-                    Label contradictory = Marker(contact.ContradictoryPosition, "?", "map-marker", "contact");
+                    Label contradictory = Marker(contact.ContradictoryPosition, "?", eligible ? 84 : 72, new Vector2(64f, 52f), "map-marker", "contact");
                     if (eligible) contradictory.AddToClassList("eligible");
                     contradictory.tooltip = $"CONTRADICTORY REPORT\nSecond possible fix {contact.ContradictoryPosition}\nSelect either marker to inspect the shared possible area.";
                 }
             }
+            LayoutMarkers();
         }
 
-        private Label Marker(HexCoord hex, string text, params string[] classes)
+        private Label Marker(HexCoord hex, string text, int priority, Vector2 size, params string[] classes)
         {
             Vector2 center = presentation.Project(hex, contentRect);
             var label = new Label(text) { pickingMode = PickingMode.Ignore };
             foreach (string className in classes) label.AddToClassList(className);
-            label.style.left = center.x - 27f;
-            label.style.top = center.y - 37f;
             Add(label);
             markers.Add(label);
+            markerLayouts.Add(new MarkerLayout { Label = label, Anchor = center, Size = size, Priority = priority });
             return label;
+        }
+
+        private void LayoutMarkers()
+        {
+            var occupied = new List<Rect>();
+            var leaders = new List<Vector4>();
+            Vector2[] offsets =
+            {
+                Vector2.zero, new Vector2(0f, -58f), new Vector2(0f, 58f), new Vector2(66f, 0f), new Vector2(-66f, 0f),
+                new Vector2(62f, -48f), new Vector2(-62f, -48f), new Vector2(62f, 48f), new Vector2(-62f, 48f)
+            };
+            float distanceVisibility = presentation == null ? 1f : presentation.MapLabelVisibility;
+            foreach (MarkerLayout marker in markerLayouts.OrderByDescending(item => item.Priority))
+            {
+                Rect baseRect = new Rect(marker.Anchor.x - marker.Size.x * .5f, marker.Anchor.y - marker.Size.y - 11f, marker.Size.x, marker.Size.y);
+                Rect chosen = baseRect;
+                float bestPenalty = float.MaxValue;
+                foreach (Vector2 offset in offsets)
+                {
+                    Rect candidate = new Rect(marker.Anchor.x - marker.Size.x * .5f + offset.x, marker.Anchor.y - marker.Size.y - 11f + offset.y, marker.Size.x, marker.Size.y);
+                    candidate.x = Mathf.Clamp(candidate.x, 8f, Mathf.Max(8f, contentRect.width - candidate.width - 8f));
+                    candidate.y = Mathf.Clamp(candidate.y, 52f, Mathf.Max(52f, contentRect.height - candidate.height - 8f));
+                    float overlap = occupied.Sum(existing => IntersectionArea(candidate, existing));
+                    float penalty = overlap + offset.sqrMagnitude * .0007f;
+                    if (penalty >= bestPenalty) continue;
+                    bestPenalty = penalty;
+                    chosen = candidate;
+                    if (penalty < .01f) break;
+                }
+                occupied.Add(chosen);
+                marker.Label.style.left = chosen.x;
+                marker.Label.style.top = chosen.y;
+                float priorityFloor = marker.Priority >= 100 ? .9f : marker.Priority >= 70 ? .68f : .42f;
+                float opacity = Mathf.Lerp(priorityFloor, 1f, distanceVisibility);
+                marker.Label.style.opacity = opacity;
+                LabelsUseDistanceFade |= opacity < .99f;
+                Vector2 labelCenter = chosen.center;
+                if (Vector2.Distance(chosen.position, baseRect.position) > 8f)
+                {
+                    leaders.Add(new Vector4(marker.Anchor.x, marker.Anchor.y, labelCenter.x, labelCenter.y));
+                    DeclutteredMarkerCount++;
+                }
+            }
+            MarkerLeaderLineCount = leaders.Count;
+            markerLeaders.SetLines(leaders);
+        }
+
+        private static float IntersectionArea(Rect first, Rect second)
+        {
+            float x = Mathf.Max(0f, Mathf.Min(first.xMax, second.xMax) - Mathf.Max(first.xMin, second.xMin));
+            float y = Mathf.Max(0f, Mathf.Min(first.yMax, second.yMax) - Mathf.Max(first.yMin, second.yMin));
+            return x * y;
         }
 
         private void OnPointerDown(PointerDownEvent evt)

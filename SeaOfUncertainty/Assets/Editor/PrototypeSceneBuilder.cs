@@ -688,10 +688,14 @@ namespace SeaOfUncertainty.Editor
                 Assert(luzonMap.UsesTerrainSlopeShading && luzonMap.TerrainColorLuminanceRange > .08f, "Measured terrain gradients provide restrained slope shading and readable tonal separation");
                 Assert(luzonMap.TerrainTileEdgesUseSharedFaceNormals, "Terrain tile boundaries share neighboring ETOPO face normals without changing terrain height or interior relief");
                 Assert(luzonMap.HasShallowWaterDetail && luzonMap.HasCoastalFoam && luzonMap.HasCoastlineDrivenShelf, "Coastline-driven shelves, bathymetric contours, and coastal foam enrich the sea-land transition");
+                Assert(luzonMap.HasWetShoreBand && luzonMap.UsesBrokenCoastalFoam && luzonMap.CoastalFoamMaskAlphaRange > .55f, $"Coastlines layer a narrow wet-shore band beneath a high-contrast static broken-foam mask (wet={luzonMap.HasWetShoreBand}, broken={luzonMap.UsesBrokenCoastalFoam}, alpha range={luzonMap.CoastalFoamMaskAlphaRange:F3})");
+                Assert(luzonMap.CoastlineStrokesAvoidTableEdges && luzonMap.SuppressedTableEdgeShorelineSegmentCount > 0, "Coastline strokes omit artificial polygon closures wherever land exits the theater bounds");
                 Assert(luzonMap.UsesGeographicBathymetry, "Geographic ocean coloration is driven by measured ETOPO seafloor depth");
                 Assert(luzonMap.HasOceanCurrentBands && luzonMap.OceanColorLuminanceRange > .08f, "Ocean texture combines readable broad color variation with restrained current bands");
+                Assert(luzonMap.SeaStateWhitecapCount >= 12 && luzonMap.WhitecapDensityFollowsSeaState && luzonMap.WhitecapsAreWorldAnchored && luzonMap.ContainsRenderedName("World-Anchored Sea-State Whitecap"), "Configured sea state produces sparse, deterministic whitecaps anchored to the curved ocean surface");
                 Assert(luzonMap.HasAtmosphericHaze && luzonMap.CloudShadowCount >= 2 && luzonMap.WeatherPreset == "Haze", "Data-driven haze and moving cloud-shadow layers establish maritime atmosphere");
                 Assert(luzonMap.GeographicLabelCount == luzon.Area.Locations.Count, "Ports, airfields, straits, and objectives receive map-space geographic labels");
+                Assert(luzonMap.GeographicLabelsUsePriorityLayout && luzonMap.GeographicLabelsFadeWithDistance && luzonMap.ContainsRenderedName("Geographic Label Leader"), "Geographic labels use priority layout, distance fading, and subordinate leader-line infrastructure");
                 float renderLuminance = luzonMap.ProbeRenderLuminance();
                 Assert(renderLuminance > .01f && renderLuminance < .95f, "The integrated ocean, terrain, atmosphere, and label camera produces a valid non-black render");
                 Vector3 edge = luzonMap.HexToWorld(new HexCoord(23, 19));
@@ -699,6 +703,7 @@ namespace SeaOfUncertainty.Editor
                 Assert(luzonMap.UsesEarthCurvature && luzonMap.EarthCurvatureRadiusWorld > 250f && luzonMap.EarthCurvatureRadiusWorld < 350f, "Operational theater uses the physical Earth radius at the scenario's 20-NM hex scale");
                 Assert(luzonMap.TheaterEdgeDrop > .35f, "Large operational areas visibly fall away from the local tangent plane toward the horizon");
                 Assert(luzonMap.UsesTraditionalFlatTopHexes, "Operational grid uses traditional flat-top hex geometry aligned with its column spacing");
+                Assert(luzonMap.HexGridIsOccludedByLand && luzonMap.HexGridSurfaceHeight < -.05f, "The operational hex grid rides just above the sea and is depth-occluded by landmasses");
                 Assert(luzonMap.TryWorldToHex(luzonMap.HexToWorld(new HexCoord(11, 9)), out HexCoord roundTrip) && roundTrip.Equals(new HexCoord(11, 9)), "Hex/world conversion round trip");
                 Assert(luzonMap.TryWorldToHex(luzonMap.HexToWorld(new HexCoord(23, 19)), out HexCoord edgeRoundTrip) && edgeRoundTrip.Equals(new HexCoord(23, 19)), "Edge hex selection round trip");
                 var pickRect = new Rect(0f, 0f, 480f, 270f);
@@ -734,6 +739,7 @@ namespace SeaOfUncertainty.Editor
                 Assert(operationalMap.PersistentWakeCount == expectedContrails && operationalMap.ActiveSurfaceWakeCount == 0, "Stationary surface formations do not display wakes");
                 Assert(operationalMap.AircraftContrailCount == expectedContrails && operationalMap.PersistentTrailsUseFormationSpace, "Aircraft use paired contrails and every trail rotates in Formation-local space");
                 Assert(operationalMap.AircraftContrailsUseVaporTreatment && operationalMap.AircraftContrailsAreAltitudeCued && operationalMap.ContainsRenderedName("High-Altitude Vapor Contrail"), "Aircraft trails use tapered vapor geometry at aircraft altitude instead of ambiguous surface-grey lines");
+                Assert(operationalMap.AircraftContrailsUseMistyLayering && operationalMap.AircraftContrailLayerCount == expectedContrails * 2 && operationalMap.ContainsRenderedName("Contrail Vapor Core"), "Each aircraft contrail combines a feathered noisy mist layer with a narrower fading vapor core");
                 FormationState wakeProbe = game.Formations.Find(formation => formation.Side == game.Active.Side && !formation.IsDestroyed && formation.Kind == FormationKind.SurfaceGroup);
                 HexCoord wakeOrigin = wakeProbe.Position;
                 wakeProbe.Position = new HexCoord(wakeOrigin.Q, wakeOrigin.R > 0 ? wakeOrigin.R - 1 : wakeOrigin.R + 1);
@@ -752,6 +758,7 @@ namespace SeaOfUncertainty.Editor
                 Assert(operationalMap.ActiveEffectCount >= 7, "Restrained prototype effect library covers all MVP effect categories");
                 operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard, true);
                 Assert(operationalMap.ActiveEffectCount == 0 && operationalMap.PooledEffectCount >= 7, "Transient effects return to the object pool");
+                Assert(operationalMap.WhitecapsHiddenForReducedMotion, "Reduced Motion suppresses subtly animated sea-state whitecaps");
                 Assert(!operationalMap.PermanentGridVisible, "Permanent hex grid is optional");
                 operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard, false, true);
                 Assert(operationalMap.PermanentGridVisible, "Optional permanent hex grid can be enabled");

@@ -56,6 +56,11 @@ namespace SeaOfUncertainty.Prototype
         private readonly Material navalDeckMaterial;
         private readonly Material canopyMaterial;
         private readonly Material foamMaterial;
+        private readonly Material whitecapMaterial;
+        private readonly Material contrailMistMaterial;
+        private readonly Material contrailCoreMaterial;
+        private readonly Material coastalFoamMaterial;
+        private readonly Material wetShoreMaterial;
         private readonly Material shallowWaterMaterial;
         private readonly Material atmosphericMaterial;
         private readonly Material cloudShadowMaterial;
@@ -80,10 +85,13 @@ namespace SeaOfUncertainty.Prototype
         private bool showPermanentGrid;
         private float waterScroll;
         private Transform waterSurfaceTransform;
+        private Transform whitecapRoot;
         private Transform cloudShadowRoot;
         private Transform sunTransform;
         private GeographicElevationGrid geographicElevation;
         private readonly List<Transform> billboardLabels = new List<Transform>();
+        private readonly List<GeographicLabel> geographicLabels = new List<GeographicLabel>();
+        private readonly List<Whitecap> whitecaps = new List<Whitecap>();
         private Vector3 cameraPanVelocity;
         private float cameraYawVelocity;
         private float cameraPitchVelocity;
@@ -92,6 +100,17 @@ namespace SeaOfUncertainty.Prototype
         private bool hasSavedCameraPose;
 
         private sealed class WakeTrail { public LineRenderer Renderer; public Color SternColor; public Color TailColor; }
+        private sealed class Whitecap { public LineRenderer Renderer; public float BaseAlpha; public float Phase; }
+        private sealed class GeographicLabel
+        {
+            public Transform Transform;
+            public TextMesh Text;
+            public LineRenderer Leader;
+            public Vector3 Anchor;
+            public Color BaseColor;
+            public int Priority;
+        }
+        private sealed class ShorelineStroke { public Vector3[] Points; public bool Closed; }
         private sealed class Motion
         {
             public Transform Transform;
@@ -120,6 +139,7 @@ namespace SeaOfUncertainty.Prototype
         public float Heading => Mathf.Repeat(yaw, 360f);
         public float CameraPitch => pitch;
         public float CameraDistance => distance;
+        public float MapLabelVisibility => Mathf.InverseLerp(Mathf.Max(12f, Mathf.Max(area.Width, area.Height)) * 2.85f, Mathf.Max(12f, Mathf.Max(area.Width, area.Height)) * 1.05f, distance);
         public int VisibleFormationCount { get; private set; }
         public int VisibleContactCount { get; private set; }
         public int ActiveEffectCount => activeEffects.Count;
@@ -129,6 +149,8 @@ namespace SeaOfUncertainty.Prototype
         public int CoastlineSurfaceVertexCount { get; private set; }
         public float CoastlineMaximumTriangleEdge { get; private set; }
         public int OffMapCoastlineVertexCount { get; private set; }
+        public int SuppressedTableEdgeShorelineSegmentCount { get; private set; }
+        public bool CoastlineStrokesAvoidTableEdges { get; private set; }
         public int TerrainReliefCount { get; private set; }
         public int ElevationSampleCount { get; private set; }
         public int TerrainMeshTileCount { get; private set; }
@@ -148,23 +170,37 @@ namespace SeaOfUncertainty.Prototype
         public float SunSourceAzimuthDegrees { get; private set; }
         public int FormationMeshVariantCount => formationMeshes.Count;
         public int GeographicLabelCount => billboardLabels.Count;
+        public int GeographicLeaderLineCount { get; private set; }
+        public bool GeographicLabelsUsePriorityLayout { get; private set; }
+        public bool GeographicLabelsFadeWithDistance { get; private set; }
         public int CloudShadowCount { get; private set; }
         public bool HasAtmosphericHaze { get; private set; }
         public bool HasShallowWaterDetail { get; private set; }
         public bool HasCoastalFoam { get; private set; }
+        public bool HasWetShoreBand { get; private set; }
+        public bool UsesBrokenCoastalFoam { get; private set; }
+        public float CoastalFoamMaskAlphaRange { get; private set; }
         public bool HasCoastlineDrivenShelf { get; private set; }
+        public int SeaStateWhitecapCount { get; private set; }
+        public bool WhitecapDensityFollowsSeaState { get; private set; }
+        public bool WhitecapsAreWorldAnchored { get; private set; }
+        public bool WhitecapsHiddenForReducedMotion => reducedMotion && (whitecapRoot == null || !whitecapRoot.gameObject.activeSelf);
         public string WeatherPreset => string.IsNullOrWhiteSpace(area.Presentation.WeatherPreset) ? "Clear" : area.Presentation.WeatherPreset;
         public int PrecipitationStreakCount { get; private set; }
         public int PersistentWakeCount { get; private set; }
         public int ActiveSurfaceWakeCount { get; private set; }
         public int AircraftContrailCount { get; private set; }
+        public int AircraftContrailLayerCount { get; private set; }
         public bool AircraftContrailsUseVaporTreatment { get; private set; }
         public bool AircraftContrailsAreAltitudeCued { get; private set; }
+        public bool AircraftContrailsUseMistyLayering { get; private set; }
         public bool PersistentTrailsUseFormationSpace { get; private set; }
         public bool CameraIsSettling => cameraPanVelocity.sqrMagnitude > .0001f || Mathf.Abs(cameraYawVelocity) > .01f || Mathf.Abs(cameraPitchVelocity) > .01f || Mathf.Abs(cameraZoomVelocity) > .01f;
         public bool UsesProceduralSurfaceTextures => generatedTextures.Count >= 3;
         public bool PermanentGridVisible => hexLines.Any(pair => pair.Value != null && pair.Value.enabled && !pair.Key.Equals(area.Objective));
         public bool UsesTraditionalFlatTopHexes => true;
+        public float HexGridSurfaceHeight => WaterSurfaceY + .026f;
+        public bool HexGridIsOccludedByLand => HexGridSurfaceHeight < GeographicLandSurfaceY;
         public bool HasActiveFormationPulse => activeFormationRing != null;
         public bool UsesEarthCurvature => true;
         public float EarthCurvatureRadiusWorld => CurvatureRadiusWorld;
@@ -233,6 +269,20 @@ namespace SeaOfUncertainty.Prototype
             navalDeckMaterial = MaterialFor("FormationDeck", "Standard", new Color(.075f, .105f, .115f, 1f), .18f, .3f);
             canopyMaterial = MaterialFor("FormationCanopy", "Standard", new Color(.025f, .10f, .15f, 1f), .48f, .72f);
             foamMaterial = TransparentMaterialFor("CoastalFoam", new Color(.74f, .92f, .9f, .34f), .08f, .52f);
+            whitecapMaterial = TransparentMaterialFor("SeaStateWhitecaps", new Color(.82f, .95f, .96f, .42f), 0f, .18f);
+            whitecapMaterial.mainTexture = CreateWhitecapTexture(96, 12);
+            whitecapMaterial.mainTextureScale = new Vector2(1.8f, 1f);
+            Texture2D contrailMistTexture = CreateContrailMistTexture(128, 16);
+            contrailMistMaterial = TransparentMaterialFor("ContrailMist", new Color(.82f, .94f, 1f, .68f), 0f, .08f);
+            contrailMistMaterial.mainTexture = contrailMistTexture;
+            contrailMistMaterial.mainTextureScale = new Vector2(2.4f, 1f);
+            contrailCoreMaterial = TransparentMaterialFor("ContrailVaporCore", new Color(.94f, .99f, 1f, .56f), 0f, .12f);
+            contrailCoreMaterial.mainTexture = contrailMistTexture;
+            contrailCoreMaterial.mainTextureScale = new Vector2(3.1f, 1f);
+            coastalFoamMaterial = TransparentMaterialFor("BrokenCoastalFoam", new Color(.84f, .97f, .94f, .82f), .02f, .34f);
+            coastalFoamMaterial.mainTexture = CreateCoastalFoamMask(128);
+            coastalFoamMaterial.mainTextureScale = Vector2.one;
+            wetShoreMaterial = TransparentMaterialFor("WetShoreDarkening", new Color(.075f, .115f, .085f, .46f), 0f, .16f);
             shallowWaterMaterial = TransparentMaterialFor("ShallowWater", new Color(.08f, .44f, .43f, .24f), .05f, .68f);
             atmosphericMaterial = TransparentMaterialFor("AtmosphericHaze", new Color(.24f, .46f, .55f, .12f), 0f, .1f);
             cloudShadowMaterial = TransparentMaterialFor("CloudShadow", new Color(.04f, .08f, .1f, .22f), 0f, .05f);
@@ -305,6 +355,7 @@ namespace SeaOfUncertainty.Prototype
             fill.shadows = LightShadows.None;
 
             BuildSurface();
+            BuildSeaStateWhitecaps();
             BuildAtmosphere();
             BuildHexGrid();
             BuildLocations();
@@ -320,6 +371,7 @@ namespace SeaOfUncertainty.Prototype
             searchMode = currentSearchMode;
             salvo = currentSalvo;
             reducedMotion = useReducedMotion;
+            if (whitecapRoot != null) whitecapRoot.gameObject.SetActive(!reducedMotion);
             showPermanentGrid = showGrid;
             UpdateHexStyles();
             RebuildStateObjects();
@@ -343,7 +395,19 @@ namespace SeaOfUncertainty.Prototype
                 if (waterSurfaceTransform != null) waterSurfaceTransform.localPosition = new Vector3(0f, WaterSurfaceY + Mathf.Sin(waterScroll * Mathf.PI * 18f) * .008f, 0f);
                 if (sunTransform != null) sunTransform.position = new Vector3(waterScroll * 1.8f, 0f, waterScroll * .72f);
             }
-            foreach (Transform label in billboardLabels) if (label != null) label.rotation = camera.transform.rotation;
+            UpdateGeographicLabelLayout();
+            if (!reducedMotion)
+            {
+                for (int i = 0; i < whitecaps.Count; i++)
+                {
+                    Whitecap whitecap = whitecaps[i];
+                    if (whitecap.Renderer == null) continue;
+                    float breathing = .78f + Mathf.Sin(Time.time * .72f + whitecap.Phase) * .22f;
+                    Color color = new Color(.82f, .95f, .96f, whitecap.BaseAlpha * breathing);
+                    whitecap.Renderer.startColor = color;
+                    whitecap.Renderer.endColor = WithAlpha(color, color.a * .08f);
+                }
+            }
             UpdateActiveFormationPulse(deltaTime);
             for (int i = motions.Count - 1; i >= 0; i--)
             {
@@ -958,6 +1022,15 @@ namespace SeaOfUncertainty.Prototype
             if (source == null) { Debug.LogError("Missing coastline resource: " + area.CoastlineResource); return false; }
             CoastlineData coastline = JsonUtility.FromJson<CoastlineData>(source.text);
             var projectionBounds = Rect.MinMaxRect(Mathf.Min(first.x, last.x) - 1f, Mathf.Min(first.z, last.z) - .87f, Mathf.Max(first.x, last.x) + 1f, Mathf.Max(first.z, last.z) + .87f);
+            double projectionWest = coastline.projectionEast > coastline.projectionWest ? coastline.projectionWest : coastline.west;
+            double projectionEast = coastline.projectionEast > coastline.projectionWest ? coastline.projectionEast : coastline.east;
+            double projectionSouth = coastline.projectionNorth > coastline.projectionSouth ? coastline.projectionSouth : coastline.south;
+            double projectionNorth = coastline.projectionNorth > coastline.projectionSouth ? coastline.projectionNorth : coastline.north;
+            Rect coastlineClipBounds = Rect.MinMaxRect(
+                Mathf.LerpUnclamped(projectionBounds.xMin, projectionBounds.xMax, (float)((coastline.west - projectionWest) / (projectionEast - projectionWest))),
+                Mathf.LerpUnclamped(projectionBounds.yMin, projectionBounds.yMax, (float)((coastline.south - projectionSouth) / (projectionNorth - projectionSouth))),
+                Mathf.LerpUnclamped(projectionBounds.xMin, projectionBounds.xMax, (float)((coastline.east - projectionWest) / (projectionEast - projectionWest))),
+                Mathf.LerpUnclamped(projectionBounds.yMin, projectionBounds.yMax, (float)((coastline.north - projectionSouth) / (projectionNorth - projectionSouth))));
             Mesh mesh = CoastlinePolygonMesh.Create(coastline, projectionBounds, GeographicLandSurfaceY, out List<Vector3[]> shorelines);
             if (mesh == null) { Debug.LogError("Coastline resource produced no valid polygon mesh: " + area.CoastlineResource); return false; }
             ApplyCurvatureToMesh(mesh);
@@ -966,33 +1039,99 @@ namespace SeaOfUncertainty.Prototype
             shorelines = shorelines.Select(shoreline => shoreline.Select(point => new Vector3(point.x, point.y + CurvatureHeight(point.x, point.z), point.z)).ToArray()).ToList();
             MeshObject("Natural Earth Land", root.transform, landMaterial, mesh);
             ApplyCoastlineDrivenShelf(shorelines, first, last, coastline, projectionBounds);
+            CoastlineStrokesAvoidTableEdges = true;
             foreach (Vector3[] shoreline in shorelines)
             {
-                GameObject foamObject = Child("Natural Earth Coastal Foam", root.transform);
-                LineRenderer foam = foamObject.AddComponent<LineRenderer>();
-                foam.sharedMaterial = foamMaterial;
-                foam.useWorldSpace = true;
-                foam.loop = true;
-                foam.positionCount = shoreline.Length;
-                foam.widthMultiplier = .048f;
-                foam.startColor = foam.endColor = new Color(.74f, .92f, .9f, .27f);
-                foam.SetPositions(shoreline.Select(point => point + Vector3.up * .006f).ToArray());
-                GameObject lineObject = Child("Natural Earth Sandy Shoreline", root.transform);
-                LineRenderer line = lineObject.AddComponent<LineRenderer>();
-                line.sharedMaterial = lineMaterial;
-                line.useWorldSpace = true;
-                line.loop = true;
-                line.positionCount = shoreline.Length;
-                line.widthMultiplier = .021f;
-                line.startColor = line.endColor = new Color(.68f, .69f, .43f, .62f);
-                line.SetPositions(shoreline.Select(point => point + Vector3.up * .012f).ToArray());
-                HasCoastalFoam = true;
+                List<ShorelineStroke> strokes = VisibleShorelineStrokes(shoreline, coastlineClipBounds, out int suppressedSegments);
+                SuppressedTableEdgeShorelineSegmentCount += suppressedSegments;
+                foreach (ShorelineStroke stroke in strokes)
+                {
+                    CreateShorelineRenderer("Natural Earth Wet Shore Darkening", stroke, wetShoreMaterial, .036f, new Color(.12f, .17f, .105f, .42f), .007f, false);
+                    CreateShorelineRenderer("Natural Earth Broken Coastal Foam", stroke, coastalFoamMaterial, .024f, new Color(.84f, .97f, .94f, .46f), .012f, true);
+                    CreateShorelineRenderer("Natural Earth Sandy Shoreline", stroke, lineMaterial, .0105f, new Color(.68f, .69f, .43f, .58f), .016f, false);
+                    HasCoastalFoam = true;
+                    HasWetShoreBand = true;
+                }
             }
             if (!BuildGeographicElevationTerrain(coastline, projectionBounds)) BuildCoastlineTerrainRelief(shorelines);
             CoastlinePolygonCount = shorelines.Count;
             OffMapCoastlineVertexCount = shorelines.Sum(shoreline => shoreline.Count(point => point.x < projectionBounds.xMin || point.x > projectionBounds.xMax || point.z < projectionBounds.yMin || point.z > projectionBounds.yMax));
             Debug.Log($"Loaded {shorelines.Count} Natural Earth coastline polygons for {area.DisplayName}; {OffMapCoastlineVertexCount} authentic vertices continue beyond the playable projection.");
             return true;
+        }
+
+        private static List<ShorelineStroke> VisibleShorelineStrokes(Vector3[] shoreline, Rect projectionBounds, out int suppressedSegments)
+        {
+            var strokes = new List<ShorelineStroke>();
+            suppressedSegments = 0;
+            if (shoreline == null || shoreline.Length < 2) return strokes;
+
+            int count = shoreline.Length;
+            var visibleEdges = new bool[count];
+            int firstSuppressedEdge = -1;
+            for (int edge = 0; edge < count; edge++)
+            {
+                bool visible = !IsProjectionBoundarySegment(shoreline[edge], shoreline[(edge + 1) % count], projectionBounds);
+                visibleEdges[edge] = visible;
+                if (visible) continue;
+                suppressedSegments++;
+                if (firstSuppressedEdge < 0) firstSuppressedEdge = edge;
+            }
+
+            if (firstSuppressedEdge < 0)
+            {
+                strokes.Add(new ShorelineStroke { Points = shoreline, Closed = true });
+                return strokes;
+            }
+
+            List<Vector3> run = null;
+            int currentEdge = (firstSuppressedEdge + 1) % count;
+            for (int processed = 0; processed < count; processed++)
+            {
+                if (visibleEdges[currentEdge])
+                {
+                    if (run == null)
+                    {
+                        run = new List<Vector3>();
+                        run.Add(shoreline[currentEdge]);
+                    }
+                    run.Add(shoreline[(currentEdge + 1) % count]);
+                }
+                else if (run != null)
+                {
+                    if (run.Count >= 2) strokes.Add(new ShorelineStroke { Points = run.ToArray(), Closed = false });
+                    run = null;
+                }
+                currentEdge = (currentEdge + 1) % count;
+            }
+            if (run != null && run.Count >= 2) strokes.Add(new ShorelineStroke { Points = run.ToArray(), Closed = false });
+            return strokes;
+        }
+
+        private static bool IsProjectionBoundarySegment(Vector3 start, Vector3 end, Rect bounds)
+        {
+            const float tolerance = .035f;
+            return (Mathf.Abs(start.x - bounds.xMin) <= tolerance && Mathf.Abs(end.x - bounds.xMin) <= tolerance)
+                || (Mathf.Abs(start.x - bounds.xMax) <= tolerance && Mathf.Abs(end.x - bounds.xMax) <= tolerance)
+                || (Mathf.Abs(start.z - bounds.yMin) <= tolerance && Mathf.Abs(end.z - bounds.yMin) <= tolerance)
+                || (Mathf.Abs(start.z - bounds.yMax) <= tolerance && Mathf.Abs(end.z - bounds.yMax) <= tolerance);
+        }
+
+        private LineRenderer CreateShorelineRenderer(string name, ShorelineStroke stroke, Material material, float width, Color color, float heightOffset, bool textured)
+        {
+            GameObject lineObject = Child(name, root.transform);
+            LineRenderer line = lineObject.AddComponent<LineRenderer>();
+            line.sharedMaterial = material;
+            line.useWorldSpace = true;
+            line.loop = stroke.Closed;
+            line.positionCount = stroke.Points.Length;
+            line.widthMultiplier = width;
+            line.startColor = line.endColor = color;
+            line.numCornerVertices = 2;
+            line.numCapVertices = stroke.Closed ? 0 : 2;
+            if (textured) line.textureMode = LineTextureMode.Tile;
+            line.SetPositions(stroke.Points.Select(point => point + Vector3.up * heightOffset).ToArray());
+            return line;
         }
 
         private void BuildLocations()
@@ -1036,7 +1175,8 @@ namespace SeaOfUncertainty.Prototype
         private void BuildGeographicLabel(OperationalLocationDefinition location)
         {
             GameObject labelObject = Child("Geographic Label — " + location.Name, root.transform);
-            labelObject.transform.position = HexToWorld(location.Hex) + new Vector3(.22f, .56f, .08f);
+            Vector3 anchor = HexToWorld(location.Hex) + new Vector3(0f, .48f, 0f);
+            labelObject.transform.position = anchor + new Vector3(.22f, .08f, .08f);
             TextMesh text = labelObject.AddComponent<TextMesh>();
             text.text = location.Name.ToUpperInvariant();
             text.fontSize = 36;
@@ -1046,7 +1186,28 @@ namespace SeaOfUncertainty.Prototype
             text.color = location.Kind == LocationKind.Objective ? new Color(1f, .74f, .18f, .95f) : new Color(.72f, .88f, .9f, .78f);
             MeshRenderer renderer = labelObject.GetComponent<MeshRenderer>();
             if (renderer != null) renderer.sortingOrder = 2;
+            GameObject leaderObject = Child("Geographic Label Leader — " + location.Name, root.transform);
+            LineRenderer leader = leaderObject.AddComponent<LineRenderer>();
+            leader.sharedMaterial = lineMaterial;
+            leader.useWorldSpace = true;
+            leader.positionCount = 2;
+            leader.widthMultiplier = .012f;
+            leader.startColor = new Color(.52f, .78f, .82f, .34f);
+            leader.endColor = new Color(.52f, .78f, .82f, .08f);
+            leader.gameObject.SetActive(false);
+            int priority = location.Kind == LocationKind.Objective ? 100
+                : location.Kind == LocationKind.Strait ? 72
+                : location.Kind == LocationKind.Port || location.Kind == LocationKind.Airfield ? 58 : 42;
             billboardLabels.Add(labelObject.transform);
+            geographicLabels.Add(new GeographicLabel
+            {
+                Transform = labelObject.transform,
+                Text = text,
+                Leader = leader,
+                Anchor = anchor,
+                BaseColor = text.color,
+                Priority = priority
+            });
         }
 
         private void BuildAtmosphere()
@@ -1103,7 +1264,7 @@ namespace SeaOfUncertainty.Prototype
                         Vector3 hexCenter = HexToWorld(hex);
                         float x = hexCenter.x + Mathf.Cos(angle) * HexRadius;
                         float z = hexCenter.z + Mathf.Sin(angle) * HexRadius;
-                        Vector3 point = SurfacePoint(x, z, .06f);
+                        Vector3 point = SurfacePoint(x, z, HexGridSurfaceHeight);
                         line.SetPosition(i, point);
                     }
                     hexLines[hex] = line;
@@ -1194,8 +1355,10 @@ namespace SeaOfUncertainty.Prototype
             PersistentWakeCount = 0;
             ActiveSurfaceWakeCount = 0;
             AircraftContrailCount = 0;
+            AircraftContrailLayerCount = 0;
             AircraftContrailsUseVaporTreatment = true;
             AircraftContrailsAreAltitudeCued = true;
+            AircraftContrailsUseMistyLayering = true;
             PersistentTrailsUseFormationSpace = true;
             if (game?.Active == null) return;
             Side viewer = game.Active.Side;
@@ -1332,12 +1495,14 @@ namespace SeaOfUncertainty.Prototype
                         new Vector3(side * .068f, -.034f, -1.24f),
                         new Vector3(side * .078f, -.026f, -1.52f)
                     };
-                    LineRenderer contrail = LocalContrailTrail(parent, "Aircraft High-Altitude Vapor Contrail", points, foamMaterial);
+                    LineRenderer contrail = LocalContrailTrail(parent, "Aircraft High-Altitude Vapor Contrail Mist", points, contrailMistMaterial, contrailCoreMaterial);
                     PersistentTrailsUseFormationSpace &= !contrail.useWorldSpace;
-                    AircraftContrailsUseVaporTreatment &= contrail.sharedMaterial == foamMaterial && contrail.widthCurve.length >= 4;
+                    AircraftContrailsUseVaporTreatment &= contrail.sharedMaterial == contrailMistMaterial && contrail.widthCurve.length >= 4;
+                    AircraftContrailsUseMistyLayering &= contrail.sharedMaterial.mainTexture != null && ContainsRenderedName("Contrail Vapor Core");
                     AircraftContrailsAreAltitudeCued &= parent.position.y > WaterSurfaceY + .8f;
                     PersistentWakeCount++;
                     AircraftContrailCount++;
+                    AircraftContrailLayerCount += 2;
                 }
                 return null;
             }
@@ -1366,6 +1531,58 @@ namespace SeaOfUncertainty.Prototype
                 trails.Add(new WakeTrail { Renderer = wake, SternColor = sternColor, TailColor = tailColor });
             }
             return trails;
+        }
+
+        private void BuildSeaStateWhitecaps()
+        {
+            whitecapRoot = Child("Sea-State Whitecaps", root.transform).transform;
+            float seaState = Mathf.Clamp01(area.Presentation.SeaState);
+            int targetCount = Mathf.RoundToInt(Mathf.Lerp(6f, 48f, seaState));
+            WhitecapDensityFollowsSeaState = targetCount == Mathf.RoundToInt(6f + seaState * 42f);
+            Vector3 first = HexToWorld(new HexCoord(0, 0));
+            Vector3 last = HexToWorld(new HexCoord(area.Width - 1, area.Height - 1));
+            float minX = Mathf.Min(first.x, last.x) - .65f;
+            float maxX = Mathf.Max(first.x, last.x) + .65f;
+            float minZ = Mathf.Min(first.z, last.z) - .55f;
+            float maxZ = Mathf.Max(first.z, last.z) + .55f;
+            int seed = area.Id == null ? 1949 : area.Id.Aggregate(1949, (value, character) => value * 31 + character);
+            var random = new System.Random(seed);
+            float windRadians = 32f * Mathf.Deg2Rad;
+            Vector3 wind = new Vector3(Mathf.Sin(windRadians), 0f, Mathf.Cos(windRadians));
+            Vector3 cross = new Vector3(wind.z, 0f, -wind.x);
+
+            for (int attempt = 0; attempt < targetCount * 24 && whitecaps.Count < targetCount; attempt++)
+            {
+                float x = Mathf.Lerp(minX, maxX, (float)random.NextDouble());
+                float z = Mathf.Lerp(minZ, maxZ, (float)random.NextDouble());
+                Vector3 sample = SurfacePoint(x, z, WaterSurfaceY + .032f);
+                if (!TryWorldToHex(sample, out HexCoord hex) || area.TerrainAt(hex) != OperationalTerrain.DeepWater) continue;
+                if (whitecaps.Any(existing => existing.Renderer != null && Vector3.Distance(existing.Renderer.GetPosition(1), sample) < .82f)) continue;
+
+                float length = Mathf.Lerp(.18f, .46f, (float)random.NextDouble()) * Mathf.Lerp(.82f, 1.18f, seaState);
+                float bend = Mathf.Lerp(-.055f, .055f, (float)random.NextDouble());
+                Vector3 start = SurfacePoint(x - wind.x * length * .5f, z - wind.z * length * .5f, WaterSurfaceY + .032f);
+                Vector3 middle = SurfacePoint(x + cross.x * bend, z + cross.z * bend, WaterSurfaceY + .034f);
+                Vector3 end = SurfacePoint(x + wind.x * length * .5f, z + wind.z * length * .5f, WaterSurfaceY + .032f);
+                GameObject capObject = Child("World-Anchored Sea-State Whitecap", whitecapRoot);
+                LineRenderer line = capObject.AddComponent<LineRenderer>();
+                line.sharedMaterial = whitecapMaterial;
+                line.useWorldSpace = true;
+                line.positionCount = 3;
+                line.SetPositions(new[] { start, middle, end });
+                line.widthCurve = new AnimationCurve(new Keyframe(0f, .018f), new Keyframe(.42f, .052f), new Keyframe(1f, .008f));
+                line.widthMultiplier = Mathf.Lerp(.72f, 1.15f, seaState);
+                line.numCornerVertices = 2;
+                line.numCapVertices = 2;
+                line.textureMode = LineTextureMode.Tile;
+                float alpha = Mathf.Lerp(.07f, .19f, seaState) * Mathf.Lerp(.72f, 1f, (float)random.NextDouble());
+                Color color = new Color(.82f, .95f, .96f, alpha);
+                line.startColor = color;
+                line.endColor = WithAlpha(color, alpha * .08f);
+                whitecaps.Add(new Whitecap { Renderer = line, BaseAlpha = alpha, Phase = (float)random.NextDouble() * Mathf.PI * 2f });
+            }
+            SeaStateWhitecapCount = whitecaps.Count;
+            WhitecapsAreWorldAnchored = whitecaps.Count > 0 && whitecaps.All(item => item.Renderer != null && item.Renderer.useWorldSpace);
         }
 
         private void BuildCarrierGroup(Transform parent, Material sideMaterial)
@@ -1623,26 +1840,70 @@ namespace SeaOfUncertainty.Prototype
             return line;
         }
 
-        private static LineRenderer LocalContrailTrail(Transform parent, string name, Vector3[] positions, Material material)
+        private static LineRenderer LocalContrailTrail(Transform parent, string name, Vector3[] positions, Material mistMaterial, Material coreMaterial)
         {
-            GameObject lineObject = Child(name, parent);
-            LineRenderer line = lineObject.AddComponent<LineRenderer>();
-            line.sharedMaterial = material;
-            line.useWorldSpace = false;
-            line.positionCount = positions.Length;
-            line.SetPositions(positions);
-            line.startColor = new Color(.96f, 1f, 1f, .82f);
-            line.endColor = new Color(.60f, .88f, 1f, 0f);
-            line.widthCurve = new AnimationCurve(
-                new Keyframe(0f, .011f),
-                new Keyframe(.16f, .026f),
-                new Keyframe(.58f, .047f),
-                new Keyframe(1f, .004f));
-            line.widthMultiplier = 1f;
-            line.numCornerVertices = 3;
-            line.numCapVertices = 2;
-            line.textureMode = LineTextureMode.Stretch;
-            return line;
+            var mistPoints = new Vector3[positions.Length];
+            float side = Mathf.Sign(positions[0].x);
+            for (int index = 0; index < positions.Length; index++)
+            {
+                float disturbance = index == 0 ? 0f : (index % 2 == 0 ? .006f : -.004f) * side;
+                mistPoints[index] = positions[index] + new Vector3(disturbance, .002f, 0f);
+            }
+
+            GameObject mistObject = Child(name, parent);
+            LineRenderer mist = mistObject.AddComponent<LineRenderer>();
+            mist.sharedMaterial = mistMaterial;
+            mist.useWorldSpace = false;
+            mist.positionCount = mistPoints.Length;
+            mist.SetPositions(mistPoints);
+            mist.colorGradient = VaporGradient(new Color(.94f, .99f, 1f), new Color(.55f, .79f, .92f), .23f, .0175f);
+            mist.widthCurve = new AnimationCurve(
+                new Keyframe(0f, .018f),
+                new Keyframe(.16f, .048f),
+                new Keyframe(.58f, .092f),
+                new Keyframe(1f, .145f));
+            mist.widthMultiplier = 1f;
+            mist.numCornerVertices = 4;
+            mist.numCapVertices = 3;
+            mist.textureMode = LineTextureMode.Tile;
+
+            GameObject coreObject = Child(name + " Contrail Vapor Core", parent);
+            LineRenderer core = coreObject.AddComponent<LineRenderer>();
+            core.sharedMaterial = coreMaterial;
+            core.useWorldSpace = false;
+            core.positionCount = positions.Length;
+            core.SetPositions(positions.Select(point => point + Vector3.up * .004f).ToArray());
+            core.colorGradient = VaporGradient(Color.white, new Color(.69f, .88f, .98f), .27f, 0f);
+            core.widthCurve = new AnimationCurve(
+                new Keyframe(0f, .008f),
+                new Keyframe(.18f, .016f),
+                new Keyframe(.62f, .027f),
+                new Keyframe(1f, .042f));
+            core.widthMultiplier = 1f;
+            core.numCornerVertices = 3;
+            core.numCapVertices = 2;
+            core.textureMode = LineTextureMode.Tile;
+            return mist;
+        }
+
+        private static Gradient VaporGradient(Color nearColor, Color farColor, float nearAlpha, float farAlpha)
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(nearColor, 0f),
+                    new GradientColorKey(Color.Lerp(nearColor, farColor, .42f), .46f),
+                    new GradientColorKey(farColor, 1f)
+                },
+                new[]
+                {
+                    new GradientAlphaKey(nearAlpha, 0f),
+                    new GradientAlphaKey(nearAlpha * .82f, .18f),
+                    new GradientAlphaKey(nearAlpha * .46f, .58f),
+                    new GradientAlphaKey(farAlpha, 1f)
+                });
+            return gradient;
         }
 
         private static Color WithAlpha(Color color, float alpha)
@@ -1770,6 +2031,114 @@ namespace SeaOfUncertainty.Prototype
             texture.SetPixels(colors);
             texture.Apply(true, false);
             generatedTextures.Add(texture);
+            return texture;
+        }
+
+        private Texture2D CreateContrailMistTexture(int width, int height)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, true)
+            {
+                name = "Layered Contrail Mist",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 4
+            };
+            var colors = new Color[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                float v = y / (float)(height - 1);
+                float feather = Mathf.Pow(Mathf.Clamp01(Mathf.Sin(v * Mathf.PI)), .72f);
+                for (int x = 0; x < width; x++)
+                {
+                    float u = x / (float)(width - 1);
+                    float broad = TileableNoise(u, v, 4f, 1.4f, 18.2f, 5.7f);
+                    float wisps = TileableNoise(u, v, 13f, 2.3f, 43.1f, 16.4f);
+                    float breakup = Mathf.Lerp(.18f, 1f, Mathf.SmoothStep(.28f, .78f, broad * .7f + wisps * .3f));
+                    float asymmetricEdge = Mathf.Lerp(.78f, 1f, TileableNoise(u, v, 7f, 3f, 7.9f, 29.6f));
+                    colors[y * width + x] = new Color(.91f, .98f, 1f, feather * breakup * asymmetricEdge);
+                }
+            }
+            texture.SetPixels(colors);
+            texture.Apply(true, false);
+            generatedTextures.Add(texture);
+            return texture;
+        }
+
+        private Texture2D CreateWhitecapTexture(int width, int height)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, true)
+            {
+                name = "Broken Sea-State Whitecap",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 4
+            };
+            var colors = new Color[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                float across = Mathf.Abs(y / (float)(height - 1) * 2f - 1f);
+                float feather = Mathf.SmoothStep(1f, 0f, across);
+                for (int x = 0; x < width; x++)
+                {
+                    float along = x / (float)(width - 1);
+                    float broken = Mathf.PerlinNoise(along * 13f + 7.1f, y * .31f + 19.4f);
+                    float pulse = Mathf.SmoothStep(.38f, .72f, broken);
+                    float endFade = Mathf.SmoothStep(0f, .12f, along) * Mathf.SmoothStep(0f, .18f, 1f - along);
+                    colors[y * width + x] = new Color(1f, 1f, 1f, feather * pulse * endFade);
+                }
+            }
+            texture.SetPixels(colors);
+            texture.Apply(true, false);
+            generatedTextures.Add(texture);
+            return texture;
+        }
+
+        private Texture2D CreateCoastalFoamMask(int width)
+        {
+            const int height = 4;
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, true)
+            {
+                name = "Static Broken Coastal Foam Mask",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                anisoLevel = 2
+            };
+            var colors = new Color[width * height];
+            var intensities = new float[width];
+            float minimumIntensity = 1f;
+            float maximumIntensity = 0f;
+            for (int x = 0; x < width; x++)
+            {
+                float u = x / (float)(width - 1);
+                float broad = TileableNoise(u, .31f, 3f, 1f, 12.7f, 4.2f);
+                float clusteredWave = .5f + .5f * Mathf.Sin((u * 5f + Mathf.Sin(u * Mathf.PI * 4f) * .13f) * Mathf.PI * 2f);
+                float brokenDetail = .5f + .5f * Mathf.Sin(u * Mathf.PI * 22f + 1.7f);
+                float intensity = clusteredWave * .76f + brokenDetail * .16f + broad * .08f;
+                intensities[x] = intensity;
+                minimumIntensity = Mathf.Min(minimumIntensity, intensity);
+                maximumIntensity = Mathf.Max(maximumIntensity, intensity);
+            }
+
+            float minimumAlpha = 1f;
+            float maximumAlpha = 0f;
+            for (int x = 0; x < width; x++)
+            {
+                float normalized = Mathf.InverseLerp(minimumIntensity, maximumIntensity, intensities[x]);
+                float clustered = Mathf.SmoothStep(.18f, .82f, normalized);
+                float alpha = Mathf.Lerp(.02f, 1f, clustered);
+                minimumAlpha = Mathf.Min(minimumAlpha, alpha);
+                maximumAlpha = Mathf.Max(maximumAlpha, alpha);
+                for (int y = 0; y < height; y++)
+                {
+                    float edgeSoftness = 1f - Mathf.Abs((y / (float)(height - 1)) * 2f - 1f) * .32f;
+                    colors[y * width + x] = new Color(.92f, 1f, .98f, alpha * edgeSoftness);
+                }
+            }
+            texture.SetPixels(colors);
+            texture.Apply(true, false);
+            generatedTextures.Add(texture);
+            CoastalFoamMaskAlphaRange = maximumAlpha - minimumAlpha;
+            UsesBrokenCoastalFoam = CoastalFoamMaskAlphaRange > .55f;
             return texture;
         }
 
@@ -2344,13 +2713,105 @@ namespace SeaOfUncertainty.Prototype
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             camera.transform.position = focus + rotation * new Vector3(0f, 0f, -distance);
             camera.transform.LookAt(focus);
-            float labelScale = Mathf.Clamp(distance / Mathf.Max(12f, Mathf.Max(area.Width, area.Height)), .72f, 1.55f);
-            foreach (Transform label in billboardLabels)
+            UpdateGeographicLabelLayout();
+        }
+
+        private void UpdateGeographicLabelLayout()
+        {
+            if (geographicLabels.Count == 0 || camera == null || targetTexture == null) return;
+            float width = Mathf.Max(1f, targetTexture.width);
+            float height = Mathf.Max(1f, targetTexture.height);
+            float mapSpan = Mathf.Max(12f, Mathf.Max(area.Width, area.Height));
+            float labelScale = Mathf.Clamp(distance / mapSpan, .72f, 1.55f);
+            float distanceVisibility = Mathf.InverseLerp(mapSpan * 2.85f, mapSpan * 1.05f, distance);
+            var occupied = new List<Rect>();
+            if (game?.Active != null)
             {
-                if (label == null) continue;
-                label.rotation = camera.transform.rotation;
-                label.localScale = Vector3.one * labelScale;
+                Side viewer = game.Active.Side;
+                foreach (FormationState formation in game.Formations.Where(item => item.Side == viewer && !item.IsDestroyed))
+                    AddProjectedOccupiedRect(occupied, HexToWorld(formation.Position) + Vector3.up * .72f, width, height, formation == game.Active ? 82f : 64f, formation == game.Active ? 66f : 50f);
+                foreach (ContactState contact in game.Contacts.Where(item => item.Owner == viewer && !item.IsLost))
+                    AddProjectedOccupiedRect(occupied, HexToWorld(contact.LastKnownPosition) + Vector3.up * .72f, width, height, 72f, 58f);
             }
+
+            GeographicLeaderLineCount = 0;
+            GeographicLabelsFadeWithDistance = false;
+            Vector2[] offsets =
+            {
+                Vector2.zero, new Vector2(0f, -25f), new Vector2(0f, 25f), new Vector2(34f, 0f),
+                new Vector2(-34f, 0f), new Vector2(38f, -24f), new Vector2(-38f, -24f), new Vector2(38f, 24f), new Vector2(-38f, 24f)
+            };
+            foreach (GeographicLabel label in geographicLabels.OrderByDescending(item => item.Priority))
+            {
+                if (label.Transform == null || label.Text == null) continue;
+                Vector3 viewport = camera.WorldToViewportPoint(label.Anchor);
+                MeshRenderer renderer = label.Transform.GetComponent<MeshRenderer>();
+                bool visible = viewport.z > 0f && viewport.x > -.08f && viewport.x < 1.08f && viewport.y > -.08f && viewport.y < 1.08f;
+                if (renderer != null) renderer.enabled = visible;
+                if (!visible)
+                {
+                    if (label.Leader != null) label.Leader.gameObject.SetActive(false);
+                    continue;
+                }
+
+                Vector2 anchor = new Vector2(viewport.x * width, (1f - viewport.y) * height);
+                float labelWidth = Mathf.Clamp(label.Text.text.Length * 6.2f * labelScale, 54f, 176f);
+                float labelHeight = 19f * labelScale;
+                Rect chosen = new Rect(anchor.x + 12f, anchor.y - labelHeight * .5f, labelWidth, labelHeight);
+                Vector2 chosenOffset = Vector2.zero;
+                float bestPenalty = float.MaxValue;
+                foreach (Vector2 offset in offsets)
+                {
+                    Rect candidate = new Rect(anchor.x + 12f + offset.x, anchor.y - labelHeight * .5f + offset.y, labelWidth, labelHeight);
+                    candidate.x = Mathf.Clamp(candidate.x, 8f, Mathf.Max(8f, width - candidate.width - 8f));
+                    candidate.y = Mathf.Clamp(candidate.y, 50f, Mathf.Max(50f, height - candidate.height - 8f));
+                    float penalty = occupied.Sum(existing => RectIntersectionArea(candidate, existing)) + offset.sqrMagnitude * .0008f;
+                    if (penalty >= bestPenalty) continue;
+                    bestPenalty = penalty;
+                    chosen = candidate;
+                    chosenOffset = new Vector2(candidate.x - (anchor.x + 12f), candidate.y - (anchor.y - labelHeight * .5f));
+                    if (penalty < .01f) break;
+                }
+                occupied.Add(chosen);
+
+                Vector2 labelPoint = new Vector2(chosen.x, chosen.center.y);
+                Vector3 labelWorld = camera.ViewportToWorldPoint(new Vector3(labelPoint.x / width, 1f - labelPoint.y / height, viewport.z));
+                label.Transform.position = labelWorld;
+                label.Transform.rotation = camera.transform.rotation;
+                label.Transform.localScale = Vector3.one * labelScale;
+                float priorityFloor = label.Priority >= 100 ? .78f : label.Priority >= 70 ? .42f : .2f;
+                float alphaFactor = Mathf.Lerp(priorityFloor, 1f, distanceVisibility);
+                label.Text.color = WithAlpha(label.BaseColor, label.BaseColor.a * alphaFactor);
+                GeographicLabelsFadeWithDistance |= alphaFactor < .99f;
+
+                bool displaced = chosenOffset.sqrMagnitude > 64f;
+                if (label.Leader != null)
+                {
+                    label.Leader.gameObject.SetActive(displaced);
+                    if (displaced)
+                    {
+                        label.Leader.SetPosition(0, label.Anchor);
+                        label.Leader.SetPosition(1, labelWorld);
+                        GeographicLeaderLineCount++;
+                    }
+                }
+            }
+            GeographicLabelsUsePriorityLayout = geographicLabels.Count > 0;
+        }
+
+        private void AddProjectedOccupiedRect(List<Rect> occupied, Vector3 world, float width, float height, float rectWidth, float rectHeight)
+        {
+            Vector3 viewport = camera.WorldToViewportPoint(world);
+            if (viewport.z <= 0f) return;
+            Vector2 center = new Vector2(viewport.x * width, (1f - viewport.y) * height);
+            occupied.Add(new Rect(center.x - rectWidth * .5f, center.y - rectHeight * .5f, rectWidth, rectHeight));
+        }
+
+        private static float RectIntersectionArea(Rect first, Rect second)
+        {
+            float overlapX = Mathf.Max(0f, Mathf.Min(first.xMax, second.xMax) - Mathf.Max(first.xMin, second.xMin));
+            float overlapY = Mathf.Max(0f, Mathf.Min(first.yMax, second.yMax) - Mathf.Max(first.yMin, second.yMin));
+            return overlapX * overlapY;
         }
 
         private void ClampFocus()
@@ -2456,7 +2917,7 @@ namespace SeaOfUncertainty.Prototype
             generatedTextures.Clear();
             DestroyObject(lineMaterial); DestroyObject(waterMaterial); DestroyObject(landMaterial); DestroyObject(littoralMaterial); DestroyObject(highlandMaterial);
             DestroyObject(blueMaterial); DestroyObject(redMaterial); DestroyObject(navalHullMaterial); DestroyObject(navalDeckMaterial); DestroyObject(canopyMaterial);
-            DestroyObject(foamMaterial); DestroyObject(shallowWaterMaterial); DestroyObject(atmosphericMaterial); DestroyObject(cloudShadowMaterial);
+            DestroyObject(foamMaterial); DestroyObject(whitecapMaterial); DestroyObject(contrailMistMaterial); DestroyObject(contrailCoreMaterial); DestroyObject(coastalFoamMaterial); DestroyObject(wetShoreMaterial); DestroyObject(shallowWaterMaterial); DestroyObject(atmosphericMaterial); DestroyObject(cloudShadowMaterial);
             DestroyObject(contactMaterial); DestroyObject(warningMaterial);
         }
 

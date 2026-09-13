@@ -1,6 +1,6 @@
 # Graphics Incremental Awesomeness TODO
 
-Last refreshed: **2026-09-11**
+Last refreshed: **2026-09-13**
 
 This is the separate, non-blocking visual-evolution backlog for Sea of Uncertainty. Its purpose is to make the game a little more convincing, readable, and delightful with each small pass without turning graphics work into an uncontrolled 1.0 beta dependency.
 
@@ -24,7 +24,7 @@ The release-critical backlog remains [`TODO.md`](../TODO.md). An item here becom
 - [x] 3D-first operational command table with optional edge HUD.
 - [x] Physical Earth-radius globe curvature at the 20-NM operational scale.
 - [x] Curved Natural Earth coastline geometry without ocean cut-through.
-- [x] Traditional flat-top, edge-sharing hex presentation.
+- [x] Traditional flat-top, edge-sharing hex presentation positioned at sea-surface depth so solid land naturally occludes it.
 - [x] NOAA ETOPO-derived land elevation with restrained 4× visual exaggeration.
 - [x] ETOPO bathymetry-driven ocean color zones, coastal shelf transitions, current bands, and animated normal detail.
 - [x] Distinct carrier, surface, submarine, and air-group silhouettes with distant operational symbols.
@@ -37,18 +37,18 @@ The release-critical backlog remains [`TODO.md`](../TODO.md). An item here becom
 These are the preferred near-term sequence, one at a time.
 
 - [x] **GIA-001 — Wake fidelity:** Surface wakes now originate at the stern only while a carrier, surface group, or logistics group is moving, follow formation-local heading, taper through a widening V, and fade after arrival; submarines and stationary surface formations remain wake-free.
-- [x] **GIA-002 — Air trail fidelity:** Air groups now use paired, tapered blue-white vapor contrails at aircraft altitude, aligned in formation-local space and visually distinct from surface wakes and plotted routes.
+- [x] **GIA-002 — Air trail fidelity:** Air groups now use paired, layered blue-white contrails at aircraft altitude: a feathered noisy mist envelope surrounds a narrower fading vapor core, both aligned in formation-local space and visually distinct from surface wakes and plotted routes.
 - [x] **GIA-003 — Elevation-aware land material:** The ETOPO grid now drives a theater-scale coastal-green, lowland, upland-olive, and high-rock palette plus subdued aspect and steepness shading from measured local gradients; restrained broad mottling preserves the command-table style. Shared neighboring face normals remove terrain-tile lighting seams while retaining the original 4× relief and interior terrain detail.
-- [ ] **GIA-004 — Sea-state whitecaps:** Add sparse, view-stable whitecaps whose density follows configured sea state and which vanish under Reduced Motion where animation would distract.
-- [ ] **GIA-005 — Label decluttering:** Add priority, collision avoidance, compact leader lines, and distance-based fading for formation and geographic labels.
+- [x] **GIA-004 — Sea-state whitecaps:** Sparse deterministic foam strokes now remain anchored to deep-water points on the curved globe, scale their count and intensity from the theater's configured sea state, breathe very subtly, and disappear entirely under Reduced Motion.
+- [x] **GIA-005 — Label decluttering:** Active formations, actionable Contacts, other Contacts, formations, objectives, straits, facilities, and background geography now follow explicit priorities; screen-space collision candidates displace lower-priority labels, compact leader lines preserve their anchors, and distance fading reduces clutter without hiding critical labels.
 
 ## Ocean and coastline
 
 - [ ] **GIA-010:** Refine the bathymetric palette so abyss, basin, slope, shelf, and shoal transitions remain visible at both high and low camera angles.
 - [ ] **GIA-011:** Add restrained directional surface streaking derived from wind and sea-state profiles.
 - [ ] **GIA-012:** Give current bands very slow, nonrepeating drift without sliding the geographically anchored bathymetric zones.
-- [ ] **GIA-013:** Add a narrow wet-shore darkening band between coastal foam and dry land.
-- [ ] **GIA-014:** Vary foam intensity by exposed coastline orientation and sea state while keeping it cosmetic.
+- [x] **GIA-013:** Coastlines now layer a narrow static wet-shore darkening band beneath the foam and dry-land demarcation.
+- [ ] **GIA-014:** Vary foam intensity by exposed coastline orientation and sea state while keeping it cosmetic. First-stage static broken-foam masking is implemented; exposure weighting and deliberately visible, staggered opacity motion remain pending visual approval.
 - [ ] **GIA-015:** Introduce shallow reef/sandbar hints around appropriate littoral islands without implying authoritative traversability.
 - [ ] **GIA-016:** Improve sun glitter into a broken, view-dependent path rather than a uniform glossy response.
 - [ ] **GIA-017:** Add gentle horizon reflection and fresnel brightening while preserving grid contrast.
@@ -57,11 +57,11 @@ These are the preferred near-term sequence, one at a time.
 ## Terrain and landforms
 
 - [ ] **GIA-020:** Smooth terrain normals selectively so measured ridgelines remain clear without faceted spikes at low camera pitch.
-- [ ] **GIA-021:** Add elevation- and slope-aware material blending using the existing ETOPO mesh.
+- [x] **GIA-021:** Elevation- and slope-aware material blending now uses the existing ETOPO mesh and measured gradients; completed as part of GIA-003.
 - [ ] **GIA-022:** Add broad vegetation variation appropriate to Luzon and Taiwan without random high-frequency noise.
 - [ ] **GIA-023:** Improve large-river and valley readability where the source resolution supports it.
 - [ ] **GIA-024:** Add restrained coastal cliff treatment where steep measured slopes meet the sea.
-- [ ] **GIA-025:** Blend terrain-tile boundaries and coastline edges under extreme lighting and low-angle views.
+- [ ] **GIA-025:** Blend terrain-tile boundaries and coastline edges under extreme lighting and low-angle views. Terrain-tile lighting seams use shared neighboring face normals at the original 4× relief, and coastline strokes omit artificial closures where land exits any theater edge; broader coastline and multi-angle validation remain.
 - [ ] **GIA-026:** Add distant terrain LOD or simplified relief only when measured performance justifies it.
 - [ ] **GIA-027:** Develop a compatible visual treatment for fictional theaters that does not pretend to be measured geography.
 
@@ -81,8 +81,8 @@ These are the preferred near-term sequence, one at a time.
 - [ ] **GIA-040:** Audit heading and wake orientation for every formation type, movement mode, camera angle, and state rebuild.
 - [ ] **GIA-041:** Give carriers a broader, gently diverging stern wake and escorts narrower independent wakes.
 - [ ] **GIA-042:** Give surface groups tapered wakes scaled by recent movement commitment.
-- [ ] **GIA-043:** Keep submarines free of surface wakes unless an explicitly visible surfaced state is ever introduced.
-- [ ] **GIA-044:** Make aircraft contrails originate from engines/wing roots, taper with age, and remain visibly elevated above the sea.
+- [x] **GIA-043:** Submarines remain free of surface wakes unless an explicitly visible surfaced state is introduced later.
+- [x] **GIA-044:** Aircraft contrails originate as paired wing-root trails, expand into textured translucent mist around a narrow core, fade with age-distance, follow formation heading, and remain visibly elevated above the sea; completed as part of GIA-002.
 - [ ] **GIA-045:** Refine formation hull proportions, superstructure silhouettes, and recognition markings without increasing information leakage.
 - [ ] **GIA-046:** Add restrained material differentiation among hull, deck, canopy, sensor, and recognition surfaces.
 - [ ] **GIA-047:** Improve formation bank/turn/settle animation during movement while preserving exact authoritative endpoints.
