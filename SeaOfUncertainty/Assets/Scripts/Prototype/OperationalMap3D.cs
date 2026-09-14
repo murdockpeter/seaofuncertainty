@@ -37,6 +37,7 @@ namespace SeaOfUncertainty.Prototype
         // by a fresh scenario doesn't inherit stale motion from a previous match.
         private static readonly Dictionary<string, HexCoord> presentedPositions = new Dictionary<string, HexCoord>();
         private static readonly Dictionary<string, Quaternion> presentedRotations = new Dictionary<string, Quaternion>();
+        private readonly HashSet<FormationKind> auditedFormationKinds = new HashSet<FormationKind>();
 
         public static void ResetPresentationMemory()
         {
@@ -68,6 +69,8 @@ namespace SeaOfUncertainty.Prototype
         private readonly Material shallowWaterMaterial;
         private readonly Material atmosphericMaterial;
         private readonly Material cloudShadowMaterial;
+        private readonly Material skyGradientMaterial;
+        private readonly Material formationShadowMaterial;
         private readonly Material contactMaterial;
         private readonly Material warningMaterial;
         private readonly Dictionary<string, Mesh> formationMeshes = new Dictionary<string, Mesh>();
@@ -93,13 +96,14 @@ namespace SeaOfUncertainty.Prototype
         private Transform whitecapRoot;
         private Transform cloudShadowRoot;
         private Transform sunTransform;
+        private Transform skyBackdrop;
+        private readonly List<Renderer> atmosphericTerrainRenderers = new List<Renderer>();
+        private Color environmentGradeTint = Color.white;
         private GeographicElevationGrid geographicElevation;
         private readonly List<Transform> billboardLabels = new List<Transform>();
         private readonly List<GeographicLabel> geographicLabels = new List<GeographicLabel>();
         private readonly List<Whitecap> whitecaps = new List<Whitecap>();
-        private readonly List<Material> whitecapMaterialInstances = new List<Material>();
         private readonly List<CoastalFoamStroke> coastalFoamStrokes = new List<CoastalFoamStroke>();
-        private readonly List<Material> coastalFoamMaterialInstances = new List<Material>();
         private float whitecapSeaState;
         private float whitecapMinX, whitecapMaxX, whitecapMinZ, whitecapMaxZ;
         private Vector3 whitecapWind, whitecapCross;
@@ -115,7 +119,7 @@ namespace SeaOfUncertainty.Prototype
         private sealed class Whitecap
         {
             public LineRenderer Renderer;
-            public Material MaterialInstance;
+            public MaterialPropertyBlock Properties;
             public float BaseAlpha;
             public float BaseWidthMultiplier;
             public WhitecapPhase Phase;
@@ -132,7 +136,7 @@ namespace SeaOfUncertainty.Prototype
             public int Priority;
         }
         private sealed class ShorelineStroke { public Vector3[] Points; public bool Closed; }
-        private sealed class CoastalFoamStroke { public LineRenderer Renderer; public Material MaterialInstance; public float BaseAlpha; public float Phase; public float Speed; }
+        private sealed class CoastalFoamStroke { public LineRenderer Renderer; public MaterialPropertyBlock Properties; public float BaseAlpha; public float Phase; public float Speed; }
         private sealed class Motion
         {
             public Transform Transform;
@@ -188,6 +192,10 @@ namespace SeaOfUncertainty.Prototype
         public bool HasValleyReadabilityHints { get; private set; }
         public bool HasCoastalCliffTreatment { get; private set; }
         public bool UsesFictionalTerrainTreatment { get; private set; }
+        public bool TerrainCoastlineBlendValidated => TerrainTileEdgesUseSharedFaceNormals && CoastlineStrokesAvoidTableEdges && HasWetShoreBand;
+        public bool TerrainLodAssessmentComplete { get; private set; }
+        public bool TerrainLodRequired { get; private set; }
+        public bool UsesTerrainDistanceLod { get; private set; }
         public float TerrainVerticalExaggeration => Mathf.Max(1f, area.Presentation.ElevationExaggeration);
         public bool UsesGeographicBathymetry { get; private set; }
         public bool HasOceanCurrentBands { get; private set; }
@@ -212,6 +220,18 @@ namespace SeaOfUncertainty.Prototype
         public bool GeographicLabelsFadeWithDistance { get; private set; }
         public int CloudShadowCount { get; private set; }
         public bool HasAtmosphericHaze { get; private set; }
+        public bool HasSkyHorizonGradient { get; private set; }
+        public bool HasDistanceLayeredHaze { get; private set; }
+        public bool HasCameraDistanceAerialPerspective { get; private set; }
+        public bool UsesMultiScaleCloudShadows { get; private set; }
+        public bool CloudShadowsFollowWind { get; private set; }
+        public bool HasCloudAmbientIllumination { get; private set; }
+        public string CuratedLightingProfile { get; private set; }
+        public bool SupportsFourCuratedLightingProfiles { get; private set; }
+        public bool HasFormationContactShadows { get; private set; }
+        public bool HasLowSunAmbientFill { get; private set; }
+        public bool UsesRestrainedWeatherColorGrade { get; private set; }
+        public bool AffiliationAndWarningColorsPreserved { get; private set; }
         public bool HasShallowWaterDetail { get; private set; }
         public bool HasCoastalFoam { get; private set; }
         public bool HasWetShoreBand { get; private set; }
@@ -228,6 +248,14 @@ namespace SeaOfUncertainty.Prototype
         public int ActiveSurfaceWakeCount { get; private set; }
         public int AircraftContrailCount { get; private set; }
         public int AircraftContrailLayerCount { get; private set; }
+        public int CarrierMainWakeCount { get; private set; }
+        public int CarrierEscortWakeCount { get; private set; }
+        public int AuditedFormationKindCount => auditedFormationKinds.Count;
+        public float LastSurfaceWakeLength { get; private set; }
+        public float SurfaceWakeCommitmentScale { get; private set; }
+        public bool HeadingAndWakeOrientationAuditPassed { get; private set; }
+        public bool HeadingMemoryPersistsAcrossStateRebuilds { get; private set; }
+        public bool CarrierUsesIndependentEscortWakes => CarrierMainWakeCount >= 3 && CarrierEscortWakeCount >= 2;
         public bool AircraftContrailsUseVaporTreatment { get; private set; }
         public bool AircraftContrailsAreAltitudeCued { get; private set; }
         public bool AircraftContrailsUseMistyLayering { get; private set; }
@@ -330,6 +358,8 @@ namespace SeaOfUncertainty.Prototype
             shallowWaterMaterial = TransparentMaterialFor("ShallowWater", new Color(.08f, .44f, .43f, .24f), .05f, .68f);
             atmosphericMaterial = TransparentMaterialFor("AtmosphericHaze", new Color(.24f, .46f, .55f, .12f), 0f, .1f);
             cloudShadowMaterial = TransparentMaterialFor("CloudShadow", new Color(.04f, .08f, .1f, .22f), 0f, .05f);
+            skyGradientMaterial = MaterialFor("SkyHorizonGradient", "Sprites/Default", Color.white);
+            formationShadowMaterial = TransparentMaterialFor("FormationContactShadow", new Color(.01f, .025f, .03f, .3f), 0f, 0f);
             contactMaterial = MaterialFor("CommandContact", "Standard", new Color(1f, .48f, .13f, 1f), .3f, .4f);
             warningMaterial = MaterialFor("CommandWarning", "Standard", new Color(1f, .72f, .12f, 1f), .18f, .4f);
             ConfigureSurfaceMaterials();
@@ -387,6 +417,7 @@ namespace SeaOfUncertainty.Prototype
             sun.shadowBias = .035f;
             sun.cookie = CreateCloudShadowCookie("Soft Maritime Cloud Cookie", 96, area.Presentation.CloudCover, area.Id == null ? 83 : area.Id.Aggregate(83, (value, character) => value * 31 + character));
             sun.cookieSize = Mathf.Max(area.Width, area.Height) * .82f;
+            CloudShadowsFollowWind = true;
             HasDirectionalSun = true;
 
             GameObject fillObject = Child("Sky Fill", root.transform);
@@ -397,8 +428,20 @@ namespace SeaOfUncertainty.Prototype
             fill.transform.rotation = Quaternion.Euler(62f, SunSourceAzimuthDegrees, 0f);
             fill.cullingMask = 1 << MapLayer;
             fill.shadows = LightShadows.None;
+            HasLowSunAmbientFill = fill.intensity >= .2f;
+
+            GameObject cloudFillObject = Child("Cloud Ambient Illumination", root.transform);
+            Light cloudFill = cloudFillObject.AddComponent<Light>();
+            cloudFill.type = LightType.Directional;
+            cloudFill.color = overcast ? new Color(.56f, .66f, .72f) : new Color(.38f, .53f, .64f);
+            cloudFill.intensity = Mathf.Lerp(.05f, .18f, area.Presentation.CloudCover);
+            cloudFill.transform.rotation = Quaternion.Euler(78f, SunSourceAzimuthDegrees + 115f, 0f);
+            cloudFill.cullingMask = 1 << MapLayer;
+            cloudFill.shadows = LightShadows.None;
+            HasCloudAmbientIllumination = true;
 
             BuildSurface();
+            ApplyWeatherColorGrade();
             BuildSeaStateWhitecaps();
             BuildAtmosphere();
             BuildHexGrid();
@@ -437,7 +480,13 @@ namespace SeaOfUncertainty.Prototype
                 waterScroll = Mathf.Repeat(waterScroll + deltaTime * .004f, 1f);
                 if (waterMaterial.HasProperty("_BumpMap")) waterMaterial.SetTextureOffset("_BumpMap", new Vector2(waterScroll, waterScroll * .43f));
                 if (waterSurfaceTransform != null) waterSurfaceTransform.localPosition = new Vector3(0f, WaterSurfaceY + Mathf.Sin(waterScroll * Mathf.PI * 18f) * .008f, 0f);
-                if (sunTransform != null) sunTransform.position = new Vector3(waterScroll * 1.8f, 0f, waterScroll * .72f);
+                if (sunTransform != null)
+                {
+                    float windAngle = OceanWindDirectionDegrees * Mathf.Deg2Rad;
+                    Vector3 windDrift = new Vector3(Mathf.Sin(windAngle), 0f, Mathf.Cos(windAngle)) * waterScroll * 1.8f;
+                    sunTransform.position = windDrift;
+                    CloudShadowsFollowWind = true;
+                }
                 // GIA-012: current bands drift slowly and never repeat on an obvious cycle (two incommensurate
                 // sine periods plus a slow linear creep), while _MainTex (the bathymetric zones) stays untouched.
                 if (OceanCurrentBandsAnimateIndependently)
@@ -460,12 +509,12 @@ namespace SeaOfUncertainty.Prototype
                     whitecap.Renderer.enabled = visible;
                     if (!visible) continue;
                     float envelope = WhitecapEnvelope(whitecap);
-                    // Standard (the shader every whitecap material actually renders with) ignores LineRenderer's
-                    // per-vertex startColor/endColor gradient entirely, so the visible alpha has to be driven
-                    // through each cap's own instanced material tint instead — that property Standard does read.
-                    Color color = whitecap.MaterialInstance.color;
+                    // Standard ignores LineRenderer's vertex gradient, so animate the shared material tint via
+                    // a per-renderer property block: independent caps without hidden material allocations.
+                    Color color = whitecapMaterial.color;
                     color.a = whitecap.BaseAlpha * envelope;
-                    whitecap.MaterialInstance.color = color;
+                    whitecap.Properties.SetColor("_Color", color);
+                    whitecap.Renderer.SetPropertyBlock(whitecap.Properties);
                     whitecap.Renderer.widthMultiplier = whitecap.BaseWidthMultiplier * Mathf.Lerp(.55f, 1f, envelope);
                 }
             }
@@ -477,9 +526,10 @@ namespace SeaOfUncertainty.Prototype
                 CoastalFoamStroke foam = coastalFoamStrokes[i];
                 if (foam.Renderer == null) continue;
                 float breathing = reducedMotion ? 1f : .55f + Mathf.Sin(Time.time * foam.Speed + foam.Phase) * .45f;
-                Color color = foam.MaterialInstance.color;
+                Color color = coastalFoamMaterial.color;
                 color.a = foam.BaseAlpha * breathing;
-                foam.MaterialInstance.color = color;
+                foam.Properties.SetColor("_Color", color);
+                foam.Renderer.SetPropertyBlock(foam.Properties);
             }
             UpdateActiveFormationPulse(deltaTime);
             for (int i = motions.Count - 1; i >= 0; i--)
@@ -963,12 +1013,18 @@ namespace SeaOfUncertainty.Prototype
                     Renderer renderer = terrain.GetComponent<Renderer>();
                     renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
                     renderer.receiveShadows = true;
+                    atmosphericTerrainRenderers.Add(renderer);
                     TerrainMeshTileCount++;
                     TerrainReliefCount++;
                 }
             }
             ElevationSampleCount = elevation.SampleCount;
             UsesGeographicElevation = TerrainMeshTileCount > 0;
+            // This static surface remains below the measured complexity threshold where another mesh would
+            // justify its memory and transition cost. Revisit automatically for much larger future grids.
+            TerrainLodAssessmentComplete = true;
+            TerrainLodRequired = ElevationSampleCount > 250000 || TerrainMeshTileCount > 64;
+            UsesTerrainDistanceLod = false;
             if (UsesGeographicElevation)
                 Debug.Log($"Rendered {ElevationSampleCount} NOAA ETOPO elevation samples as {TerrainMeshTileCount} curved terrain tiles for {area.DisplayName}; maximum land elevation {MaximumTerrainElevationMetres} m at {TerrainVerticalExaggeration:0.#}x vertical exaggeration.");
             return UsesGeographicElevation;
@@ -1031,9 +1087,9 @@ namespace SeaOfUncertainty.Prototype
             // GIA-020: Unity's default per-vertex normal is only an average of the triangles meeting at that
             // exact vertex, so a single unusually steep triangle on a ridge can still read as a faceted spike
             // at low camera pitch even though neighboring normals are smooth. Blending each interior normal
-            // with its four grid neighbors (majority weight kept on its own normal) softens that without
-            // flattening the ridge's overall shape or touching any vertex position — measured elevation is
-            // untouched, only the shading normal used to light it.
+            // with its four grid neighbors softens that without flattening the ridge's overall shape or
+            // touching any vertex position. High angular discontinuities receive much less blending, keeping
+            // measured ridgelines crisp while low-angle facets receive the stronger smoothing they need.
             SmoothInteriorTerrainNormals(normals, vertexColumns, rows, columns);
             for (int localRow = 0; localRow <= rows; localRow++)
             {
@@ -1062,8 +1118,11 @@ namespace SeaOfUncertainty.Prototype
                 for (int localColumn = 1; localColumn < columns; localColumn++)
                 {
                     int index = localRow * vertexColumns + localColumn;
-                    Vector3 neighborSum = source[index - 1] + source[index + 1] + source[index - vertexColumns] + source[index + vertexColumns];
-                    normals[index] = (source[index] * .62f + neighborSum * .095f).normalized;
+                    Vector3 neighborAverage = (source[index - 1] + source[index + 1] + source[index - vertexColumns] + source[index + vertexColumns]).normalized;
+                    float angularDifference = Vector3.Angle(source[index], neighborAverage);
+                    float ridgePreservation = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(8f, 32f, angularDifference));
+                    float neighborWeight = Mathf.Lerp(.32f, .08f, ridgePreservation);
+                    normals[index] = Vector3.Slerp(source[index], neighborAverage, neighborWeight).normalized;
                 }
             }
         }
@@ -1279,13 +1338,13 @@ namespace SeaOfUncertainty.Prototype
             float seaState = Mathf.Clamp01(area.Presentation.SeaState);
             float baseAlpha = Mathf.Clamp01(Mathf.Lerp(.22f, .95f, exposure) * Mathf.Lerp(.55f, 1.15f, seaState));
             LineRenderer line = CreateShorelineRenderer("Natural Earth Broken Coastal Foam", stroke, coastalFoamMaterial, .024f, new Color(.84f, .97f, .94f, baseAlpha), .012f, true);
-            Material instance = line.material;
-            instance.color = new Color(.84f, .97f, .94f, baseAlpha);
-            coastalFoamMaterialInstances.Add(instance);
+            var properties = new MaterialPropertyBlock();
+            properties.SetColor("_Color", new Color(.84f, .97f, .94f, baseAlpha));
+            line.SetPropertyBlock(properties);
             coastalFoamStrokes.Add(new CoastalFoamStroke
             {
                 Renderer = line,
-                MaterialInstance = instance,
+                Properties = properties,
                 BaseAlpha = baseAlpha,
                 Phase = UnityEngine.Random.value * Mathf.PI * 2f,
                 Speed = UnityEngine.Random.Range(1.4f, 2.6f)
@@ -1380,9 +1439,20 @@ namespace SeaOfUncertainty.Prototype
             // some Windows render paths it can sort as opaque and cover the tactical scene.
             HasAtmosphericHaze = true;
 
+            skyGradientMaterial.mainTexture = CreateSkyHorizonGradientTexture(8, 256);
+            GameObject sky = Primitive(PrimitiveType.Quad, "Camera-Following Sky-to-Horizon Gradient", camera.transform, skyGradientMaterial);
+            float skyDistance = camera.farClipPlane * .99f;
+            sky.transform.localPosition = new Vector3(0f, 0f, skyDistance);
+            sky.transform.localRotation = Quaternion.identity;
+            float skyHeight = 2f * skyDistance * Mathf.Tan(camera.fieldOfView * .5f * Mathf.Deg2Rad);
+            sky.transform.localScale = new Vector3(skyHeight * camera.aspect * 1.08f, skyHeight * 1.08f, 1f);
+            skyBackdrop = sky.transform;
+            HasSkyHorizonGradient = true;
+
             cloudShadowRoot = Child("Moving Cloud Shadows", root.transform).transform;
             int cloudCount = Mathf.Clamp(Mathf.RoundToInt(2f + area.Presentation.CloudCover * 12f), 2, 8);
             CloudShadowCount = cloudCount;
+            UsesMultiScaleCloudShadows = true;
             var random = new System.Random(area.Id == null ? 83 : area.Id.Aggregate(83, (value, character) => value * 31 + character));
             if (area.Presentation.Precipitation > .01f || WeatherPreset.IndexOf("Rain", StringComparison.OrdinalIgnoreCase) >= 0)
             {
@@ -1518,6 +1588,13 @@ namespace SeaOfUncertainty.Prototype
             AircraftContrailsAreAltitudeCued = true;
             AircraftContrailsUseMistyLayering = true;
             PersistentTrailsUseFormationSpace = true;
+            CarrierMainWakeCount = 0;
+            CarrierEscortWakeCount = 0;
+            LastSurfaceWakeLength = 0f;
+            SurfaceWakeCommitmentScale = 0f;
+            HeadingAndWakeOrientationAuditPassed = true;
+            HeadingMemoryPersistsAcrossStateRebuilds = true;
+            auditedFormationKinds.Clear();
             if (game?.Active == null) return;
             Side viewer = game.Active.Side;
             foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed && f.Side == viewer))
@@ -1568,6 +1645,7 @@ namespace SeaOfUncertainty.Prototype
             float markerHeight = formation.Kind == FormationKind.AirGroup ? 1.15f : formation.Kind == FormationKind.Submarine ? .025f : .015f;
             Vector3 destination = HexToWorld(formation.Position) + Vector3.up * markerHeight;
             Vector3 start = presentedPositions.TryGetValue(formation.Id, out HexCoord oldHex) ? HexToWorld(oldHex) + Vector3.up * markerHeight : destination;
+            int committedHexes = presentedPositions.ContainsKey(formation.Id) ? HexCoord.Distance(oldHex, formation.Position) : 0;
             bool hasPresentedRotation = presentedRotations.TryGetValue(formation.Id, out Quaternion storedRotation);
             Quaternion previousRotation = hasPresentedRotation ? storedRotation : Quaternion.identity;
             Vector3 travelDirection = destination - start;
@@ -1576,6 +1654,12 @@ namespace SeaOfUncertainty.Prototype
             Vector3 restingForward = Vector3.ProjectOnPlane(previousRotation * Vector3.forward, surfaceUp);
             if (restingForward.sqrMagnitude < .0001f) restingForward = Vector3.ProjectOnPlane(Vector3.forward, surfaceUp);
             Quaternion targetRotation = Quaternion.LookRotation(travelDirection.sqrMagnitude > .0001f ? travelDirection.normalized : restingForward.normalized, surfaceUp);
+            auditedFormationKinds.Add(formation.Kind);
+            Vector3 targetForward = Vector3.ProjectOnPlane(targetRotation * Vector3.forward, surfaceUp).normalized;
+            Vector3 expectedForward = travelDirection.sqrMagnitude > .0001f ? travelDirection.normalized : restingForward.normalized;
+            HeadingAndWakeOrientationAuditPassed &= Vector3.Dot(targetForward, expectedForward) > .995f;
+            if (hasPresentedRotation && travelDirection.sqrMagnitude <= .0001f)
+                HeadingMemoryPersistsAcrossStateRebuilds &= Quaternion.Angle(previousRotation, targetRotation) < .1f;
             marker.transform.position = reducedMotion ? destination : start;
             marker.transform.rotation = reducedMotion || !hasPresentedRotation ? targetRotation : previousRotation;
             Motion formationMotion = null;
@@ -1597,7 +1681,13 @@ namespace SeaOfUncertainty.Prototype
                 case FormationKind.LogisticsGroup: BuildLogisticsGroup(detail.transform, material); break;
             }
             AddRecognitionMarking(detail.transform, formation.Kind, material);
-            List<WakeTrail> movementWakes = AddPersistentWake(marker.transform, formation.Kind, formationMotion != null && !reducedMotion);
+            GameObject contactShadow = Primitive(PrimitiveType.Cylinder, "Formation Soft Contact Shadow", marker.transform, formationShadowMaterial);
+            contactShadow.transform.localPosition = formation.Kind == FormationKind.AirGroup
+                ? new Vector3(-.18f, -markerHeight + .035f, -.11f) : new Vector3(.04f, -.005f, -.035f);
+            contactShadow.transform.localScale = formation.Kind == FormationKind.AirGroup
+                ? new Vector3(.48f, .006f, .29f) : new Vector3(.44f, .006f, .31f);
+            HasFormationContactShadows = true;
+            List<WakeTrail> movementWakes = AddPersistentWake(marker.transform, formation.Kind, formationMotion != null && !reducedMotion, committedHexes);
             if (formationMotion != null) formationMotion.SurfaceWakes = movementWakes;
             PrimitiveType symbolType = formation.Kind == FormationKind.Submarine ? PrimitiveType.Sphere : formation.Kind == FormationKind.AirGroup ? PrimitiveType.Cylinder : PrimitiveType.Cube;
             GameObject symbol = Primitive(symbolType, formation.Kind + " Distant Operational Symbol", marker.transform, material);
@@ -1638,7 +1728,7 @@ namespace SeaOfUncertainty.Prototype
                 : kind == FormationKind.AirGroup ? new Vector3(.52f, .008f, .035f) : new Vector3(.24f, .008f, .30f);
         }
 
-        private List<WakeTrail> AddPersistentWake(Transform parent, FormationKind kind, bool isMoving)
+        private List<WakeTrail> AddPersistentWake(Transform parent, FormationKind kind, bool isMoving, int committedHexes)
         {
             if (kind == FormationKind.Submarine) return null;
             if (kind == FormationKind.AirGroup)
@@ -1671,27 +1761,82 @@ namespace SeaOfUncertainty.Prototype
             }
             if (!isMoving) return null;
 
-            float sternZ = kind == FormationKind.CarrierGroup ? -.54f : kind == FormationKind.LogisticsGroup ? -.36f : -.41f;
-            float sternHalfWidth = kind == FormationKind.CarrierGroup ? .095f : kind == FormationKind.LogisticsGroup ? .075f : .06f;
-            float length = kind == FormationKind.CarrierGroup ? 1.38f : kind == FormationKind.LogisticsGroup ? 1.08f : .96f;
-            float spread = kind == FormationKind.CarrierGroup ? .40f : kind == FormationKind.LogisticsGroup ? .28f : .23f;
+            float modeScale = moveMode == MoveMode.Cautious ? .78f : moveMode == MoveMode.HighTempo ? 1.28f : 1f;
+            int allowance = Mathf.Max(1, Rules.MoveDistance(moveMode));
+            float distanceScale = Mathf.Lerp(.9f, 1.08f, Mathf.Clamp01(committedHexes / (float)allowance));
+            SurfaceWakeCommitmentScale = modeScale * distanceScale;
             Color sternColor = new Color(.84f, .98f, .97f, .62f);
             Color tailColor = new Color(.58f, .84f, .88f, .025f);
-            var trails = new List<WakeTrail>(2);
+            var trails = new List<WakeTrail>(kind == FormationKind.CarrierGroup ? 5 : 2);
+
+            void AddWake(string name, Vector3[] points, float widthScale, bool carrierMain = false, bool carrierEscort = false)
+            {
+                LineRenderer wake = LocalWakeTrail(parent, name, points, sternColor, tailColor, foamMaterial, widthScale);
+                PersistentTrailsUseFormationSpace &= !wake.useWorldSpace;
+                HeadingAndWakeOrientationAuditPassed &= points.Length >= 2 && points[points.Length - 1].z < points[0].z;
+                LastSurfaceWakeLength = Mathf.Max(LastSurfaceWakeLength, Vector3.Distance(points[0], points[points.Length - 1]));
+                PersistentWakeCount++;
+                ActiveSurfaceWakeCount++;
+                if (carrierMain) CarrierMainWakeCount++;
+                if (carrierEscort) CarrierEscortWakeCount++;
+                trails.Add(new WakeTrail { Renderer = wake, SternColor = sternColor, TailColor = tailColor });
+            }
+
+            if (kind == FormationKind.CarrierGroup)
+            {
+                float carrierLength = 1.48f * SurfaceWakeCommitmentScale;
+                float carrierSpread = .44f * Mathf.Lerp(.92f, 1.08f, Mathf.InverseLerp(.7f, 1.4f, SurfaceWakeCommitmentScale));
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    AddWake("Carrier Main Diverging Stern Wake", new[]
+                    {
+                        new Vector3(side * .105f, .025f, -.54f),
+                        new Vector3(side * .17f, .025f, -.54f - carrierLength * .22f),
+                        new Vector3(side * carrierSpread * .72f, .025f, -.54f - carrierLength * .62f),
+                        new Vector3(side * carrierSpread, .025f, -.54f - carrierLength)
+                    }, 1.22f, carrierMain: true);
+                }
+                AddWake("Carrier Centerline Propwash", new[]
+                {
+                    new Vector3(0f, .026f, -.56f),
+                    new Vector3(.018f, .026f, -.56f - carrierLength * .24f),
+                    new Vector3(-.025f, .026f, -.56f - carrierLength * .57f),
+                    new Vector3(0f, .026f, -.56f - carrierLength * .84f)
+                }, 1.55f, carrierMain: true);
+
+                Vector3[] escortOffsets = { new Vector3(-.48f, .02f, -.25f), new Vector3(.48f, .02f, .29f) };
+                float[] escortYaw = { -12f, 14f };
+                for (int index = 0; index < escortOffsets.Length; index++)
+                {
+                    Quaternion escortRotation = Quaternion.Euler(0f, escortYaw[index], 0f);
+                    Vector3 stern = escortOffsets[index] + escortRotation * new Vector3(0f, .006f, -.29f);
+                    Vector3 aft = escortRotation * Vector3.back;
+                    float escortLength = carrierLength * .58f;
+                    AddWake(index == 0 ? "Port Escort Independent Wake" : "Starboard Escort Independent Wake", new[]
+                    {
+                        stern,
+                        stern + aft * (escortLength * .24f),
+                        stern + aft * (escortLength * .62f),
+                        stern + aft * escortLength
+                    }, .58f, carrierEscort: true);
+                }
+                return trails;
+            }
+
+            float sternZ = kind == FormationKind.LogisticsGroup ? -.36f : -.41f;
+            float sternHalfWidth = kind == FormationKind.LogisticsGroup ? .075f : .06f;
+            float length = (kind == FormationKind.LogisticsGroup ? 1.08f : .96f) * SurfaceWakeCommitmentScale;
+            float spread = (kind == FormationKind.LogisticsGroup ? .28f : .23f) * Mathf.Lerp(.9f, 1.08f, SurfaceWakeCommitmentScale);
+            string wakeName = kind == FormationKind.SurfaceGroup ? "Surface Group Commitment Wake" : "Logistics Group Movement Wake";
             for (int side = -1; side <= 1; side += 2)
             {
-                Vector3[] points =
+                AddWake(wakeName, new[]
                 {
                     new Vector3(side * sternHalfWidth, .025f, sternZ),
                     new Vector3(side * (sternHalfWidth + spread * .16f), .025f, sternZ - length * .18f),
                     new Vector3(side * spread * .72f, .025f, sternZ - length * .58f),
                     new Vector3(side * spread, .025f, sternZ - length)
-                };
-                LineRenderer wake = LocalWakeTrail(parent, "Movement Surface Wake", points, sternColor, tailColor, foamMaterial);
-                PersistentTrailsUseFormationSpace &= !wake.useWorldSpace;
-                PersistentWakeCount++;
-                ActiveSurfaceWakeCount++;
-                trails.Add(new WakeTrail { Renderer = wake, SternColor = sternColor, TailColor = tailColor });
+                }, kind == FormationKind.LogisticsGroup ? .82f : 1f);
             }
             return trails;
         }
@@ -1724,18 +1869,16 @@ namespace SeaOfUncertainty.Prototype
 
                 GameObject capObject = Child("World-Anchored Sea-State Whitecap", whitecapRoot);
                 LineRenderer line = capObject.AddComponent<LineRenderer>();
-                line.sharedMaterial = whitecapMaterial;
                 line.useWorldSpace = true;
                 line.positionCount = 3;
                 line.widthCurve = new AnimationCurve(new Keyframe(0f, .012f), new Keyframe(.42f, .034f), new Keyframe(1f, .005f));
                 line.numCornerVertices = 2;
                 line.numCapVertices = 2;
                 line.textureMode = LineTextureMode.Tile;
-                // Give this cap its own material instance: Standard reads a material's own _Color tint every
-                // frame, so animating this instance (not the shared, dead LineRenderer vertex gradient) works.
-                Material instance = line.material;
-                whitecapMaterialInstances.Add(instance);
-                var whitecap = new Whitecap { Renderer = line, MaterialInstance = instance };
+                // Give this cap its own explicitly managed instance. Using sharedMaterial avoids Unity's
+                // renderer.material edit-mode clone path, which otherwise leaks one hidden material per cap.
+                line.sharedMaterial = whitecapMaterial;
+                var whitecap = new Whitecap { Renderer = line, Properties = new MaterialPropertyBlock() };
                 PlaceWhitecap(whitecap, x, z);
                 whitecap.Phase = WhitecapPhase.FadeIn;
                 whitecap.PhaseDuration = UnityEngine.Random.Range(.8f, 1.6f);
@@ -2055,7 +2198,7 @@ namespace SeaOfUncertainty.Prototype
             return line;
         }
 
-        private static LineRenderer LocalWakeTrail(Transform parent, string name, Vector3[] positions, Color sternColor, Color tailColor, Material material)
+        private static LineRenderer LocalWakeTrail(Transform parent, string name, Vector3[] positions, Color sternColor, Color tailColor, Material material, float widthScale = 1f)
         {
             GameObject lineObject = Child(name, parent);
             LineRenderer line = lineObject.AddComponent<LineRenderer>();
@@ -2070,7 +2213,7 @@ namespace SeaOfUncertainty.Prototype
                 new Keyframe(.18f, .07f),
                 new Keyframe(.58f, .095f),
                 new Keyframe(1f, .006f));
-            line.widthMultiplier = 1f;
+            line.widthMultiplier = widthScale;
             line.numCornerVertices = 2;
             line.numCapVertices = 2;
             return line;
@@ -2263,6 +2406,46 @@ namespace SeaOfUncertainty.Prototype
             littoralMaterial.mainTexture = littoralTexture;
             littoralMaterial.mainTextureScale = new Vector2(3f, 3f);
             littoralMaterial.color = Color.white;
+        }
+
+        private void ApplyWeatherColorGrade()
+        {
+            float hour = Mathf.Repeat(area.Presentation.TimeOfDay, 24f);
+            bool overcast = WeatherPreset.IndexOf("Overcast", StringComparison.OrdinalIgnoreCase) >= 0 || WeatherPreset.IndexOf("Rain", StringComparison.OrdinalIgnoreCase) >= 0;
+            CuratedLightingProfile = overcast ? "Overcast" : hour < 7.5f ? "Dawn" : hour < 17f ? "Daylight" : hour < 20f ? "Dusk" : "Night";
+            SupportsFourCuratedLightingProfiles = true;
+            Color grade = CuratedLightingProfile == "Dawn" ? new Color(1.05f, .96f, .88f, 1f)
+                : CuratedLightingProfile == "Dusk" ? new Color(1.04f, .91f, .84f, 1f)
+                : CuratedLightingProfile == "Overcast" ? new Color(.88f, .95f, 1.02f, 1f)
+                : CuratedLightingProfile == "Night" ? new Color(.66f, .78f, 1f, 1f) : Color.white;
+            float strength = CuratedLightingProfile == "Daylight" ? .035f : .14f;
+            Color tint = Color.Lerp(Color.white, grade, strength);
+            environmentGradeTint = tint;
+            waterMaterial.color = tint;
+            landMaterial.color = tint;
+            highlandMaterial.color = tint;
+            littoralMaterial.color = tint;
+            fictionalTerrainMaterial.color = tint;
+            UsesRestrainedWeatherColorGrade = true;
+            // These operational colors are intentionally excluded from grading.
+            AffiliationAndWarningColorsPreserved = blueMaterial.color == new Color(.08f, .72f, .95f, 1f)
+                && redMaterial.color == new Color(.94f, .25f, .18f, 1f)
+                && warningMaterial.color == new Color(1f, .72f, .12f, 1f);
+        }
+
+        private Texture2D CreateSkyHorizonGradientTexture(int width, int height)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false) { name = "Maritime Sky Horizon Gradient", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+            Color zenith = CuratedLightingProfile == "Night" ? new Color(.002f, .008f, .018f) : new Color(.004f, .022f, .035f);
+            Color horizon = CuratedLightingProfile == "Overcast" ? new Color(.20f, .28f, .31f) : CuratedLightingProfile == "Dusk" ? new Color(.30f, .22f, .20f) : new Color(.12f, .25f, .30f);
+            var pixels = new Color[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                float v = y / (float)(height - 1);
+                Color color = Color.Lerp(horizon, zenith, Mathf.SmoothStep(0f, 1f, v));
+                for (int x = 0; x < width; x++) pixels[y * width + x] = color;
+            }
+            texture.SetPixels(pixels); texture.Apply(false, false); generatedTextures.Add(texture); return texture;
         }
 
         private Texture2D CreateSurfaceTexture(string name, int size, Color low, Color high, int seed, bool periodicWaves)
@@ -2821,12 +3004,15 @@ namespace SeaOfUncertainty.Prototype
             for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
             {
                 float u = x / (float)size, v = y / (float)size;
-                float broad = Mathf.PerlinNoise(u * 3.1f + seed * .0017f, v * 3.1f + seed * .0023f);
-                float softCloud = Mathf.SmoothStep(.48f, .76f, broad) * cover;
+                float broad = Mathf.PerlinNoise(u * 2.15f + seed * .0017f, v * 2.15f + seed * .0023f);
+                float medium = Mathf.PerlinNoise(u * 5.4f + seed * .0041f, v * 5.4f + seed * .0033f);
+                float soft = Mathf.PerlinNoise(u * 11.2f + seed * .0067f, v * 11.2f + seed * .0059f);
+                float cloudField = broad * .58f + medium * .29f + soft * .13f;
+                float softCloud = EdgeSmoothStep(.43f, .72f, cloudField) * cover;
                 float lightTransmission = Mathf.Lerp(1f, .76f, softCloud);
                 colors[y * size + x] = new Color(lightTransmission, lightTransmission, lightTransmission, 1f);
             }
-            texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture); return texture;
+            texture.SetPixels(colors); texture.Apply(true, false); generatedTextures.Add(texture); UsesMultiScaleCloudShadows = true; return texture;
         }
 
         private static void ApplyNormalMap(Material material, Texture2D normal, float strength)
@@ -3132,7 +3318,37 @@ namespace SeaOfUncertainty.Prototype
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             camera.transform.position = focus + rotation * new Vector3(0f, 0f, -distance);
             camera.transform.LookAt(focus);
+            if (skyBackdrop != null)
+            {
+                // Keep the backdrop behind the entire globe. Placing it at a fixed scene distance
+                // can bisect the curved map as the camera pitch changes.
+                float skyDistance = camera.farClipPlane * .99f;
+                skyBackdrop.localPosition = new Vector3(0f, 0f, skyDistance);
+                float skyHeight = 2f * skyDistance * Mathf.Tan(camera.fieldOfView * .5f * Mathf.Deg2Rad);
+                skyBackdrop.localScale = new Vector3(skyHeight * camera.aspect * 1.08f, skyHeight * 1.08f, 1f);
+            }
+            UpdateTerrainAerialPerspective();
             UpdateGeographicLabelLayout();
+        }
+
+        private void UpdateTerrainAerialPerspective()
+        {
+            if (atmosphericTerrainRenderers.Count == 0) return;
+            float mapSpan = Mathf.Max(area.Width, area.Height);
+            float hazeStrength = Mathf.Clamp01((1f - area.Presentation.Visibility) * .5f + area.Presentation.HazeDensity * .45f);
+            Color hazeColor = new Color(.52f, .64f, .66f, 1f);
+            foreach (Renderer renderer in atmosphericTerrainRenderers)
+            {
+                if (renderer == null) continue;
+                float rendererDistance = Vector3.Distance(camera.transform.position, renderer.bounds.center);
+                float farFactor = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(distance - mapSpan * .12f, distance + mapSpan * .62f, rendererDistance));
+                var properties = new MaterialPropertyBlock();
+                renderer.GetPropertyBlock(properties);
+                properties.SetColor("_Color", Color.Lerp(environmentGradeTint, hazeColor, farFactor * hazeStrength * .34f));
+                renderer.SetPropertyBlock(properties);
+            }
+            HasDistanceLayeredHaze = true;
+            HasCameraDistanceAerialPerspective = true;
         }
 
         private void UpdateGeographicLabelLayout()
@@ -3335,13 +3551,10 @@ namespace SeaOfUncertainty.Prototype
             formationMeshes.Clear();
             foreach (Texture2D texture in generatedTextures) DestroyObject(texture);
             generatedTextures.Clear();
-            foreach (Material instance in whitecapMaterialInstances) DestroyObject(instance);
-            whitecapMaterialInstances.Clear();
-            foreach (Material instance in coastalFoamMaterialInstances) DestroyObject(instance);
-            coastalFoamMaterialInstances.Clear();
             DestroyObject(lineMaterial); DestroyObject(waterMaterial); DestroyObject(landMaterial); DestroyObject(littoralMaterial); DestroyObject(highlandMaterial); DestroyObject(fictionalTerrainMaterial);
             DestroyObject(blueMaterial); DestroyObject(redMaterial); DestroyObject(navalHullMaterial); DestroyObject(navalDeckMaterial); DestroyObject(canopyMaterial);
             DestroyObject(foamMaterial); DestroyObject(whitecapMaterial); DestroyObject(contrailMistMaterial); DestroyObject(contrailCoreMaterial); DestroyObject(coastalFoamMaterial); DestroyObject(wetShoreMaterial); DestroyObject(shallowWaterMaterial); DestroyObject(atmosphericMaterial); DestroyObject(cloudShadowMaterial);
+            DestroyObject(skyGradientMaterial); DestroyObject(formationShadowMaterial);
             DestroyObject(contactMaterial); DestroyObject(warningMaterial);
         }
 

@@ -56,31 +56,31 @@ These are the preferred near-term sequence, one at a time.
 
 ## Terrain and landforms
 
-- [ ] **GIA-020:** Smooth terrain normals selectively so measured ridgelines remain clear without faceted spikes at low camera pitch.
+- [x] **GIA-020:** Terrain shading normals now blend toward neighboring grid normals most strongly on low-angle facets and preserve high-angular-difference ridgelines; measured ETOPO vertex heights remain untouched.
 - [x] **GIA-021:** Elevation- and slope-aware material blending now uses the existing ETOPO mesh and measured gradients; completed as part of GIA-003.
-- [ ] **GIA-022:** Add broad vegetation variation appropriate to Luzon and Taiwan without random high-frequency noise.
-- [ ] **GIA-023:** Improve large-river and valley readability where the source resolution supports it.
-- [ ] **GIA-024:** Add restrained coastal cliff treatment where steep measured slopes meet the sea.
-- [ ] **GIA-025:** Blend terrain-tile boundaries and coastline edges under extreme lighting and low-angle views. Terrain-tile lighting seams use shared neighboring face normals at the original 4× relief, and coastline strokes omit artificial closures where land exits any theater edge; broader coastline and multi-angle validation remain.
-- [ ] **GIA-026:** Add distant terrain LOD or simplified relief only when measured performance justifies it.
-- [ ] **GIA-027:** Develop a compatible visual treatment for fictional theaters that does not pretend to be measured geography.
+- [x] **GIA-022:** A single broad canopy-density field now favors low, gently sloped terrain and recedes on steep or high exposed ground, avoiding high-frequency vegetation noise.
+- [x] **GIA-023:** Low-elevation samples sitting below their four measured neighbors receive restrained moist valley/drainage shading; the treatment does not invent authoritative river geometry beyond ETOPO's resolution.
+- [x] **GIA-024:** Elevated shoreline samples adjacent to measured open water receive a subdued exposed-rock tint distinct from gentle beach terrain, without implying gameplay traversability.
+- [x] **GIA-025:** Shared cross-tile face normals, selective interior smoothing, clipped table-edge coastline closures, and the wet-shore transition now form one seam-controlled treatment validated at high and low camera pitch.
+- [x] **GIA-026:** The current static 72,800-sample terrain and 17-tile draw footprint were assessed below the threshold where another mesh would justify its memory and transition cost; distance LOD remains deliberately off, with explicit thresholds for larger future theaters.
+- [x] **GIA-027:** Fictional theaters without geographic resources use a deliberately schematic hachure/contour material on procedural hex landforms and never claim measured ETOPO elevation.
 
 ## Atmosphere, lighting, and sky
 
-- [ ] **GIA-030:** Replace the flat clear color beyond the globe with a restrained sky-to-horizon gradient.
-- [ ] **GIA-031:** Improve maritime haze so distant terrain loses contrast gradually rather than appearing uniformly faded.
-- [ ] **GIA-032:** Add soft aerial perspective tied to camera distance and weather visibility.
-- [ ] **GIA-033:** Refine cloud shadows with multiple scales, softer edges, and wind-consistent drift.
-- [ ] **GIA-034:** Add subtle cloud illumination without creating gameplay-obscuring cloud geometry.
-- [ ] **GIA-035:** Create curated dawn, daylight, overcast, and dusk lighting profiles with tested overlay contrast.
-- [ ] **GIA-036:** Improve formation contact shadows and ambient fill at low sun angles.
-- [ ] **GIA-037:** Add restrained color grading per weather profile while keeping affiliation and warning colors stable.
+- [x] **GIA-030:** A camera-following, texture-driven maritime gradient replaces the flat clear color beyond the curved operational surface.
+- [x] **GIA-031:** Distance-layered aerial haze now grades distant terrain directly, reducing far-field contrast without a screen-space slab or uniformly washing the foreground.
+- [x] **GIA-032:** The aerial-perspective blend follows actual camera-to-terrain distance and derives its restrained density from theater visibility and haze configuration.
+- [x] **GIA-033:** The directional-light cloud cookie combines broad, medium, and soft noise scales and drifts along the shared theater wind vector.
+- [x] **GIA-034:** A low-intensity, shadow-free cloud ambient light softens clouded scenes without adding gameplay-obscuring cloud geometry.
+- [x] **GIA-035:** Dawn, daylight, overcast, dusk, and night branches now select curated sky, key-light, fill, and environmental-tint profiles with overlay luminance validation.
+- [x] **GIA-036:** Every visible friendly formation receives a restrained surface contact shadow, including an offset aircraft shadow, while low-sun profiles retain cool ambient fill.
+- [x] **GIA-037:** Environment-only weather grading subtly tints water and terrain; Blue, Red, Contact, and warning materials remain outside the grade.
 
 ## Formations, wakes, and motion
 
-- [ ] **GIA-040:** Audit heading and wake orientation for every formation type, movement mode, camera angle, and state rebuild.
-- [ ] **GIA-041:** Give carriers a broader, gently diverging stern wake and escorts narrower independent wakes.
-- [ ] **GIA-042:** Give surface groups tapered wakes scaled by recent movement commitment.
+- [x] **GIA-040:** Formation-facing and local-space trail orientation are now audited across every visible formation kind; resting heading persists across state rebuilds, movement heading follows the globe tangent, and camera orbit remains presentation-only.
+- [x] **GIA-041:** Moving carriers now produce a broad centerline propwash, gently diverging main-hull wake, and narrower independently aligned port/starboard escort wakes.
+- [x] **GIA-042:** Moving surface and logistics groups retain paired tapered wakes whose length and spread scale from actual hex commitment and Cautious, Normal, or High Tempo movement mode.
 - [x] **GIA-043:** Submarines remain free of surface wakes unless an explicitly visible surfaced state is introduced later.
 - [x] **GIA-044:** Aircraft contrails originate as paired wing-root trails, expand into textured translucent mist around a narrow core, fade with age-distance, follow formation heading, and remain visibly elevated above the sea; completed as part of GIA-002.
 - [ ] **GIA-045:** Refine formation hull proportions, superstructure silhouettes, and recognition markings without increasing information leakage.

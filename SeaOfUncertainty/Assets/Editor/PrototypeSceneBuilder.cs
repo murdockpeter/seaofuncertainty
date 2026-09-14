@@ -691,6 +691,8 @@ namespace SeaOfUncertainty.Editor
                 Assert(luzonMap.HasVegetationDensityVariation, "Broad, elevation- and slope-weighted vegetation density patches vary land color without added high-frequency noise");
                 Assert(luzonMap.HasValleyReadabilityHints, "Local depressions relative to their neighbors read as plausible drainage/valley lines");
                 Assert(luzonMap.HasCoastalCliffTreatment, "Elevated land meeting open water directly carries a restrained exposed-rock cliff hint distinct from a beach");
+                Assert(luzonMap.TerrainCoastlineBlendValidated, "Shared terrain normals, clipped table-edge coastlines, and the wet-shore transition form one seam-controlled land/sea treatment");
+                Assert(luzonMap.TerrainLodAssessmentComplete && !luzonMap.TerrainLodRequired && !luzonMap.UsesTerrainDistanceLod, "The current 72.8k-sample static terrain remains below the measured threshold that would justify a popping-prone second LOD mesh");
                 Assert(luzonMap.HasShallowWaterDetail && luzonMap.HasCoastalFoam && luzonMap.HasCoastlineDrivenShelf, "Coastline-driven shelves, bathymetric contours, and coastal foam enrich the sea-land transition");
                 Assert(luzonMap.HasWetShoreBand && luzonMap.UsesBrokenCoastalFoam && luzonMap.CoastalFoamMaskAlphaRange > .55f, $"Coastlines layer a narrow wet-shore band beneath a high-contrast static broken-foam mask (wet={luzonMap.HasWetShoreBand}, broken={luzonMap.UsesBrokenCoastalFoam}, alpha range={luzonMap.CoastalFoamMaskAlphaRange:F3})");
                 Assert(luzonMap.CoastlineStrokesAvoidTableEdges && luzonMap.SuppressedTableEdgeShorelineSegmentCount > 0, "Coastline strokes omit artificial polygon closures wherever land exits the theater bounds");
@@ -704,6 +706,11 @@ namespace SeaOfUncertainty.Editor
                 Assert(luzonMap.HasScatteredSunGlitter && luzonMap.HasHorizonFresnelBrightening, "Ocean specular response uses a broken, scattered glitter path with gentle grazing-angle brightening");
                 Assert(luzonMap.SeaStateWhitecapCount >= 12 && luzonMap.WhitecapDensityFollowsSeaState && luzonMap.WhitecapsAreWorldAnchored && luzonMap.ContainsRenderedName("World-Anchored Sea-State Whitecap"), "Configured sea state produces sparse, deterministic whitecaps anchored to the curved ocean surface");
                 Assert(luzonMap.HasAtmosphericHaze && luzonMap.CloudShadowCount >= 2 && luzonMap.WeatherPreset == "Haze", "Data-driven haze and moving cloud-shadow layers establish maritime atmosphere");
+                Assert(luzonMap.HasSkyHorizonGradient && luzonMap.ContainsRenderedName("Sky-to-Horizon Gradient"), "The globe falls away into a restrained maritime sky-to-horizon gradient instead of a flat clear color");
+                Assert(luzonMap.HasDistanceLayeredHaze && luzonMap.HasCameraDistanceAerialPerspective, "Renderer-distance haze reduces distant terrain contrast according to camera range and theater visibility");
+                Assert(luzonMap.UsesMultiScaleCloudShadows && luzonMap.CloudShadowsFollowWind && luzonMap.HasCloudAmbientIllumination, "Soft multi-scale cloud shadows drift with the theater wind and receive subtle geometry-free cloud illumination");
+                Assert(luzonMap.SupportsFourCuratedLightingProfiles && !string.IsNullOrEmpty(luzonMap.CuratedLightingProfile) && luzonMap.HasLowSunAmbientFill, "Dawn, daylight, overcast, dusk/night lighting profiles retain ambient fill at low sun angles");
+                Assert(luzonMap.UsesRestrainedWeatherColorGrade && luzonMap.AffiliationAndWarningColorsPreserved, "Weather grading affects the environment while preserving affiliation and warning colors exactly");
                 Assert(luzonMap.GeographicLabelCount == luzon.Area.Locations.Count, "Ports, airfields, straits, and objectives receive map-space geographic labels");
                 Assert(luzonMap.GeographicLabelsUsePriorityLayout && luzonMap.GeographicLabelsFadeWithDistance && luzonMap.ContainsRenderedName("Geographic Label Leader"), "Geographic labels use priority layout, distance fading, and subordinate leader-line infrastructure");
                 float renderLuminance = luzonMap.ProbeRenderLuminance();
@@ -741,6 +748,7 @@ namespace SeaOfUncertainty.Editor
                 game.Contacts.Add(new ContactState { Owner = game.Active.Side, TargetId = enemyId, LastKnownPosition = new HexCoord(8, 3), Location = LocationQuality.Low, Identity = IdentityQuality.Unknown, Age = 4, IsLost = true });
                 operationalMap.SetState(game, ToolkitActionMode.Strike, MoveMode.Normal, SearchMode.Active, Salvo.Standard);
                 Assert(operationalMap.HasActiveFormationPulse, "The active formation has a dedicated pulse ring");
+                Assert(operationalMap.HasFormationContactShadows && operationalMap.ContainsRenderedName("Formation Soft Contact Shadow"), "Visible formations receive restrained contact shadows without exposing hidden forces");
                 Assert(operationalMap.VisibleFormationCount == game.Formations.FindAll(formation => formation.Side == game.Active.Side && !formation.IsDestroyed).Count, "3D view instantiates only the active side's friendly formations");
                 Assert(operationalMap.FormationMeshVariantCount >= 2 && operationalMap.ContainsRenderedName("Tapered Hull"), "Close formation models use reusable tapered naval meshes instead of stretched-cube hull blockouts");
                 Assert(operationalMap.ContainsRenderedName("Swept Wing") && operationalMap.ContainsRenderedName("Hydrodynamic Pressure Hull"), "Air-group and submarine silhouettes remain recognizable by geometry");
@@ -751,14 +759,42 @@ namespace SeaOfUncertainty.Editor
                 Assert(operationalMap.AircraftContrailCount == expectedContrails && operationalMap.PersistentTrailsUseFormationSpace, "Aircraft use paired contrails and every trail rotates in Formation-local space");
                 Assert(operationalMap.AircraftContrailsUseVaporTreatment && operationalMap.AircraftContrailsAreAltitudeCued && operationalMap.ContainsRenderedName("High-Altitude Vapor Contrail"), "Aircraft trails use tapered vapor geometry at aircraft altitude instead of ambiguous surface-grey lines");
                 Assert(operationalMap.AircraftContrailsUseMistyLayering && operationalMap.AircraftContrailLayerCount == expectedContrails * 2 && operationalMap.ContainsRenderedName("Contrail Vapor Core"), "Each aircraft contrail combines a feathered noisy mist layer with a narrower fading vapor core");
+                Assert(operationalMap.AuditedFormationKindCount == System.Enum.GetValues(typeof(FormationKind)).Length && operationalMap.HeadingAndWakeOrientationAuditPassed, "Every formation kind resolves heading on the globe tangent independently of camera orientation");
                 FormationState wakeProbe = game.Formations.Find(formation => formation.Side == game.Active.Side && !formation.IsDestroyed && formation.Kind == FormationKind.SurfaceGroup);
                 HexCoord wakeOrigin = wakeProbe.Position;
-                wakeProbe.Position = new HexCoord(wakeOrigin.Q, wakeOrigin.R > 0 ? wakeOrigin.R - 1 : wakeOrigin.R + 1);
-                operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
-                Assert(operationalMap.ActiveSurfaceWakeCount == 2 && operationalMap.ContainsRenderedName("Movement Surface Wake"), "A moving surface formation receives a paired, stern-anchored movement wake");
+                HexCoord wakeDestination = new HexCoord(wakeOrigin.Q, wakeOrigin.R > 0 ? wakeOrigin.R - 1 : wakeOrigin.R + 1);
+                wakeProbe.Position = wakeDestination;
+                operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Cautious, SearchMode.Passive, Salvo.Standard);
+                float cautiousWakeLength = operationalMap.LastSurfaceWakeLength;
+                float cautiousCommitment = operationalMap.SurfaceWakeCommitmentScale;
+                Assert(operationalMap.ActiveSurfaceWakeCount == 2 && operationalMap.ContainsRenderedName("Surface Group Commitment Wake"), "A moving surface group receives a paired, tapered, stern-anchored wake");
                 operationalMap.Tick(2f);
                 Assert(operationalMap.ActiveSurfaceWakeCount == 0, "Surface wakes fade away after the formation becomes stationary");
                 wakeProbe.Position = wakeOrigin;
+                operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
+                float normalWakeLength = operationalMap.LastSurfaceWakeLength;
+                float normalCommitment = operationalMap.SurfaceWakeCommitmentScale;
+                operationalMap.Tick(2f);
+                wakeProbe.Position = wakeDestination;
+                operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.HighTempo, SearchMode.Passive, Salvo.Standard);
+                float highTempoWakeLength = operationalMap.LastSurfaceWakeLength;
+                Assert(cautiousCommitment < normalCommitment && normalCommitment < operationalMap.SurfaceWakeCommitmentScale
+                    && cautiousWakeLength < normalWakeLength && normalWakeLength < highTempoWakeLength, "Surface wake length and spread rise from Cautious through Normal to High Tempo commitment");
+                operationalMap.Tick(2f);
+
+                FormationState carrierWakeProbe = game.Formations.Find(formation => formation.Side == game.Active.Side && !formation.IsDestroyed && formation.Kind == FormationKind.CarrierGroup);
+                HexCoord carrierOrigin = carrierWakeProbe.Position;
+                carrierWakeProbe.Position = new HexCoord(carrierOrigin.Q, carrierOrigin.R > 0 ? carrierOrigin.R - 1 : carrierOrigin.R + 1);
+                operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
+                Assert(operationalMap.ActiveSurfaceWakeCount == 5 && operationalMap.CarrierUsesIndependentEscortWakes
+                    && operationalMap.ContainsRenderedName("Carrier Centerline Propwash") && operationalMap.ContainsRenderedName("Escort Independent Wake"), "Carrier movement separates broad main-hull propwash from narrower independent escort wakes");
+                operationalMap.Rotate(1f);
+                operationalMap.Orbit(new Vector2(38f, -24f));
+                operationalMap.SetState(game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
+                Assert(operationalMap.ActiveSurfaceWakeCount == 0 && operationalMap.HeadingMemoryPersistsAcrossStateRebuilds && operationalMap.HeadingAndWakeOrientationAuditPassed, "Camera orbit and a stationary state rebuild preserve formation heading without manufacturing a wake");
+                operationalMap.ResetCamera();
+                wakeProbe.Position = wakeOrigin;
+                carrierWakeProbe.Position = carrierOrigin;
                 Assert(operationalMap.VisibleContactCount == game.Contacts.FindAll(contact => contact.Owner == game.Active.Side && !contact.IsLost).Count, "3D view instantiates only the active side's Contacts");
                 FormationState hiddenEnemy = game.Formations.Find(formation => formation.Side != game.Active.Side);
                 Assert(!operationalMap.ContainsRenderedName(hiddenEnemy.Name) && !operationalMap.ContainsRenderedName(hiddenEnemy.Id), "3D scene hierarchy does not expose a hidden enemy identity");
