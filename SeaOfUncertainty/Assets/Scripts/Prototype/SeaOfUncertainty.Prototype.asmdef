@@ -1,0 +1,22 @@
+{
+    "name": "SeaOfUncertainty.Prototype",
+    "rootNamespace": "SeaOfUncertainty.Prototype",
+    "references": [
+        "SeaOfUncertainty.Core",
+        "Unity.Collections",
+        "Unity.Networking.Transport",
+        "Unity.Services.Core",
+        "Unity.Services.Authentication",
+        "Unity.Services.Multiplayer",
+        "Unity.Services.RemoteConfig"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -96,8 +96,7 @@ namespace SeaOfUncertainty.Prototype
             if (FindAnyObjectByType<SeaUIToolkitController>() != null) return;
             var host = new GameObject("Sea of Uncertainty — UI Toolkit");
             DontDestroyOnLoad(host);
-            SeaPrototypeController session = host.AddComponent<SeaPrototypeController>();
-            session.LegacyUiEnabled = false;
+            host.AddComponent<SeaPrototypeController>();
             host.AddComponent<SeaUIToolkitController>();
         }
 
