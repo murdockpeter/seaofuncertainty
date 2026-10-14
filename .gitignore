@@ -25,3 +25,6 @@
 # OS files
 .DS_Store
 Thumbs.db
+
+# Test runner output, archived logs and verification screenshots
+SeaOfUncertainty/[Tt]est[Rr]esults/
