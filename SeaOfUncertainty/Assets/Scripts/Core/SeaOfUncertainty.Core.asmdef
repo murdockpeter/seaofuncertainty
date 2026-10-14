@@ -1,0 +1,14 @@
+{
+    "name": "SeaOfUncertainty.Core",
+    "rootNamespace": "SeaOfUncertainty.Core",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
