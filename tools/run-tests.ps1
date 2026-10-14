@@ -68,8 +68,8 @@ foreach ($name in $Suite) {
     else {
         $failed += $name
         Write-Host ('{0,-26} FAIL  ({1}s, exit {2})' -f $name, $seconds, $process.ExitCode) -ForegroundColor Red
-        Select-String -Path $log -Pattern 'smoke test failed|test failed|Exception:|error CS\d+' |
-            Select-Object -First 8 | ForEach-Object { '    ' + $_.Line.Trim() }
+        Select-String -Path $log -Pattern 'Test failed:|check\(s\) failed|Exception:|error CS\d+' |
+            Select-Object -First 12 | ForEach-Object { '    ' + $_.Line.Trim() }
         Write-Host "    log: $log"
     }
 }

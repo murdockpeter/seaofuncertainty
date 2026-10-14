@@ -81,6 +81,7 @@ namespace SeaOfUncertainty.Editor
             Assert(faultReceipts.Count == 3 && faultReceipts.Any(item => item.Code == "OUT_OF_ORDER") && faultReceipts.Any(item => item.Code == "ACCEPTED"), "Reordered batch is rejected deterministically until the expected packet arrives");
             Assert(faultServer.Reconnect(faultSide, -1, string.Empty).SnapshotRequired, "Faulted client can recover from a fresh authoritative snapshot");
 
+            TestChecks.ThrowIfAny("multiplayer");
             Debug.Log("Sea of Uncertainty multiplayer tests passed: lobby, invitations, setup, signed interrupted recovery, authority, opaque Contacts, privacy, latency, loss, duplicates, ordering, reconnect, and diagnostics.");
         }
 
@@ -162,7 +163,7 @@ namespace SeaOfUncertainty.Editor
 
         private static void Assert(bool condition, string message)
         {
-            if (!condition) throw new InvalidOperationException("Multiplayer foundation test failed: " + message);
+            TestChecks.Check(condition, "Multiplayer foundation: " + message);
         }
     }
 }

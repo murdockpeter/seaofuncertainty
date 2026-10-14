@@ -51,12 +51,13 @@ namespace SeaOfUncertainty.Editor
             Assert(File.ReadAllText(Path.Combine(output, "tracks.html")).Contains("READY TIME") && File.ReadAllText(Path.Combine(output, "tracks.html")).Contains("ENTROPY"), "Operational tracks include Ready, Command, Endurance, weapon, and Entropy state");
             Assert(File.ReadAllText(Path.Combine(output, "scenario-aids.html")).Contains("Action Aid") && File.ReadAllText(Path.Combine(output, "scenario-aids.html")).Contains("Horizon"), "Scenario setup sheets and player aid derive from structured rules data");
             Assert(document.Commands.Any(item => item.Kind == AuthoritativeCommandKind.Action && item.Action == ActionKind.Search), "Replay fixture includes seeded Search resolution");
+            TestChecks.ThrowIfAny("shared architecture");
             Debug.Log($"Sea of Uncertainty shared architecture tests passed: {document.Commands.Count} commands, final digest {document.Events.Last().StateAfter}.");
         }
 
         private static void Assert(bool condition, string message)
         {
-            if (!condition) throw new InvalidOperationException("Shared architecture test failed: " + message);
+            TestChecks.Check(condition, "Shared architecture: " + message);
         }
     }
 }
