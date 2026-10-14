@@ -56,11 +56,14 @@ foreach ($name in $Suite) {
     $log = Join-Path $resultsPath "$name.log"
     $timer = [Diagnostics.Stopwatch]::StartNew()
     Write-Host ("{0,-26} running..." -f $name)
-    $process = Start-Process -FilePath $UnityPath -Wait -PassThru -NoNewWindow -ArgumentList @(
+    # Wait on Unity itself, not -Wait: that also waits for helper processes Unity leaves running.
+    $process = Start-Process -FilePath $UnityPath -PassThru -NoNewWindow -ArgumentList @(
         '-batchmode', '-quit',
         '-projectPath', "`"$projectPath`"",
         '-executeMethod', $suites[$name],
         '-logFile', "`"$log`"")
+    $null = $process.Handle  # cache the handle so ExitCode is readable after exit
+    $process.WaitForExit()
     $seconds = [int]$timer.Elapsed.TotalSeconds
     if ($process.ExitCode -eq 0) {
         Write-Host ('{0,-26} PASS  ({1}s)' -f $name, $seconds) -ForegroundColor Green
