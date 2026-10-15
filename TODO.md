@@ -1,6 +1,6 @@
 # Sea of Uncertainty — 1.0 Beta Closure Plan
 
-Last refreshed against the repository: **2026-09-11**
+Last refreshed against the repository: **2026-10-15**
 
 Unity baseline: **6000.2.12f1**
 
@@ -25,6 +25,21 @@ Priority meanings:
 - **P0:** required before distributing the 1.0 beta;
 - **P1:** required before declaring the beta broadly stable;
 - **Deferred:** deliberately outside the 1.0 beta scope.
+
+## Next development package — New scenarios and ballistic warfare
+
+Direction selected on **2026-10-15**: plan first; four new scenarios on the existing theaters; capability-based ballistic missile weapons and defense across formation types, including protection of nearby friendly task groups. Implementation has not started. See [the implementation plan](design/NEW_SCENARIOS_AND_BALLISTIC_WARFARE.md).
+
+This package expands the previous two-scenario release target. **B10-001** and **B10-002** remain open: finish and playtest the expansion before freezing the resulting beta content. The existing release checklist still applies.
+
+- [ ] **SCN-BM-001:** Enable new authored scenario IDs using an explicit existing-theater reference, with validated objectives, regions, profiles, initial Contacts, and scheduled events. Unknown IDs must not be silently ignored or substituted during authoring.
+- [ ] **SCN-BM-002:** Define and implement ballistic weapon profiles, finite magazines, a land-based ballistic missile formation, and capability data for every formation type; retain existing Light/Standard/Heavy salvo commitments.
+- [ ] **SCN-BM-003:** Implement capability-based ballistic interception with finite interceptor inventories, legal target domains, and deterministic protection of nearby friendly formations/task groups.
+- [ ] **SCN-BM-004:** Integrate ballistic strikes and defense with reactions, synchronized strikes, AI, UI, authority/replay, save migration, telemetry, and print/rules output while preserving hidden information.
+- [ ] **SCN-BM-005:** Author and validate four distinct scenarios: Narrows Shield, Silent Battery, Northern Umbrella, and Last Passage. Names, numerical values, and deployments are draft content.
+- [ ] **SCN-BM-006:** Verify legacy scenario compatibility, ballistic and coverage boundaries, inventory accounting, save/replay determinism, information privacy, and full Solo/Hotseat playability; record balance playtests before content freeze.
+
+Start with **SCN-BM-001**. Its authoring support is required to make new scenario entries actually playable.
 
 ## P0 — Scope and release identity
 
