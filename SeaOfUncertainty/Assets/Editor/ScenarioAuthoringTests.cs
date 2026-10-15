@@ -11,6 +11,7 @@ namespace SeaOfUncertainty.Editor
     {
         public static void Run()
         {
+            TestShippedBallisticOperations();
             AuthoredScenarioDefinition entry = Fixture();
             var catalog = new AuthoredScenarioCatalog { Scenarios = new List<AuthoredScenarioDefinition> { entry } };
             // Exercise the shipped serializer, including omitted fields, rather than only object initializers.
@@ -122,6 +123,79 @@ namespace SeaOfUncertainty.Editor
             Debug.Log("Sea of Uncertainty scenario authoring tests passed.");
         }
 
+        private static void TestShippedBallisticOperations()
+        {
+            foreach (string id in new[] { "meridian-veil", "northern-gateway" })
+            {
+                ScenarioDefinition scenario = ScenarioCatalog.Require(id);
+                Check(OperationalDataValidator.Validate(scenario).Count == 0, "Shipped ballistic operation validates: " + id);
+                Check(scenario.Formations.Count(item => item.Kind == FormationKind.BallisticMissileBattery) == 1,
+                    "Shipped operation includes one land-deployed Red battery: " + id);
+                foreach (FormationDefinition definition in scenario.Formations.Where(item => item.BallisticWeapons.Capacity > 0))
+                {
+                    var game = new PrototypeGame(1978, scenario);
+                    FormationState actor = game.Find(definition.Id);
+                    actor.ReadyTime = game.Time;
+                    PrototypeGame.SaveData state = game.CaptureState();
+                    state.ActiveFormationId = actor.Id;
+                    game.RestoreState(state);
+                    actor = game.Active;
+                    FormationState target = game.Formations.Single(item => item.Side != actor.Side && item.Kind == FormationKind.CarrierGroup);
+                    ContactState contact = game.ContactFor(actor.Side, target.Id);
+                    FormationState escort = game.FriendlyBallisticCoverage(target.Side, target).FirstOrDefault();
+                    Check(contact != null && game.CanStrikeContact(actor, contact, contact.LastKnownPosition, Salvo.Standard, WeaponDelivery.Ballistic, out _),
+                        "Authored opening intelligence permits a ballistic shot without moving hidden targets: " + id + "/" + actor.Id);
+                    Check(escort != null && escort.Kind == FormationKind.SurfaceGroup && escort.BallisticDefense.InterceptionRating == 4,
+                        "Opening carrier position is inside the stronger friendly escort coverage: " + id + "/" + actor.Id);
+                    int stocks = game.Formations.Sum(item => item.BallisticDefense.Interceptors);
+                    bool launched = game.StrikeContact(actor, contact, contact.LastKnownPosition, Salvo.Standard, Reaction.Hold, null,
+                        out CombatResult result, out string message, WeaponDelivery.Ballistic);
+                    Check(launched && actor.BallisticWeapons.Ammunition == 1 && result.BallisticInterceptionModifier == 4
+                        && game.Formations.Sum(item => item.BallisticDefense.Interceptors) == stocks - 1,
+                        "Shipped loadout spends exactly one launch and one escort interception package: " + id + "/" + actor.Id + " " + message);
+                    var restored = new PrototypeGame(1978, scenario);
+                    restored.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(JsonUtility.ToJson(game.CaptureState())));
+                    Check(AuthoritativeReplay.StateDigest(game) == AuthoritativeReplay.StateDigest(restored), "Shipped ballistic engagement saves depleted stocks: " + id + "/" + actor.Id);
+                }
+                var reloadGame = new PrototypeGame(1978, scenario);
+                FormationState battery = reloadGame.Formations.Single(item => item.Kind == FormationKind.BallisticMissileBattery);
+                Check(reloadGame.HasBallisticReloadAccess(battery) && reloadGame.LegalMoveDestinations(battery, MoveMode.Normal).All(hex => reloadGame.Area.TerrainAt(hex) == OperationalTerrain.Land),
+                    "Authored battery has an airfield reload service and land-only movement: " + id);
+                FormationState provider = reloadGame.Formations.First(item => item.BallisticDefense.Capacity > 0);
+                provider.Position = scenario.LogisticsRegions.SelectMany(region => region.Hexes)
+                    .First(hex => reloadGame.Area.Locations.Any(location => location.Hex.Equals(hex) && location.Kind == LocationKind.Port));
+                Check(reloadGame.HasInterceptorReloadAccess(provider), "Authored port supports interceptor reloads: " + id);
+
+                ScenarioDefinition baseline = id == "meridian-veil" ? ScenarioCatalog.MeridianVeil() : ScenarioCatalog.LuzonStrait();
+                Check(scenario.Objectives.Select(item => JsonUtility.ToJson(item)).SequenceEqual(baseline.Objectives.Select(item => JsonUtility.ToJson(item)))
+                    && scenario.ScheduledEvents.Select(item => JsonUtility.ToJson(item)).SequenceEqual(baseline.ScheduledEvents.Select(item => JsonUtility.ToJson(item))) && scenario.Horizon == baseline.Horizon,
+                    "Ballistic playtest keeps executable objectives, scheduled events and duration: " + id);
+                var oldGame = new PrototypeGame(1978, baseline);
+                PrototypeGame.SaveData oldSave = oldGame.CaptureState();
+                oldSave.Version = 11;
+                reloadGame.RestoreState(oldSave);
+                Check(reloadGame.Formations.Count == oldGame.Formations.Count && reloadGame.Formations.All(item => item.BallisticWeapons.Capacity == 0 && item.BallisticDefense.Capacity == 0),
+                    "Loading an old operation retains its forces and zero ballistic equipment despite the new catalog: " + id);
+                foreach (int seed in new[] { 1978, 4200 })
+                {
+                    var simulation = new PrototypeGame(seed, scenario);
+                    int launches = 0, interceptions = 0, actions = 0;
+                    simulation.CommandEvent += (formation, kind, detail) => { if (kind == "BallisticInterception") interceptions++; };
+                    while (simulation.Time < scenario.Horizon && actions++ < 600)
+                    {
+                        AiDecision decision = PrototypeAiCommander.Choose(simulation);
+                        bool legal = decision != null && PrototypeAiCommander.Execute(simulation, decision, out _);
+                        Check(legal, "Shipped ballistic AI decision is legal: " + id + "/" + seed + "/" + actions);
+                        if (!legal) break;
+                        if (decision.Action == ActionKind.Strike && decision.WeaponDelivery == WeaponDelivery.Ballistic) launches++;
+                    }
+                    Check(simulation.Time >= scenario.Horizon && actions < 600 && launches > 0 && interceptions > 0,
+                        "Seeded authored operation reaches its horizon with ballistic launches and interceptions: " + id + "/" + seed);
+                    Debug.Log($"Ballistic scenario simulation {id}, seed {seed}: {actions} actions, {launches} launches, {interceptions} interceptions, T{simulation.Time}.");
+                }
+            }
+        }
+
         private static AuthoredScenarioDefinition Fixture()
         {
             AuthoredScenarioDefinition entry = ScenarioAuthoringCatalog.FromScenario(ScenarioCatalog.LuzonStrait());
@@ -141,7 +215,7 @@ namespace SeaOfUncertainty.Editor
             entry.Objectives = new List<ScenarioObjectiveDefinition> { new ScenarioObjectiveDefinition { Id = "custom-denial", Title = "Deny the center", Kind = ScenarioObjectiveKind.Denial, Points = 5, Radius = 3 } };
             entry.BlueCommandArchitecture = CommandArchitecture.Centralized;
             foreach (SensorRangeDefinition range in entry.SensorRanges) { range.Passive = 2; range.Active = 3; range.Focused = 4; }
-            foreach (WeaponRangeDefinition range in entry.WeaponRanges) { range.Light = 1; range.Standard = 2; range.Heavy = 3; }
+            foreach (WeaponRangeDefinition range in entry.WeaponRanges.Where(item => item.Kind != FormationKind.BallisticMissileBattery)) { range.Light = 1; range.Standard = 2; range.Heavy = 3; }
             entry.ScheduledEvents = new List<ScheduledScenarioEventDefinition>
             {
                 new ScheduledScenarioEventDefinition { Id = "custom-weather", Time = 2, Kind = ScheduledEventKind.WeatherChange, Weather = "Clear" },

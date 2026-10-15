@@ -13,6 +13,7 @@ namespace SeaOfUncertainty.Core
         public MoveMode MoveMode;
         public SearchMode SearchMode;
         public Salvo Salvo;
+        public WeaponDelivery WeaponDelivery;
         public string TargetId;
         public PatrolPosture PatrolPosture;
         public SupportKind SupportKind;
@@ -26,7 +27,7 @@ namespace SeaOfUncertainty.Core
         public string Phase;
         public string Situation;
 
-        public string ModeName => DeclareSynchronizedStrike ? "Synchronized Declaration" : !string.IsNullOrEmpty(SynchronizedStrikeId) ? "Synchronized Resolution" : Action == ActionKind.Move ? MoveMode.ToString() : Action == ActionKind.Search ? SearchMode.ToString() : Action == ActionKind.Strike ? Salvo.ToString() : Action == ActionKind.Patrol ? PatrolPosture.ToString() : Action == ActionKind.Support ? SupportKind.ToString() : "Default";
+        public string ModeName => DeclareSynchronizedStrike ? "Synchronized Declaration" : !string.IsNullOrEmpty(SynchronizedStrikeId) ? "Synchronized Resolution" : Action == ActionKind.Move ? MoveMode.ToString() : Action == ActionKind.Search ? SearchMode.ToString() : Action == ActionKind.Strike ? WeaponDelivery + " " + Salvo : Action == ActionKind.Patrol ? PatrolPosture.ToString() : Action == ActionKind.Support ? SupportKind.ToString() : "Default";
     }
 
     public static class PrototypeAiCommander
@@ -51,7 +52,7 @@ namespace SeaOfUncertainty.Core
             FormationState actor = game.Active;
             SynchronizedStrikeState readySynchronized = game.ReadySynchronizedStrikeFor(actor);
             if (readySynchronized != null)
-                return new AiDecision { Action = ActionKind.Strike, SynchronizedStrikeId = readySynchronized.Id, TargetId = readySynchronized.ContactTargetId, Hex = readySynchronized.Aim, Salvo = readySynchronized.Participants.First().Salvo, Rationale = "Resolve the reserved synchronized event at its scheduled Strike Time." };
+                return new AiDecision { Action = ActionKind.Strike, SynchronizedStrikeId = readySynchronized.Id, TargetId = readySynchronized.ContactTargetId, Hex = readySynchronized.Aim, Salvo = readySynchronized.Participants.First().Salvo, WeaponDelivery = readySynchronized.Participants.First().WeaponDelivery, Rationale = "Resolve the reserved synchronized event at its scheduled Strike Time." };
             List<ContactState> contacts = game.Contacts
                 .Where(contact => contact.Owner == actor.Side && !contact.IsLost)
                 .OrderByDescending(contact => contact.Location)
@@ -60,7 +61,7 @@ namespace SeaOfUncertainty.Core
                 .ThenBy(contact => contact.TargetId, StringComparer.Ordinal)
                 .ToList();
 
-            if (game.Sides[actor.Side].CommandSlots == 0)
+            if (actor.Kind != FormationKind.BallisticMissileBattery && game.Sides[actor.Side].CommandSlots == 0)
             {
                 AiDecision standingMission = ChooseStandingMission(game, actor, contacts, profile);
                 if (standingMission != null) return standingMission;
@@ -68,6 +69,26 @@ namespace SeaOfUncertainty.Core
 
             if (profile == AiStrategyProfile.Cautious && (actor.Friction || actor.Disruption))
                 return new AiDecision { Action = ActionKind.Recover, Rationale = "Cautious profile clears recoverable Entropy before accepting combat risk." };
+
+            if (actor.Kind == FormationKind.BallisticMissileBattery && actor.Loud && game.Sides[actor.Side].CommandSlots > 0 && (actor.EntropySources < 3 || actor.PushThroughReady))
+            {
+                HexCoord? relocation = game.LegalMoveDestinations(actor, MoveMode.Normal).OrderBy(hex => hex.Q).ThenBy(hex => hex.R).Cast<HexCoord?>().FirstOrDefault();
+                if (relocation.HasValue) return new AiDecision { Action = ActionKind.Move, Hex = relocation.Value, MoveMode = MoveMode.Normal, Rationale = "Relocate on land after launch exposure without consulting hidden enemies." };
+            }
+
+            if (actor.BallisticWeapons != null && actor.BallisticWeapons.CanLaunch(actor) && (actor.EntropySources < 3 || actor.PushThroughReady)
+                && (game.ActionFollowsMission(actor, ActionKind.Strike) || game.TriggeredMissionFor(actor) == ActionKind.Strike || game.Sides[actor.Side].CommandSlots > 0))
+            {
+                ContactState ballisticContact = contacts.FirstOrDefault(contact => game.CanStrikeContact(actor, contact, contact.LastKnownPosition, Salvo.Standard, WeaponDelivery.Ballistic, out _));
+                if (ballisticContact != null)
+                    return new AiDecision { Action = ActionKind.Strike, TargetId = ballisticContact.TargetId, Hex = ballisticContact.LastKnownPosition, Salvo = Salvo.Standard, WeaponDelivery = WeaponDelivery.Ballistic, Rationale = "Commit one ballistic package against an authorized owned Contact; hidden defenses are not inputs." };
+            }
+            if (actor.Kind == FormationKind.BallisticMissileBattery)
+            {
+                if (game.HasLogisticsAccess(actor) && game.NeedsReplenishment(actor)) return new AiDecision { Action = ActionKind.Replenish, Rationale = "Use compatible land logistics." };
+
+                return new AiDecision { Action = actor.Friction || actor.Disruption ? ActionKind.Recover : ActionKind.Hold, Rationale = "Conserve the battery until a legal reported target is available." };
+            }
 
             ContactState strikeContact = contacts
                 .Where(contact => SelectSalvo(game, actor, contact, profile).HasValue)
@@ -161,7 +182,7 @@ namespace SeaOfUncertainty.Core
             if (decision.DeclareSynchronizedStrike)
             {
                 ContactState declarationContact = game.Contacts.FirstOrDefault(item => item.Owner == actor.Side && !item.IsLost && item.TargetId == decision.TargetId);
-                return game.DeclareSynchronizedStrike(actor, decision.ParticipantIds.Select(game.Find), declarationContact, decision.Hex, decision.Salvo, decision.UsePriorPlanning, decision.DeconflictedFormationId, out _, out message);
+                return game.DeclareSynchronizedStrike(actor, decision.ParticipantIds.Select(game.Find), declarationContact, decision.Hex, decision.Salvo, decision.UsePriorPlanning, decision.DeconflictedFormationId, out _, out message, decision.WeaponDelivery);
             }
             if (!string.IsNullOrEmpty(decision.SynchronizedStrikeId))
             {
@@ -169,7 +190,7 @@ namespace SeaOfUncertainty.Core
                 if (synchronized == null) { message = "The synchronized event is no longer active."; return false; }
                 ContactState synchronizedContact = game.Contacts.FirstOrDefault(item => item.Owner == actor.Side && item.TargetId == synchronized.ContactTargetId);
                 FormationState synchronizedTarget = synchronizedContact == null || synchronizedContact.IsFalse ? null : game.Find(synchronizedContact.TargetId);
-                bool hit = synchronizedTarget != null && !synchronizedTarget.IsDestroyed && synchronizedTarget.Position.Equals(synchronized.Aim);
+                bool hit = synchronizedTarget != null && !synchronizedTarget.IsDestroyed && synchronizedTarget.Position.Equals(synchronized.Aim) && (synchronized.Participants[0].WeaponDelivery != WeaponDelivery.Ballistic || synchronized.Participants.Any(item => game.IsBallisticTargetEligible(game.Find(item.FormationId), synchronizedTarget)));
                 Reaction synchronizedReaction = hit ? selectedReaction ?? ChooseReaction(game, actor, synchronizedTarget) : Reaction.None;
                 HexCoord? synchronizedEvade = hit && synchronizedReaction == Reaction.Evade ? evadeDestination ?? ChooseEvadeDestination(game, actor, synchronizedTarget) : null;
                 return game.ResolveSynchronizedStrike(synchronized, synchronizedReaction, synchronizedEvade, synchronizedContact == null || synchronizedContact.IsLost, out _, out message);
@@ -185,7 +206,7 @@ namespace SeaOfUncertainty.Core
                     bool hit = target != null && !target.IsDestroyed && target.Position.Equals(decision.Hex);
                     Reaction reaction = hit ? selectedReaction ?? ChooseReaction(game, actor, target) : Reaction.None;
                     HexCoord? destination = hit && reaction == Reaction.Evade ? evadeDestination ?? ChooseEvadeDestination(game, actor, target) : null;
-                    return game.StrikeContact(actor, contact, decision.Hex, decision.Salvo, reaction, destination, out _, out message);
+                    return game.StrikeContact(actor, contact, decision.Hex, decision.Salvo, reaction, destination, out _, out message, decision.WeaponDelivery);
                 case ActionKind.Recover: return game.Recover(actor, out message);
                 case ActionKind.Patrol: return game.Patrol(actor, decision.Hex, decision.PatrolPosture, null, out message);
                 case ActionKind.Support: return game.Support(actor, game.Find(decision.TargetId), decision.SupportKind, out message);

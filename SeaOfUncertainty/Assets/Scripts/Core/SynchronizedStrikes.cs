@@ -8,6 +8,7 @@ namespace SeaOfUncertainty.Core
     {
         public string FormationId;
         public Salvo Salvo = Salvo.Standard;
+        public WeaponDelivery WeaponDelivery;
     }
 
     [Serializable]
@@ -23,6 +24,7 @@ namespace SeaOfUncertainty.Core
         public LocationQuality DeclaredLocation;
         public IdentityQuality DeclaredIdentity;
         public int DeclaredAge;
+        public ContactDomain DeclaredDomain;
         public List<SynchronizedStrikeParticipant> Participants = new List<SynchronizedStrikeParticipant>();
         public bool PriorPlanning;
         public string DeconflictedFormationId;

@@ -1,0 +1,57 @@
+# Ballistic interception and friendly coverage - SCN-BM-003
+
+Implementation baseline: 2026-10-15. This extends the [launch rules](BALLISTIC_LAUNCH_RULES.md) with automatic spatial coverage and finite interceptor packages. The live Meridian Veil and Northern Gateway catalog entries explicitly equip playtest launchers and interceptors; compiled legacy templates and existing saves retain their original equipment. See the [playtest setup](BALLISTIC_PLAYTEST_SETUP.md). The four expansion scenarios, full product integration, and human balance acceptance remain in the master TODO.
+
+## Authored capability
+
+Every formation has an independent `BallisticDefense` profile. Any kind may be equipped; zero capacity/current stock is the legacy/default capability. A carrier group's own profile can represent organic escorts. Separately modeled formations contribute through distance; there is no new platform roster or persistent task-group membership.
+
+Fields are `InterceptionRating` (0..6), `Interceptors`, `Capacity`, `CoverageRadius` (hexes), and `ProtectedDomains`. Current stock must be nonnegative and no greater than capacity. An enabled profile needs a positive rating and explicit domains. `Unknown` is never a protected domain. Subsurface protection requires `AllowShallowSubmarines` and/or `AllowDeepSubmarines`. These permissions never override the attack weapon's own target-domain/depth restrictions.
+
+`CanProtectSelf` defaults true; `SelfDefenseOnly` defaults false. An enabled self-only profile cannot also prohibit self-defense. Radius zero permits only same-hex coverage, including self-defense. A submerged submarine provider needs explicit `CanInterceptWhileDeep` permission to launch interceptors; this is independent of permission to protect submerged targets.
+
+## Eligibility and selection
+
+After a legal ballistic engagement commits against an actual eligible target, collect friendly equipped providers at or inside their coverage radius. Providers and targets must be in the operational area. Destroyed, Crippled, replenishing, empty, or invalid-profile providers cannot contribute. Active Launcher Damage or Magazine Damage blocks interception. Light damage reduces effective interception rating by one; Heavy damage reduces it by two. A zero effective rating is unavailable.
+
+`RequireReady` is optional and defaults false. When true, a provider with Ready Time later than current Time is unavailable. Otherwise providers can contribute while waiting for Ready Time or reserved for a synchronized action. Already-spent ordinary Reactions and Critical Endurance do not independently prevent interception. Interception does not change Ready Time, cancel a reservation, spend Command Attention, or consume the provider's ordinary Reaction. The attacked formation's chosen normal Reaction still follows its ordinary rules.
+
+Select exactly one provider by highest current effective rating, then shortest target distance, then ordinal stable formation ID. Do not stack providers. Spend one interceptor package and add that provider's effective rating (bounded to +6) to the normal combat defense comparison. A package abstracts interception of the entire committed salvo, so Light/Standard/Heavy all spend one package. This is a combat modifier, not a guaranteed shoot-down or a per-missile simulation.
+
+Conventional Outer/Area/Point layers, automatic EW defense, naval Screen interception and generic defensive Support remain excluded from ballistic interception. Normal target defense, damage and ordinary Reaction effects remain as specified in the launch rules. False Contacts, empty hexes, stale fixes that miss, and actually ineligible targets consume the committed attack ammunition but spend no interceptors. Invalid/rejected launches spend neither inventory.
+
+## Synchronized ballistic volleys
+
+The existing reservation/Strike-Time procedure now accepts an explicitly selected ballistic delivery. Every participant in one declaration uses that delivery and the selected salvo. Mixed conventional/ballistic declarations are unsupported. Declaration validates each launcher's owned report, range, quality, damage and ammunition; ammunition is spent at resolution. Resolution revalidates all participants before spending anything. A depleted or unavailable participant requires abort/retask rather than partial commitment.
+
+Retasking rechecks ballistic report legality and records its domain. Explicit blind continuation can use the declared report's domain/quality when the report is lost, while actual eligibility/occupancy remains authoritative and private. Every participant still spends its committed attack package on a miss, including later participants whose target was destroyed earlier in the volley.
+
+Use the existing stable participant order and single normal defender Reaction. Recompute provider eligibility, damage-adjusted rating and remaining stock separately for each eligible hit. A depleted, Crippled or Destroyed provider cannot protect a later participant. If the target is destroyed, later participants spend attack ammunition without further interception. Repeated resolution of a completed event is rejected. Each ballistic launcher remains Loud after completing its reserved action.
+
+## Reloads and information
+
+Replenishment restores interceptors only when the formation has ordinary logistics access at its current hex and an authored logistics region there has `SupportsInterceptorReload = true`. `SupportsBallisticReload` independently controls offensive ballistic ammunition; enabling one service does not enable the other. Battery general service still requires a local Airfield, and nearby fleet trains do not service land batteries.
+
+The defending side receives a private receipt with provider, protected target, applied modifier and remaining stock. Telemetry records that receipt under the provider's side. Attacker results include the resolved modifier but no provider ID, name, position or magazine. Attacker-visible logs and snapshots never contain the hidden provider receipt. No preview selects/spends defensive inventory or consults hidden enemy coverage.
+
+Owned inspectors and hover cards show interceptor stock, profile radius, currently eligible friendly providers and authoritative reasons for unavailable protection. The defender's secure ballistic reaction screen explains its own available protection and keeps interceptor expenditure separate from its ordinary Reaction. These queries reject a target belonging to a different viewer. A provider may become unavailable before resolution, so the authoritative selection is always recomputed. Enemy Contact cards do not show defense profiles. The order palette exposes **Ballistic Synchronized Strike**; ordinary synchronized orders remain conventional.
+
+## Formats, tests, and remaining integration
+
+Current formats: game save v13, operational schema v8, authored catalog v4, authoritative commands v3, and side snapshots v3. Operation envelopes remain v4. Pre-v13 saves and pre-v4 catalogs explicitly receive zero interceptor capability; v12 saves/v3 catalogs retain their ballistic launch capability. Older saved synchronized declarations remain conventional. Version 1 commands remain conventional; version 2 individual ballistic commands remain supported, while ballistic synchronized declarations require version 3. New state digests include interceptor inventory and reserved weapon delivery.
+
+Unit checks cover all protected target/provider kinds, self-defense, boundaries, deterministic ties, effective ratings, damage/status/readiness/depth restrictions, no stock/invalid stock, no conventional/EW substitution, exactly-once expenditure and side-scoped receipts. Integration checks cover compatible reloads, authored/legacy formats, synchronized exhaustion, provider loss, rejection without partial expenditure, repeat resolution, and save/load with matching resolution digests. Production UI checks cover owned stocks/coverage and an intercepted attack through the actual order/aim callbacks.
+
+Full legacy replay/checkpoint compatibility (including combat random seed/progress), persistence of UI reaction choices, AI defensive positioning/coordinated declaration strategy, remaining action reasons/costs, complete rule/PDF generation, and the four authored scenarios remain SCN-BM-004/005/006 work. AI resolves an already reserved ballistic volley through the same authority and human-reaction flow; it does not consult hidden enemy defense to choose a target. Automated checks do not replace visible Solo/Hotseat and balance playtests.
+
+## Map coverage and feedback (SCN-BM-004 UI slice)
+
+Hover a friendly marker or inspect its hex using the map keyboard cursor to reveal friendly ballistic coverage. **Inspector > Show Defense Coverage** pins the overlay after closing the inspector; **Hide Defense Coverage** clears it. The friendly Ready queue provides inspector access to other owned formations. Hovering temporarily changes the highlighted provider; leaving the marker returns to the pinned selection. Coverage resets when the operation map is rebuilt or command passes to another side.
+
+The outline follows the exact hex-distance footprint, clipped to the map. Green means the provider is available; circles mark eligible friendly protected formations. Amber shows only the nominal range of an unavailable provider, with an explanation and no protected-target rings. Range alone does not grant protection: domain, depth, self-defense restrictions, damage, servicing and ammunition still apply. A carrier or unequipped target highlights its best currently eligible provider when one exists; a separately equipped escort highlights its own footprint, even when a stronger provider overlaps it. Actual combat recomputes provider ranking.
+
+Opening Strike Orders produces no launch animation. A committed ballistic package generates an owner-only launch cue, including an empty/false/stale aim. An interception generates a defender-only cue at its own provider's position. Cues appear once when that side next receives its command map; reopening the same map does not replay the cue. Reduced motion uses a static cue. These transient cues reset on a new/load operation; private combat receipts remain available in the saved, side-scoped recent log. The map displays the most recent friendly interception receipt beneath the order guidance, retaining it for the session even if the short recent log rolls over. After a load, it falls back to the most recent saved receipt still present in that log. It never renders the enemy launch or interception location from authoritative hidden state.
+
+Automated presentation checks exercise inspector pin/hide, actual order/aim commitment, absence of a launch cue before commitment, private event ownership, rejection of enemy and mismatched cue providers, nominal depleted footprints without protection rings, and enemy coverage rejection. Core checks exercise both even/odd hex columns, self-defense footprints, range/status explanations and cross-side query rejection. Visual layout, motion and secure Hotseat acceptance remain manual tasks.
+
+Validation on 2026-10-15: Regression (including Unit, Integration and Presentation), ScenarioAuthoring, ContentSimulation, AdvancedContentSimulation, SharedArchitecture, AiEvaluation and Windows Build passed against the local worktree. Logs are under `SeaOfUncertainty/TestResults/`. Automated checks do not record the manual visual and Hotseat acceptance tasks as complete.

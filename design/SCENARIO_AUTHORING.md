@@ -2,7 +2,7 @@
 
 The distributable catalog is `SeaOfUncertainty/Assets/Resources/Data/scenario-catalog.json`. Open **Sea of Uncertainty > Scenario Catalog Editor** in Unity to edit it. Expand **Scenario Definition** and the nested lists. **Duplicate Selected** creates an independent, explicitly authored copy; change its stable ID. **Add Scenario** starts a blank operation, which remains invalid until it has forces and executable objectives. **Validate** and **Save JSON** use the same resolver and validation as runtime loading. Invalid catalogs cannot be saved through the editor.
 
-## Catalog version 2
+## Catalog version 4
 
 Each operation must specify `TheaterTemplateId` using one of these stable IDs:
 
@@ -22,7 +22,13 @@ The theater supplies fresh map geometry, scale, projection, coastline/elevation 
 
 Use `[]` for an empty list. A nonempty list behind a disabled replacement flag is not applied. There is no item-by-item merge. Reusing a region ID across roles is allowed only when its ordered hex definitions agree; duplicates within a single list and conflicting definitions are rejected.
 
-`FormationDefinition` supplies side, kind, initial coordinates/Ready Time, ratings, and current/maximum Light, Standard, and Heavy inventories. Signature may be negative; other ratings and inventories must be nonnegative. Current inventories cannot exceed capacity. Weapon ranges are conventional, formation-kind profiles with `Light`, `Standard`, and `Heavy` ranges in hexes. They apply to ordinary strikes, counterattack eligibility, synchronized strikes, AI decisions, map previews, and UI range labels. They do not introduce ballistic weapons.
+`FormationDefinition` supplies side, kind, initial coordinates/Ready Time, ratings, and current/maximum Light, Standard, and Heavy inventories. Signature may be negative; other ratings and inventories must be nonnegative. Current inventories cannot exceed capacity. Weapon ranges are conventional, formation-kind profiles with `Light`, `Standard`, and `Heavy` ranges in hexes. They apply to ordinary strikes, counterattack eligibility, synchronized strikes, AI decisions, map previews, and UI range labels. Batteries have zero conventional ranges. Ballistic weapons use the separate per-formation profile described below.
+
+## Ballistic capabilities
+
+Expand each formation's `BallisticWeapons`: set Range (hexes), AttackModifier (-6..6), Capacity, Ammunition, TargetDomains, MinimumLocation, and MinimumIdentity (at least General for an enabled profile). Defaults grant no weapons. Subsurface targeting also requires explicit AllowShallowSubmarines / AllowDeepSubmarines settings. These profiles are independent per formation, including carrier/surface/submarine/air/logistics abstractions and the appended BallisticMissileBattery kind.
+
+Enable `SupportsBallisticReload` only on compatible logistics regions. A formation must also have ordinary logistics access at its current hex; a battery uses an Airfield and cannot receive nearby fleet-train service. Ordinary replenishment never grants unconfigured ballistic reloads. See [ballistic launch rules](BALLISTIC_LAUNCH_RULES.md) for damage restrictions, Contact legality, expenditure, launch exposure, and launch restrictions. Configure `BallisticDefense` separately with rating 0..6, current/capacity interceptor stocks, coverage radius, protected domains, self/ready restrictions, and submarine permissions. Enable `SupportsInterceptorReload` independently on compatible logistics regions. See [ballistic defense rules](BALLISTIC_DEFENSE_RULES.md) for automatic selection, expenditure, synchronized coverage and privacy.
 
 ## Objectives and events
 
@@ -32,13 +38,13 @@ Contacts must refer to deployed opposing formations with valid owner/quality val
 
 Scheduled events need unique IDs and times between zero and the operation horizon. Weather changes supply weather/severity. Command changes supply side/architecture. Reinforcements supply a formation with a globally unique ID, a matching side, and an entry `RegionId` from `ReinforcementRegions` or area regions. Entry placement uses stable hex order and retries when friendly occupation blocks every legal entry hex. Event resolution does not mutate the authored reinforcement definition.
 
-Naval deployments must be in bounds, on water or at a port/anchorage, and outside restricted areas; air packages may occupy land but still respect boundaries/restrictions. Setup, reinforcement, exit, and transit/withdrawal destination regions are checked for navigable access to the central objective. Logistics regions must contain a port, airfield, or anchorage. Invalid references, enum values, profiles, inventories, duplicate IDs, and unreachable destinations produce errors naming the operation.
+Batteries deploy and reinforce only on unrestricted Land; their movement routes remain on contiguous Land. Land battery setup regions do not require a water route to the naval objective. Naval deployments must be in bounds, on water or at a port/anchorage, and outside restricted areas; air packages may occupy land but still respect boundaries/restrictions. Setup, reinforcement, exit, and transit/withdrawal destination regions are checked for navigable access to the central objective. Logistics regions must contain a port, airfield, or anchorage. Invalid references, enum values, profiles, inventories, duplicate IDs, and unreachable destinations produce errors naming the operation.
 
 ## Compatibility and migration
 
 The shipped version 1 catalog remains supported explicitly: it may override only the two compiled operation IDs, retains compiled objectives/Contacts/events/regions, and replaces formations only when its formation list is nonempty. Unknown IDs in version 1 now report an error with upgrade guidance. Missing catalog resources retain the compiled catalog; malformed content and unsupported catalog versions report errors rather than quietly reverting to different operations.
 
-Opening version 1 in the editor expands its resolved definitions to version 2 in memory. **Save JSON** persists that expansion after validation. Existing operation IDs and behavior are retained. Scenario schema 6 adds conventional weapon ranges; migration fills pre-6 data with the previous rules envelopes. The gameplay save payload remains version 11 because this change adds no saved gameplay-state fields. The legacy `ScenarioCatalog.Find` fallback remains available for older save/runtime compatibility; new-operation selection uses `Require`, which reports unknown IDs.
+Opening v1/v2/v3 in the editor upgrades resolved definitions to v4 in memory; **Save JSON** persists the upgrade after validation. Operational schema v7 added launch profiles; v8 adds interception profiles and a separate interceptor reload-service flag. Catalogs v1/v2, pre-v7 scenarios, and pre-v12 game saves explicitly migrate to zero ballistic capability. Missing legacy battery-kind profiles receive defaults (zero conventional ranges). Pre-v13 saves and pre-v4 catalogs explicitly receive zero interception capability while retaining their existing ballistic launch capability. Game saves are now v13; operation envelopes remain v4. New selections and file loads use `Require` for explicit unknown-ID errors; `Find` retains the documented legacy runtime fallback.
 
 ## Verification
 

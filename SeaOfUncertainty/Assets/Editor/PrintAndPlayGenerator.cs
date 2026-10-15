@@ -42,7 +42,7 @@ namespace SeaOfUncertainty.Editor
                     Ratings r = formation.Ratings ?? new Ratings();
                     html.Append($"<article class='card {formation.Side.ToString().ToLowerInvariant()}'><header>{E(formation.Name)} <small>{E(formation.Id)}</small></header>")
                         .Append($"<p>{formation.Side} · {formation.Kind}</p><div class='ratings'>MOVE {r.Move} · SEARCH {r.Search} · SIG {r.Signature}<br>STRIKE {r.Strike} · DEF {r.Defense} · ASW {r.Asw}<br>CMD {r.Command} · EW {r.ElectronicWarfare} · CYBER {r.Cyber}</div>")
-                        .Append($"<footer>WEAPONS L {weapons.MaxLight} · S {weapons.MaxStandard} · H {weapons.MaxHeavy}<br>START {new HexCoord(formation.Q, formation.R)}</footer></article>");
+                        .Append($"<footer>WEAPONS L {weapons.MaxLight} · S {weapons.MaxStandard} · H {weapons.MaxHeavy}{(formation.BallisticWeapons?.Capacity > 0 ? "<br>" + E(formation.BallisticWeapons.Summary) : string.Empty)}{(formation.BallisticDefense?.Capacity > 0 ? "<br>" + E(formation.BallisticDefense.Summary) : string.Empty)}<br>START {new HexCoord(formation.Q, formation.R)}</footer></article>");
                 }
             }
             return html.ToString();
@@ -122,7 +122,7 @@ namespace SeaOfUncertainty.Editor
                 "</style></head><body><h1>" + E(title) + "</h1><main class='" + bodyClass + "'>" + body + "</main></body></html>";
         }
 
-        private static string KindCode(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SAG" : kind == FormationKind.Submarine ? "SS" : kind == FormationKind.AirGroup ? "AIR" : "LOG";
+        private static string KindCode(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SAG" : kind == FormationKind.Submarine ? "SS" : kind == FormationKind.AirGroup ? "AIR" : kind == FormationKind.BallisticMissileBattery ? "BM" : "LOG";
         private static string E(object value) => System.Net.WebUtility.HtmlEncode(value?.ToString() ?? string.Empty);
         private static void Write(string directory, string file, string contents) => File.WriteAllText(Path.Combine(directory, file), contents, new UTF8Encoding(false));
 

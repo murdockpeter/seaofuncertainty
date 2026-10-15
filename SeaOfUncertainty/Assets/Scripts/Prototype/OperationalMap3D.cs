@@ -75,6 +75,11 @@ namespace SeaOfUncertainty.Prototype
         private readonly Material warningMaterial;
         private readonly Dictionary<string, Mesh> formationMeshes = new Dictionary<string, Mesh>();
         private LineRenderer hoverRing;
+        private GameObject ballisticCoverageRoot;
+        private FormationState ballisticCoverageProvider;
+        public string BallisticCoverageProviderId => ballisticCoverageProvider?.Id;
+        public int BallisticCoverageHexCount { get; private set; }
+        public int BallisticProtectedFormationCount { get; private set; }
         private LineRenderer previewLine;
         private LineRenderer objectiveRing;
         private bool objectiveEmphasized;
@@ -90,6 +95,9 @@ namespace SeaOfUncertainty.Prototype
         private MoveMode moveMode;
         private SearchMode searchMode;
         private Salvo salvo;
+        private MeshFilter[] landSurfaceMeshes;
+        private readonly Dictionary<HexCoord, float> landMarkerOffsets = new Dictionary<HexCoord, float>();
+        private WeaponDelivery weaponDelivery;
         private bool reducedMotion;
         private bool showPermanentGrid;
         private float waterScroll;
@@ -453,13 +461,15 @@ namespace SeaOfUncertainty.Prototype
             UpdateCamera();
         }
 
-        public void SetState(PrototypeGame currentGame, ToolkitActionMode mode, MoveMode currentMoveMode, SearchMode currentSearchMode, Salvo currentSalvo, bool useReducedMotion = false, bool showGrid = false)
+        public void SetState(PrototypeGame currentGame, ToolkitActionMode mode, MoveMode currentMoveMode, SearchMode currentSearchMode, Salvo currentSalvo, bool useReducedMotion = false, bool showGrid = false, WeaponDelivery delivery = WeaponDelivery.Conventional)
         {
             game = currentGame;
+            SetBallisticCoverage(null);
             actionMode = mode;
             moveMode = currentMoveMode;
             searchMode = currentSearchMode;
             salvo = currentSalvo;
+            weaponDelivery = delivery;
             reducedMotion = useReducedMotion;
             if (whitecapRoot != null) whitecapRoot.gameObject.SetActive(!reducedMotion);
             showPermanentGrid = showGrid;
@@ -472,8 +482,7 @@ namespace SeaOfUncertainty.Prototype
             if (game?.Active != null)
             {
                 if (actionMode == ToolkitActionMode.Search) TriggerEffect(OperationalEffectKind.SearchSweep, game.Active.Position);
-                else if (actionMode == ToolkitActionMode.Move) TriggerEffect(OperationalEffectKind.MovementWake, game.Active.Position);
-                else if (actionMode == ToolkitActionMode.Strike) TriggerEffect(OperationalEffectKind.Launch, game.Active.Position);
+                else if (actionMode == ToolkitActionMode.Move && game.Active.Kind != FormationKind.BallisticMissileBattery) TriggerEffect(OperationalEffectKind.MovementWake, game.Active.Position);
             }
         }
 
@@ -613,7 +622,9 @@ namespace SeaOfUncertainty.Prototype
             effect.name = "VFX " + kind;
             effect.SetActive(true);
             effect.transform.SetParent(root.transform, false);
-            effect.transform.position = HexToWorld(hex) + Vector3.up * (kind == OperationalEffectKind.MovementWake || kind == OperationalEffectKind.SearchSweep ? .035f : .3f);
+            float height = kind == OperationalEffectKind.MovementWake || kind == OperationalEffectKind.SearchSweep ? .035f : .3f;
+            if (kind == OperationalEffectKind.Launch || kind == OperationalEffectKind.Interception) height += LandMarkerOffset(hex);
+            effect.transform.position = HexToWorld(hex) + Vector3.up * height;
             effect.transform.rotation = Quaternion.identity;
             Vector3 scale;
             if (kind == OperationalEffectKind.SearchSweep) scale = new Vector3(1.5f, .025f, 1.5f);
@@ -654,6 +665,48 @@ namespace SeaOfUncertainty.Prototype
             if (!Enum.TryParse(suffix, out OperationalEffectKind kind)) kind = OperationalEffectKind.Impact;
             if (!effectPools.TryGetValue(kind, out Stack<GameObject> pool)) effectPools[kind] = pool = new Stack<GameObject>();
             pool.Push(effect);
+        }
+
+        public void SetBallisticCoverage(FormationState provider)
+        {
+            if (game?.Active == null || provider == null || provider.Side != game.Active.Side || !game.Formations.Contains(provider) || provider.IsDestroyed || provider.BallisticDefense == null || provider.BallisticDefense.Capacity <= 0) provider = null;
+            if (provider == ballisticCoverageProvider && (provider == null || ballisticCoverageRoot != null)) return;
+            if (ballisticCoverageRoot != null) { ballisticCoverageRoot.SetActive(false); DestroyObject(ballisticCoverageRoot); }
+            ballisticCoverageRoot = null;
+            ballisticCoverageProvider = provider;
+            BallisticCoverageHexCount = BallisticProtectedFormationCount = 0;
+            if (provider == null) return;
+            Side viewer = game.Active.Side;
+            var hexes = new HashSet<HexCoord>(game.FriendlyBallisticCoverageHexes(viewer, provider));
+            if (hexes.Count == 0) return;
+            ballisticCoverageRoot = Child("Friendly Ballistic Coverage", root.transform);
+            BallisticCoverageHexCount = hexes.Count;
+            bool ready = game.FriendlyBallisticDefenseAvailable(viewer, provider);
+            Color color = ready ? new Color(.22f, .95f, .74f, .8f) : new Color(1f, .65f, .2f, .65f);
+            foreach (HexCoord hex in hexes)
+            {
+                int parity = hex.Q & 1;
+                HexCoord[] neighbors = { new HexCoord(hex.Q + 1, hex.R + parity), new HexCoord(hex.Q, hex.R + 1), new HexCoord(hex.Q - 1, hex.R + parity), new HexCoord(hex.Q - 1, hex.R - 1 + parity), new HexCoord(hex.Q, hex.R - 1), new HexCoord(hex.Q + 1, hex.R - 1 + parity) };
+                Vector3 center = HexToWorld(hex);
+                for (int edge = 0; edge < 6; edge++)
+                {
+                    if (hexes.Contains(neighbors[edge])) continue;
+                    var line = Child("Ballistic Coverage Boundary", ballisticCoverageRoot.transform).AddComponent<LineRenderer>();
+                    line.sharedMaterial = lineMaterial; line.useWorldSpace = true; line.positionCount = 2;
+                    line.widthMultiplier = .055f; line.startColor = line.endColor = color;
+                    for (int vertex = 0; vertex < 2; vertex++)
+                    {
+                        float angle = (edge + vertex) * Mathf.PI / 3f;
+                        line.SetPosition(vertex, SurfacePoint(center.x + Mathf.Cos(angle), center.z + Mathf.Sin(angle), .16f + LandMarkerOffset(hex)));
+                    }
+                }
+            }
+            foreach (FormationState target in game.FriendlyBallisticProtectedFormations(viewer, provider))
+            {
+                LineRenderer ring = Ring("Ballistic Protected Friendly", target.Position, .65f, color, .07f);
+                ring.transform.SetParent(ballisticCoverageRoot.transform, true);
+                BallisticProtectedFormationCount++;
+            }
         }
 
         public void SetHoverHex(HexCoord? hex)
@@ -760,7 +813,7 @@ namespace SeaOfUncertainty.Prototype
 
         public Vector2 Project(HexCoord hex, Rect contentRect)
         {
-            Vector3 viewport = camera.WorldToViewportPoint(HexToWorld(hex) + Vector3.up * .7f);
+            Vector3 viewport = camera.WorldToViewportPoint(HexToWorld(hex) + Vector3.up * (.7f + LandMarkerOffset(hex)));
             return new Vector2(viewport.x * contentRect.width, (1f - viewport.y) * contentRect.height);
         }
 
@@ -941,6 +994,42 @@ namespace SeaOfUncertainty.Prototype
             }
             objectiveRing = Ring("Operational Objective", area.Objective, .68f, new Color(1f, .73f, .28f, .4f), .035f);
             objectiveRing.transform.SetParent(root.transform, true);
+            landSurfaceMeshes = root.GetComponentsInChildren<MeshFilter>().Where(filter =>
+            {
+                Material material = filter.GetComponent<Renderer>()?.sharedMaterial;
+                return material == landMaterial || material == highlandMaterial || material == fictionalTerrainMaterial;
+            }).ToArray();
+            landMarkerOffsets.Clear();
+        }
+
+        private float LandMarkerOffset(HexCoord hex)
+        {
+            if (area.TerrainAt(hex) != OperationalTerrain.Land || landSurfaceMeshes == null) return 0f;
+            if (landMarkerOffsets.TryGetValue(hex, out float cached)) return cached;
+            Vector3 point = HexToWorld(hex);
+            float highest = point.y;
+            foreach (MeshFilter filter in landSurfaceMeshes)
+            {
+                if (filter == null || filter.sharedMesh == null || !filter.sharedMesh.isReadable) continue;
+                Renderer renderer = filter.GetComponent<Renderer>();
+                if (renderer == null || point.x < renderer.bounds.min.x || point.x > renderer.bounds.max.x || point.z < renderer.bounds.min.z || point.z > renderer.bounds.max.z) continue;
+                Vector3[] vertices = filter.sharedMesh.vertices;
+                int[] triangles = filter.sharedMesh.triangles;
+                for (int i = 0; i < triangles.Length; i += 3)
+                {
+                    Vector3 a = filter.transform.TransformPoint(vertices[triangles[i]]);
+                    Vector3 b = filter.transform.TransformPoint(vertices[triangles[i + 1]]);
+                    Vector3 c = filter.transform.TransformPoint(vertices[triangles[i + 2]]);
+                    float divisor = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+                    if (Mathf.Abs(divisor) < .000001f) continue;
+                    float u = ((b.z - c.z) * (point.x - c.x) + (c.x - b.x) * (point.z - c.z)) / divisor;
+                    float v = ((c.z - a.z) * (point.x - c.x) + (a.x - c.x) * (point.z - c.z)) / divisor;
+                    if (u >= 0f && v >= 0f && u + v <= 1f) highest = Mathf.Max(highest, u * a.y + v * b.y + (1f - u - v) * c.y);
+                }
+            }
+            float offset = highest - point.y + .025f;
+            landMarkerOffsets[hex] = offset;
+            return offset;
         }
 
         private void BuildCoastlineTerrainRelief(IEnumerable<Vector3[]> shorelines)
@@ -1550,7 +1639,7 @@ namespace SeaOfUncertainty.Prototype
                     }
                     else if (actionMode == ToolkitActionMode.Strike)
                     {
-                        bool inRange = distanceToHex <= game.StrikeRangeFor(game.Active, salvo);
+                        bool inRange = distanceToHex <= game.StrikeRangeFor(game.Active, salvo, weaponDelivery);
                         color = inRange ? new Color(1f, .45f, .14f, .9f) : new Color(.3f, .34f, .38f, .2f);
                         width = inRange ? .06f : .02f;
                     }
@@ -1648,8 +1737,10 @@ namespace SeaOfUncertainty.Prototype
         {
             GameObject marker = AcquireMarker(formation.Name);
             float markerHeight = formation.Kind == FormationKind.AirGroup ? 1.15f : formation.Kind == FormationKind.Submarine ? .025f : .015f;
+            if (formation.Kind == FormationKind.BallisticMissileBattery) markerHeight = LandMarkerOffset(formation.Position);
             Vector3 destination = HexToWorld(formation.Position) + Vector3.up * markerHeight;
             Vector3 start = presentedPositions.TryGetValue(formation.Id, out HexCoord oldHex) ? HexToWorld(oldHex) + Vector3.up * markerHeight : destination;
+            if (formation.Kind == FormationKind.BallisticMissileBattery) start = destination;
             int committedHexes = presentedPositions.ContainsKey(formation.Id) ? HexCoord.Distance(oldHex, formation.Position) : 0;
             bool hasPresentedRotation = presentedRotations.TryGetValue(formation.Id, out Quaternion storedRotation);
             Quaternion previousRotation = hasPresentedRotation ? storedRotation : Quaternion.identity;
@@ -1684,6 +1775,7 @@ namespace SeaOfUncertainty.Prototype
                 case FormationKind.Submarine: BuildSubmarine(detail.transform, material); break;
                 case FormationKind.AirGroup: BuildAircraft(detail.transform, material); break;
                 case FormationKind.LogisticsGroup: BuildLogisticsGroup(detail.transform, material); break;
+                case FormationKind.BallisticMissileBattery: BuildMissileBattery(detail.transform, material); break;
             }
             AddRecognitionMarking(detail.transform, formation.Kind, material);
             GameObject contactShadow = Primitive(PrimitiveType.Cylinder, "Formation Soft Contact Shadow", marker.transform, formationShadowMaterial);
@@ -1700,6 +1792,7 @@ namespace SeaOfUncertainty.Prototype
                 : formation.Kind == FormationKind.SurfaceGroup ? new Vector3(.17f, .025f, .34f)
                 : formation.Kind == FormationKind.Submarine ? new Vector3(.17f, .06f, .29f)
                 : formation.Kind == FormationKind.AirGroup ? new Vector3(.28f, .025f, .28f) : new Vector3(.24f, .025f, .30f);
+            if (formation.Kind == FormationKind.BallisticMissileBattery) { symbol.transform.localScale = new Vector3(.16f, .32f, .16f); symbol.transform.localPosition = new Vector3(0f, .16f, 0f); }
             if (formation.Kind == FormationKind.AirGroup) symbol.transform.localRotation = Quaternion.Euler(0f, 0f, 45f);
             lodPairs.Add(new LodPair { Detail = detail, Symbol = symbol });
             bool active = formation == game.Active;
@@ -1735,6 +1828,7 @@ namespace SeaOfUncertainty.Prototype
 
         private List<WakeTrail> AddPersistentWake(Transform parent, FormationKind kind, bool isMoving, int committedHexes)
         {
+            if (kind == FormationKind.BallisticMissileBattery) return null;
             if (kind == FormationKind.Submarine) return null;
             if (kind == FormationKind.AirGroup)
             {
@@ -1844,6 +1938,25 @@ namespace SeaOfUncertainty.Prototype
                 }, kind == FormationKind.LogisticsGroup ? .82f : 1f);
             }
             return trails;
+        }
+
+        private void BuildMissileBattery(Transform parent, Material material)
+        {
+            GameObject chassis = Primitive(PrimitiveType.Cube, "Mobile Ballistic Launcher Chassis", parent, material);
+            chassis.transform.localPosition = new Vector3(0f, .09f, 0f);
+            chassis.transform.localScale = new Vector3(.26f, .12f, .56f);
+            GameObject launcher = Primitive(PrimitiveType.Cylinder, "Ballistic Launch Canister", parent, material);
+            launcher.transform.localPosition = new Vector3(0f, .3f, -.03f);
+            launcher.transform.localScale = new Vector3(.11f, .3f, .11f);
+            launcher.transform.localRotation = Quaternion.Euler(32f, 0f, 0f);
+            for (int side = -1; side <= 1; side += 2)
+                for (int axle = -1; axle <= 1; axle++)
+                {
+                    GameObject wheel = Primitive(PrimitiveType.Cylinder, "Launcher Wheel", parent, material);
+                    wheel.transform.localPosition = new Vector3(side * .15f, .055f, axle * .19f);
+                    wheel.transform.localScale = new Vector3(.11f, .035f, .11f);
+                    wheel.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+                }
         }
 
         private void BuildSeaStateWhitecaps()
@@ -2161,11 +2274,11 @@ namespace SeaOfUncertainty.Prototype
         private GameObject BuildContact(ContactState contact)
         {
             GameObject marker = AcquireMarker("Contact Marker");
-            marker.transform.position = HexToWorld(contact.LastKnownPosition) + Vector3.up * .62f;
+            marker.transform.position = HexToWorld(contact.LastKnownPosition) + Vector3.up * (.62f + LandMarkerOffset(contact.LastKnownPosition));
             bool eligible = actionMode == ToolkitActionMode.Search && game?.Active != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= game.SearchRangeFor(game.Active, searchMode) || actionMode == ToolkitActionMode.Strike && StrikeEligible(contact);
             Color stateColor = eligible ? new Color(.2f, 1f, .62f, 1f) : contact.Age >= 3 ? new Color(.62f, .49f, .38f, .72f) : contactMaterial.color;
 
-            GameObject diamond = Primitive(PrimitiveType.Cube, contact.Identity == IdentityQuality.Identified ? "Identified Contact" : "Unknown Contact", marker.transform, contactMaterial);
+            GameObject diamond = Primitive(PrimitiveType.Cube, contact.Domain == ContactDomain.Land ? "Land Contact Report" : contact.Identity == IdentityQuality.Identified ? "Identified Contact" : "Unknown Contact", marker.transform, contactMaterial);
             float scale = contact.Identity == IdentityQuality.Identified ? .36f : contact.Identity == IdentityQuality.General ? .31f : .26f;
             diamond.transform.localScale = Vector3.one * scale;
             diamond.transform.localRotation = Quaternion.Euler(35f, 45f, 35f);
@@ -2345,8 +2458,7 @@ namespace SeaOfUncertainty.Prototype
         private bool StrikeEligible(ContactState contact)
         {
             if (contact == null) return false;
-            if (!game.ContactPossibleHexes(contact).Any(hex => HexCoord.Distance(game.Active.Position, hex) <= game.StrikeRangeFor(game.Active, salvo))) return false;
-            return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
+            return game.ContactPossibleHexes(contact).Any(hex => game.CanStrikeContact(game.Active, contact, hex, salvo, weaponDelivery, out _));
         }
 
         private LineRenderer Ring(string name, HexCoord hex, float radius, Color color, float width)
@@ -2367,6 +2479,7 @@ namespace SeaOfUncertainty.Prototype
         {
             ring.positionCount = 32;
             Vector3 center = HexToWorld(hex);
+            height += LandMarkerOffset(hex);
             for (int i = 0; i < 32; i++)
             {
                 float angle = i / 32f * Mathf.PI * 2f;

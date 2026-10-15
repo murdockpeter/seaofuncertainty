@@ -6,12 +6,13 @@ namespace SeaOfUncertainty.Core
 {
     public enum Side { Blue, Red }
     public enum OperationMode { LocalHotseat, SoloVsAi }
-    public enum FormationKind { CarrierGroup, SurfaceGroup, Submarine, AirGroup, LogisticsGroup }
+    public enum FormationKind { CarrierGroup, SurfaceGroup, Submarine, AirGroup, LogisticsGroup, BallisticMissileBattery }
     public enum ActionKind { Move, Search, Strike, Patrol, Support, Recover, Replenish, Hold }
     public enum MoveMode { Cautious, Normal, HighTempo }
     public enum SearchMode { Passive, Active, Focused }
     public enum SearchPriority { Location, Identity }
     public enum Salvo { Light, Standard, Heavy }
+    public enum WeaponDelivery { Conventional, Ballistic }
     public enum Reaction { None, Defend, Evade, Counterattack, Hold }
     public enum ReactionControl { None, HumanDirect, HumanHandoff, Ai }
     public enum PatrolPosture { Defensive, Balanced, Aggressive }
@@ -22,7 +23,7 @@ namespace SeaOfUncertainty.Core
     public enum MissionTrigger { OnReady, ContactLocated, EntropyMarked, LogisticsRequired, ObjectiveReached }
     public enum LocationQuality { Low, Medium, High }
     public enum IdentityQuality { Unknown, General, Identified }
-    public enum ContactDomain { Unknown, Surface, Subsurface, Air }
+    public enum ContactDomain { Unknown, Surface, Subsurface, Air, Land }
     public enum Endurance { Ready, Extended, Critical }
     public enum DamageState { None, Light, Heavy, Crippled, Destroyed }
     public enum CombatBand { Poor, Even, Favorable, Dominant }
@@ -148,6 +149,8 @@ namespace SeaOfUncertainty.Core
         public string SynchronizedStrikeId;
         public bool IsSynchronizedStrikeLeader;
         public WeaponInventoryState Weapons = new WeaponInventoryState();
+        public BallisticWeaponProfile BallisticWeapons = new BallisticWeaponProfile();
+        public BallisticDefenseProfile BallisticDefense = new BallisticDefenseProfile();
         public SubmarineDepthState SubmarineDepth = SubmarineDepthState.Deep;
 
         public int EntropySources => (Friction ? 1 : 0) + (Disruption ? 1 : 0) + (Destruction ? 1 : 0);
@@ -160,8 +163,8 @@ namespace SeaOfUncertainty.Core
         public int EffectiveDefense => Math.Max(0, Ratings.Defense - (Damage == DamageState.Light ? 1 : 0) - (HasEffect(EntropyCardIds.EscortLost) ? 1 : 0) - (HasEffect(EntropyCardIds.AirDefenseHit) ? 1 : 0) + ReactionDefenseBonus);
         public int EffectiveSignature => Ratings.Signature + (Loud ? 1 : 0) + SignatureBonus + MovementSignatureModifier - Math.Max(0, Ratings.ElectronicWarfare / 2) - (Kind == FormationKind.Submarine && SubmarineDepth == SubmarineDepthState.Deep ? 1 : 0);
         public int EffectiveCommand => Math.Max(0, Ratings.Command + CommandBonus - (HasEffect(EntropyCardIds.CommandSpacesHit) ? 1 : 0) - (HasEffect(EntropyCardIds.BridgeCasualties) ? 1 : 0));
-        public bool CanHeavySalvo => !WeaponExpended && (Weapons == null || Weapons.MaxHeavy == 0 || Weapons.Heavy > 0) && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect(EntropyCardIds.MagazineDamage) && !HasEffect(EntropyCardIds.LauncherDamage);
-        public bool CanFire(Salvo salvo) => salvo == Salvo.Heavy ? CanHeavySalvo : Weapons == null || (salvo == Salvo.Light ? Weapons.MaxLight == 0 : Weapons.MaxStandard == 0) || Weapons.CanFire(salvo);
+        public bool CanHeavySalvo => Kind != FormationKind.BallisticMissileBattery && !WeaponExpended && (Weapons == null || Weapons.MaxHeavy == 0 || Weapons.Heavy > 0) && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect(EntropyCardIds.MagazineDamage) && !HasEffect(EntropyCardIds.LauncherDamage);
+        public bool CanFire(Salvo salvo) => Kind != FormationKind.BallisticMissileBattery && (salvo == Salvo.Heavy ? CanHeavySalvo : Weapons == null || (salvo == Salvo.Light ? Weapons.MaxLight == 0 : Weapons.MaxStandard == 0) || Weapons.CanFire(salvo));
         public bool HasEffect(string id)
         {
             if (ActiveEffectCardIds == null || !ActiveEffectCardIds.Contains(id) || ResolvedEffectCardIds != null && ResolvedEffectCardIds.Contains(id)) return false;
@@ -236,6 +239,7 @@ namespace SeaOfUncertainty.Core
         public DamageState CounterattackDamage;
         public DamageState CounterattackResultingDamage;
         public int MissileDefenseModifier;
+        public int BallisticInterceptionModifier;
         public string MissileDefenseLayers;
     }
 
@@ -253,6 +257,7 @@ namespace SeaOfUncertainty.Core
         public static int MoveDistance(MoveMode mode) => mode == MoveMode.Cautious ? 1 : mode == MoveMode.Normal ? 2 : 3;
         public static int MoveDistance(FormationKind kind, MoveMode mode)
         {
+            if (kind == FormationKind.BallisticMissileBattery) return mode == MoveMode.HighTempo ? 2 : 1;
             if (kind != FormationKind.AirGroup) return kind == FormationKind.LogisticsGroup ? (mode == MoveMode.HighTempo ? 2 : 1) : MoveDistance(mode);
             return mode == MoveMode.Cautious ? 4 : mode == MoveMode.Normal ? 6 : 8;
         }
@@ -275,6 +280,7 @@ namespace SeaOfUncertainty.Core
         public static int SalvoModifier(Salvo salvo) => salvo == Salvo.Light ? 0 : salvo == Salvo.Standard ? 1 : 2;
         public static int StrikeRange(FormationKind kind, Salvo salvo)
         {
+            if (kind == FormationKind.BallisticMissileBattery) return 0;
             int light = kind == FormationKind.AirGroup ? 6 : kind == FormationKind.CarrierGroup ? 4 : kind == FormationKind.LogisticsGroup ? 1 : 3;
             int standard = kind == FormationKind.AirGroup ? 10 : kind == FormationKind.CarrierGroup ? 8 : kind == FormationKind.Submarine ? 5 : kind == FormationKind.LogisticsGroup ? 1 : 6;
             int heavy = kind == FormationKind.AirGroup ? 14 : kind == FormationKind.CarrierGroup ? 12 : kind == FormationKind.Submarine ? 7 : kind == FormationKind.LogisticsGroup ? 1 : 9;

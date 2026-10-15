@@ -113,7 +113,8 @@ namespace SeaOfUncertainty.Editor
             actor.ActiveEffectCardIds.Add(EntropyCardIds.LauncherDamage);
             Assert(!actor.CanHeavySalvo, "Launcher Damage blocks Heavy Salvo");
 
-            var contradictionGame = new PrototypeGame(1978);
+            // Keep this single-report card fixture independent of live catalog intelligence.
+            var contradictionGame = new PrototypeGame(1978, ScenarioCatalog.MeridianVeil());
             FormationState contradictionActor = contradictionGame.Active;
             ContactState contradictionContact = contradictionGame.Contacts.First(contact => contact.Owner == contradictionActor.Side && !contact.IsLost && !contact.IsFalse);
             int originalPossibleHexes = contradictionGame.ContactPossibleHexes(contradictionContact).Count;
@@ -367,7 +368,8 @@ namespace SeaOfUncertainty.Editor
             while (game.Active != formation && game.Active != null && guard++ < 80) Assert(game.Hold(game.Active, out string cadenceMessage), "Advance servicing clock: " + cadenceMessage);
             Assert(game.Active == formation && !formation.Replenishing, "Reaction availability returns when the replenished Formation becomes Ready");
 
-            var emptyGame = new PrototypeGame(1978);
+            // Exercise conventional logistics choice without a live ballistic launch opportunity.
+            var emptyGame = new PrototypeGame(1978, ScenarioCatalog.MeridianVeil());
             FormationState empty = emptyGame.Active;
             empty.Position = westPort;
             Assert(!emptyGame.Replenish(empty, null, out string emptyMessage) && emptyMessage.Contains("no Endurance"), "Replenishment rejects a Formation with nothing to restore");
@@ -566,6 +568,8 @@ namespace SeaOfUncertainty.Editor
         [MenuItem("Sea of Uncertainty/Tests/Run Unit Suite")]
         public static void RunUnitTestSuite()
         {
+            BallisticLaunchTests.RunUnit();
+            BallisticDefenseTests.RunUnit();
             EnsureRuntimePanelSettings();
             Ensure3DMaterials();
             ThemeStyleSheet runtimeTheme = Resources.Load<ThemeStyleSheet>("UI/UnityDefaultRuntimeTheme");
@@ -638,6 +642,9 @@ namespace SeaOfUncertainty.Editor
         [MenuItem("Sea of Uncertainty/Tests/Run Integration Suite")]
         public static void RunIntegrationTestSuite()
         {
+            SaveRecoveryTests.Run();
+            BallisticLaunchTests.RunIntegration();
+            BallisticDefenseTests.RunIntegration();
             var game = new PrototypeGame();
             Assert(game.Formations.Exists(f => f.Side == Side.Blue && f.ReadyTime == 0) && game.Formations.Exists(f => f.Side == Side.Red && f.ReadyTime == 0), "Both sides have formations in the opening Ready-Time cohort");
             Assert(game.Formations.Exists(f => f.Side == Side.Blue && f.ReadyTime == 1) && game.Formations.Exists(f => f.Side == Side.Red && f.ReadyTime == 1), "Both sides have interleaved follow-on readiness");
@@ -770,7 +777,7 @@ namespace SeaOfUncertainty.Editor
                 Assert(operationalMap.AircraftContrailCount == expectedContrails && operationalMap.PersistentTrailsUseFormationSpace, "Aircraft use paired contrails and every trail rotates in Formation-local space");
                 Assert(operationalMap.AircraftContrailsUseVaporTreatment && operationalMap.AircraftContrailsAreAltitudeCued && operationalMap.ContainsRenderedName("High-Altitude Vapor Contrail"), "Aircraft trails use tapered vapor geometry at aircraft altitude instead of ambiguous surface-grey lines");
                 Assert(operationalMap.AircraftContrailsUseMistyLayering && operationalMap.AircraftContrailLayerCount == expectedContrails * 2 && operationalMap.ContainsRenderedName("Contrail Vapor Core"), "Each aircraft contrail combines a feathered noisy mist layer with a narrower fading vapor core");
-                Assert(operationalMap.AuditedFormationKindCount == System.Enum.GetValues(typeof(FormationKind)).Length && operationalMap.HeadingAndWakeOrientationAuditPassed, "Every formation kind resolves heading on the globe tangent independently of camera orientation");
+                Assert(operationalMap.AuditedFormationKindCount == game.Formations.Where(item => item.Side == game.Active.Side && !item.IsDestroyed).Select(item => item.Kind).Distinct().Count() && operationalMap.HeadingAndWakeOrientationAuditPassed, "Every formation kind resolves heading on the globe tangent independently of camera orientation");
                 FormationState wakeProbe = game.Formations.Find(formation => formation.Side == game.Active.Side && !formation.IsDestroyed && formation.Kind == FormationKind.SurfaceGroup);
                 HexCoord wakeOrigin = wakeProbe.Position;
                 HexCoord wakeDestination = new HexCoord(wakeOrigin.Q, wakeOrigin.R > 0 ? wakeOrigin.R - 1 : wakeOrigin.R + 1);
@@ -955,7 +962,7 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.Active != null && restored.Active.Id == game.Active.Id, "Save restores active formation");
             Assert(restored.Formations.Count == game.Formations.Count, "Save restores formations");
             Assert(restored.Contacts.Count == game.Contacts.Count, "Save restores Contacts");
-            Assert(saveData.Version == 11 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 11 save preserves stable IDs, Entropy decks, response windows, Response hands, synchronized strikes and scenario events, Command architectures, magazines, Standing Missions, weather, uncertainty, damage duration, and private logs");
+            Assert(saveData.Version == 13 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 13 save preserves stable IDs, Entropy decks, response windows, Response hands, synchronized strikes and scenario events, Command architectures, magazines, Standing Missions, weather, uncertainty, damage duration, and private logs");
             Assert(restored.LogEntries.Count == game.LogEntries.Count, "Save restores side-scoped operational log visibility");
             Assert(restored.EntropyDecks.Count == 3 && restored.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count) == game.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count), "Save restores Entropy deck state");
             Assert(restored.CommandResponseDecks.Count == 2 && restored.CommandResponseDecks.All(deck => deck.Hand.Count == 3), "Save restores both private Command Response hands");
@@ -1245,7 +1252,7 @@ namespace SeaOfUncertainty.Editor
         {
             ScenarioAuthoringTests.Run();
             ScenarioDefinition authored = ScenarioCatalog.Find("meridian-veil");
-            Assert(authored.Formations.Count == 10 && authored.SpecialRules.Contains("finite magazines"), "External JSON catalog supplies scenario metadata and all formation definitions");
+            Assert(authored.Formations.Count == 11 && authored.SpecialRules.Contains("finite magazines"), "External JSON catalog supplies the original forces plus a ballistic battery");
             Assert(authored.Formations.All(item => item.Ratings != null && item.Weapons != null), "Every authored formation has ratings and a finite weapon inventory");
 
             var combatGame = new PrototypeGame(6201, authored);

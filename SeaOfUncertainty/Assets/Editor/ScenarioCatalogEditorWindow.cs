@@ -1,4 +1,4 @@
-﻿#if UNITY_EDITOR
+#if UNITY_EDITOR
 using System;
 using System.IO;
 using System.Linq;
@@ -37,7 +37,7 @@ namespace SeaOfUncertainty.Editor
                 TextAsset source = AssetDatabase.LoadAssetAtPath<TextAsset>(AssetPath);
                 AuthoredScenarioCatalog loaded = source == null ? new AuthoredScenarioCatalog() : JsonUtility.FromJson<AuthoredScenarioCatalog>(source.text);
                 state.Catalog = ScenarioAuthoringCatalog.Upgrade(loaded);
-                validation = loaded.Version == 1 ? "Version 1 migrated in memory. Validate and Save JSON to persist version 2." : "Not validated.";
+                validation = loaded.Version < 4 ? "Legacy catalog migrated in memory. Validate and Save JSON to persist version 4." : "Not validated.";
                 valid = false;
                 serializedState = new SerializedObject(state);
                 scenarioIndex = Mathf.Clamp(scenarioIndex, 0, Math.Max(0, state.Catalog.Scenarios.Count - 1));
@@ -53,7 +53,7 @@ namespace SeaOfUncertainty.Editor
         private void OnGUI()
         {
             EditorGUILayout.LabelField("External Scenario and Formation Authoring", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Version 2: choose a Theater Template Id. Forces, Contacts, objectives, events and scenario region lists always replace; [] clears them. Area regions, restrictions, presentation and sensor/weapon/defense profiles inherit unless their Replace/Override switch is enabled. Expand lists to edit all fields.", MessageType.Info);
+            EditorGUILayout.HelpBox("Version 4: per-formation Ballistic Weapons/Defense and separate compatible reload services are explicit. Choose a Theater Template Id. Forces, Contacts, objectives, events and scenario region lists always replace; [] clears them. Area regions, restrictions, presentation and sensor/weapon/defense profiles inherit unless their Replace/Override switch is enabled. Expand lists to edit all fields.", MessageType.Info);
             if (serializedState == null)
             {
                 EditorGUILayout.HelpBox(validation, MessageType.Error);
