@@ -22,6 +22,16 @@ The rules model remains a deterministic two-dimensional axial hex topology. The 
 - Hexes are subtle at rest and emphasized contextually for movement, Search, Strike, objectives, and selection.
 - At later production zoom levels, close 3D models transition to operational symbols and then aggregated markers.
 
+## Command interface
+
+- Issue orders through the active formation's contextual palette on the 3D map. Mouse, number-key shortcuts, and controller navigation use the same command dispatch and posture/weapon pickers.
+- Keep a compact status strip for current Time, active formation, next friendly readiness, and actual command capacity/strain. Do not maintain a second permanent action panel or sidebars.
+- Open the scrollable formation inspector with **I** and the friendly Ready queue with **T**. Queue rows inspect the selected friendly formation. Enemy Contacts expose only the owning side's known Contact report.
+- Keep Push Through, HQ Recovery, mission assignment, and synchronized-strike declaration/resolution/retask/abort accessible through map orders. A ready synchronized strike directs conflicting shortcuts back to its resolution palette.
+- Use **Space** on the idle map for orders, **1–3** for posture/weapon pickers, **4–9** for the remaining action families, and **Escape** to close an overlay, cancel map targeting, or open the menu. **Tab/Shift+Tab** remain focus navigation. Controller button 3 opens map orders; cancel backs out of targeting before pausing.
+- Preserve cards, logs, rules, settings, save/load, grid controls, action previews, and audio descriptions. Private action feedback must be cleared or replaced with side-visible log content at a commander handoff.
+- Keep formation and Contact markers compact at rest. Hover reveals a bounded, noninteractive detail card; objective geography uses a gold compass reticle with subdued ground emphasis. **O**, **C**, and the map cursor expose the same information without requiring mouse hover. Objective details show executable public rules and friendly presence, never hidden enemy control or contested status.
+
 ## Vertical domains
 
 Aircraft altitude and submarine depth are discrete operational states. Models may be vertically offset for readability, but world-space height is not authoritative distance or terrain clearance.

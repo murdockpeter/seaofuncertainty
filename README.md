@@ -66,14 +66,19 @@ Scenario metadata and formation definitions live in `Assets/Resources/Data/scena
 
 Use **Sea of Uncertainty → Generate Print-and-Play Proofs** to regenerate formation cards, counters and Contacts, operational tracks, both complete card decks, and scenario/player aids beneath `SeaOfUncertainty/generated/print-and-play`. These HTML files are content proofs; final bleed, safe-area, licensing, and imposition work remains open.
 
-The runtime presentation now uses Unity UI Toolkit. Shared component styling and design tokens live in `Assets/Resources/UI/SeaTheme.uss`; the old immediate-mode controller remains disabled as a development fallback. The retained-mode layout scales at smaller desktop resolutions, expands its map on ultrawide displays, and responds to live window-size changes.
+The runtime presentation uses Unity UI Toolkit. Shared component styling and design tokens live in `Assets/Resources/UI/SeaTheme.uss`. Orders use the active formation's contextual palette on the 3D map, with a compact Time/readiness/command-status strip. Formation details and the friendly Ready queue open on demand; there are no permanent sidebars or duplicate action panel. The legacy immediate-mode interface has been removed.
 
 The operation-mode screen supports **Solo vs AI** (player commands Blue) and **Local Hotseat**. The prototype AI controls Red through the same continuous Ready-Time scheduler and legal action methods as a human. Its decisions use only Red formations, Red-owned Contacts, public terrain, and the public objective; it receives no combat or initiative bonuses.
 
 Keyboard controls:
 
 - `Tab` and `Shift+Tab`: move through controls;
-- `1`–`5`: Move, Search, Strike, Recover, and Hold;
+- `Space` on the idle map: open the active formation's order palette;
+- `1`–`3`: open Move, Search, and Strike posture/weapon choices;
+- `4`–`9`: Recover, Hold, Screen, Support, Replenish, and Synchronized Strike;
+- `I`: open the formation inspector;
+- `T`: open the friendly Ready queue; select a row to inspect that formation;
+- `H` / `L`: open cards / the side-visible event log;
 - `G`: toggle the persistent map hex grid;
 - `C`: focus the active formation;
 - `O`: focus the operational objective;
@@ -81,9 +86,11 @@ Keyboard controls:
 - `F9` / `F10`: save and recall a command-camera view;
 - arrow keys while the tactical map is focused: move the map cursor;
 - `Enter` or `Space`: commit the highlighted map selection;
-- `Escape`: close an overlay or open the operation menu.
+- `Escape`: close an overlay, cancel map targeting, or open the operation menu.
 
 3D map mouse controls:
+
+Markers use compact badges at rest. Hover a badge or model for its friendly formation or owned Contact report; hover the gold objective reticle for scoring rules and range. **O** opens the same objective details by keyboard, and the map cursor exposes details as it moves. Hover cards do not block movement or targeting clicks.
 
 - mouse wheel: bounded zoom;
 - middle-button drag: pan;
@@ -101,7 +108,7 @@ Full keyboard camera controls work anywhere on the operation screen when no moda
 
 The 3D theater uses a physical Earth-radius spherical cap at the scenario's nautical-mile scale, plus multi-scale procedural surface normals, sun glint, depth-driven ocean coloration, subtle current bands, coastline foam, horizon haze, moving cloud shadows, and data-driven weather hooks. Geographic theaters can render tiled measured elevation along the globe normal; the Luzon theater uses a baked two-arc-minute subset of NOAA NCEI ETOPO 2022 for both seafloor color zones and land relief, with 4x land vertical exaggeration for legibility at the 20-NM hex scale. Curved picking, overlays, formations, and movement remain aligned to the authoritative hex grid; map-space labels and distinct port/airfield geometry remain presentation-only and do not alter hex terrain or rules.
 
-The command bar's **HEXES OFF / HEXES ON** control provides the same persistent grid toggle. The overlay uses traditional flat-top hexes at the authoritative 20-NM scale, and the visibility preference is saved between sessions.
+The operation menu's **SHOW HEX GRID / HIDE HEX GRID** control provides the same persistent grid toggle. The overlay uses traditional flat-top hexes at the authoritative 20-NM scale, and the visibility preference is saved between sessions.
 
 Gamepad and joystick UI navigation uses dedicated axes, configurable dead-zone filtering, and one-step focus movement after the stick recenters.
 
@@ -111,11 +118,11 @@ The public-prototype presentation is code-owned: procedural formation models, ma
 
 ## Design documents
 
-- 1.0 beta closure plan and primary development backlog: `TODO.md`
+- Active short-term work queue: [TODO.md](TODO.md)
 - Approved 20 nm prototype rulings: `design/20NM_SCALE_RULES.md`
 - 3D MVP budgets and acceptance: `design/3D_MVP_BUDGETS_AND_ACCEPTANCE.md`
 - 3D MVP go/no-go review: `design/3D_GO_NO_GO_REVIEW.md`
-- Incremental graphics polish backlog: `design/GRAPHICS_INCREMENTAL_AWESOMENESS.md`
+- Historical beta, graphics, UI/accessibility, and alpha checklists: [archive index](design/archive/README.md)
 
 Regenerate the packaged Luzon coastline from the existing local campaign polygon library with:
 

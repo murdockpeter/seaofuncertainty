@@ -30,6 +30,24 @@ namespace SeaOfUncertainty.Prototype
         private readonly Label headingReadout;
         private bool reducedMotion;
         private Vector2 edgePanInput;
+        private readonly ObjectiveReticle objectiveMarker;
+        private readonly VisualElement markerCard;
+        private readonly Label markerCategory;
+        private readonly Label markerTitle;
+        private readonly Label markerMetadata;
+        private readonly Label markerDescription;
+        private bool keyboardInspection;
+        private HexCoord? inspectedHex;
+        private Vector2? hoverPoint;
+        private Vector2 markerCardAnchor;
+
+#if UNITY_EDITOR
+        public bool EditorMarkerCardVisible => markerCard.style.display.value == DisplayStyle.Flex;
+        public string EditorMarkerCardText => string.Join("\n", new[] { markerCategory.text, markerTitle.text, markerMetadata.text, markerDescription.text });
+        public void EditorInspectHex(HexCoord hex) => InspectHex(hex);
+        public void EditorClearMarkerInfo() => HideMarkerInfo();
+        public static Rect EditorMarkerCardBounds(Vector2 anchor, Vector2 mapSize, Vector2 cardSize) => MarkerCardBounds(anchor, mapSize, cardSize);
+#endif
 
         private sealed class MarkerLayout
         {
@@ -37,6 +55,49 @@ namespace SeaOfUncertainty.Prototype
             public Vector2 Anchor;
             public Vector2 Size;
             public int Priority;
+            public Rect Bounds;
+            public HexCoord Hex;
+            public FormationState Formation;
+            public ContactState Contact;
+        }
+
+        private sealed class ObjectiveReticle : VisualElement
+        {
+            public bool Emphasized;
+
+            public ObjectiveReticle()
+            {
+                name = "objective-reticle";
+                pickingMode = PickingMode.Ignore;
+                AddToClassList("objective-reticle");
+                generateVisualContent += context =>
+                {
+                    Painter2D painter = context.painter2D;
+                    Vector2 center = contentRect.center;
+                    painter.strokeColor = new Color(1f, .76f, .32f, Emphasized ? 1f : .8f);
+                    painter.lineWidth = Emphasized ? 2f : 1.3f;
+                    float radius = Emphasized ? 14f : 11f;
+                    // A small compass diamond and four separated brackets keep the map visible.
+                    painter.BeginPath();
+                    painter.MoveTo(center + new Vector2(0, -6));
+                    painter.LineTo(center + new Vector2(6, 0));
+                    painter.LineTo(center + new Vector2(0, 6));
+                    painter.LineTo(center + new Vector2(-6, 0));
+                    painter.ClosePath(); painter.Stroke();
+                    for (int quadrant = 0; quadrant < 4; quadrant++)
+                    {
+                        float angle = quadrant * Mathf.PI * .5f;
+                        Vector2 radial = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                        Vector2 tangent = new Vector2(-radial.y, radial.x);
+                        painter.BeginPath();
+                        painter.MoveTo(center + radial * (radius - 3f) - tangent * 4f);
+                        painter.LineTo(center + radial * radius - tangent * 4f);
+                        painter.LineTo(center + radial * radius + tangent * 4f);
+                        painter.LineTo(center + radial * (radius - 3f) + tangent * 4f);
+                        painter.Stroke();
+                    }
+                };
+            }
         }
 
         private sealed class MarkerLeaderOverlay : VisualElement
@@ -103,6 +164,19 @@ namespace SeaOfUncertainty.Prototype
             Add(commandHud);
             markerLeaders = new MarkerLeaderOverlay();
             Add(markerLeaders);
+            objectiveMarker = new ObjectiveReticle();
+            objectiveMarker.style.display = DisplayStyle.None;
+            Add(objectiveMarker);
+            markerCard = new VisualElement { name = "map-marker-card", pickingMode = PickingMode.Ignore };
+            markerCard.AddToClassList("map-marker-card");
+            markerCategory = MarkerCardLabel("marker-card-category");
+            markerTitle = MarkerCardLabel("marker-card-title");
+            markerMetadata = MarkerCardLabel("marker-card-metadata");
+            markerDescription = MarkerCardLabel("marker-card-description");
+            markerCard.Add(markerCategory); markerCard.Add(markerTitle); markerCard.Add(markerMetadata); markerCard.Add(markerDescription);
+            markerCard.style.display = DisplayStyle.None;
+            markerCard.RegisterCallback<GeometryChangedEvent>(_ => PositionMarkerCard(markerCardAnchor));
+            Add(markerCard);
             RegisterCallback<AttachToPanelEvent>(_ => EnsurePresentation());
             RegisterCallback<DetachFromPanelEvent>(_ => DisposePresentation());
             RegisterCallback<GeometryChangedEvent>(evt =>
@@ -113,11 +187,11 @@ namespace SeaOfUncertainty.Prototype
             RegisterCallback<PointerDownEvent>(OnPointerDown);
             RegisterCallback<PointerMoveEvent>(OnPointerMove);
             RegisterCallback<PointerUpEvent>(OnPointerUp);
-            RegisterCallback<PointerLeaveEvent>(_ => { edgePanInput = Vector2.zero; ContactHovered?.Invoke(null); presentation?.SetHoverHex(null); UpdateReadout(null); });
+            RegisterCallback<PointerLeaveEvent>(_ => { edgePanInput = Vector2.zero; hoverPoint = null; ContactHovered?.Invoke(null); if (!keyboardInspection) HideMarkerInfo(); presentation?.SetHoverHex(null); UpdateReadout(null); });
             RegisterCallback<WheelEvent>(OnWheel);
             RegisterCallback<KeyDownEvent>(OnKeyDown);
             RegisterCallback<KeyUpEvent>(OnKeyUp);
-            RegisterCallback<FocusOutEvent>(_ => cameraKeys.Clear());
+            RegisterCallback<FocusOutEvent>(_ => { cameraKeys.Clear(); HideMarkerInfo(); });
             RegisterCallback<NavigationSubmitEvent>(_ => SubmitCursor());
             schedule.Execute(TickPresentation).Every(16);
         }
@@ -130,6 +204,7 @@ namespace SeaOfUncertainty.Prototype
             searchMode = currentSearchMode;
             salvo = currentSalvo;
             reducedMotion = useReducedMotion;
+            HideMarkerInfo();
             if (game?.Active != null) keyboardHex = game.Active.Position;
             EnsurePresentation();
             presentation?.SetState(game, actionMode, moveMode, searchMode, salvo, reducedMotion, showHexGrid);
@@ -164,12 +239,14 @@ namespace SeaOfUncertainty.Prototype
             DeclutteredMarkerCount = 0;
             MarkerLeaderLineCount = 0;
             LabelsUseDistanceFade = false;
-            if (game?.Active == null || presentation == null || contentRect.width < 10f) return;
+            objectiveMarker.style.display = DisplayStyle.None;
+            if (game?.Active == null || presentation == null || contentRect.width < 10f) { HideMarkerInfo(); return; }
             Side viewer = game.Active.Side;
             foreach (FormationState formation in game.Formations.Where(f => !f.IsDestroyed && f.Side == viewer))
             {
                 bool active = formation == game.Active;
-                Label marker = Marker(formation.Position, active ? "ACTIVE\n" + Code(formation.Kind) : Code(formation.Kind), active ? 100 : 50, active ? new Vector2(72f, 58f) : new Vector2(54f, 42f), "map-marker", formation.Side == Side.Blue ? "blue" : "red");
+                Label marker = Marker(formation.Position, Code(formation.Kind), active ? 100 : 50, active ? new Vector2(34f, 28f) : new Vector2(28f, 24f), "map-marker", formation.Side == Side.Blue ? "blue" : "red");
+                markerLayouts.Last().Formation = formation;
                 if (active) marker.AddToClassList("active-formation");
                 marker.tooltip = $"{formation.Name}\n{formation.Kind} • Ready T{formation.ReadyTime:00}\n{formation.Cohesion}{(active ? "\nACTIVE — right-click for orders" : string.Empty)}";
             }
@@ -178,19 +255,29 @@ namespace SeaOfUncertainty.Prototype
                 bool eligible = actionMode == ToolkitActionMode.Search ? SearchEligible(contact) : actionMode == ToolkitActionMode.Strike && StrikeEligible(contact);
                 FormationState target = game.Find(contact.TargetId);
                 string contactCode = contact.Identity == IdentityQuality.Identified && target != null ? Code(target.Kind) : "?";
-                Label marker = Marker(contact.LastKnownPosition, $"◇ {contactCode}\n{contact.Location.ToString()[0]} A{contact.Age}", eligible ? 88 : 76, new Vector2(64f, 52f), "map-marker", "contact");
+                Label marker = Marker(contact.LastKnownPosition, "◇ " + contactCode, eligible ? 88 : 76, new Vector2(34f, 26f), "map-marker", "contact");
+                markerLayouts.Last().Contact = contact;
                 if (eligible) marker.AddToClassList("eligible");
                 int radius = Rules.ContactUncertaintyRadius(contact);
                 int possibleHexes = game.ContactPossibleHexes(contact).Count;
                 marker.tooltip = $"{contact.Summary}\nLast known {contact.LastKnownPosition}\nPossible area: {possibleHexes} hex{(possibleHexes == 1 ? string.Empty : "es")} within radius {radius} • Age or observed movement expands the estimate\n{(eligible ? "Eligible — click to commit" : "Not eligible for selected action")}";
                 if (contact.HasContradictoryPosition)
                 {
-                    Label contradictory = Marker(contact.ContradictoryPosition, "?", eligible ? 84 : 72, new Vector2(64f, 52f), "map-marker", "contact");
+                    Label contradictory = Marker(contact.ContradictoryPosition, "?", eligible ? 84 : 72, new Vector2(28f, 24f), "map-marker", "contact");
+                    markerLayouts.Last().Contact = contact;
                     if (eligible) contradictory.AddToClassList("eligible");
                     contradictory.tooltip = $"CONTRADICTORY REPORT\nSecond possible fix {contact.ContradictoryPosition}\nSelect either marker to inspect the shared possible area.";
                 }
             }
             LayoutMarkers();
+            Vector2 objective = presentation.Project(game.Area.Objective, contentRect);
+            objectiveMarker.style.display = contentRect.Contains(objective) ? DisplayStyle.Flex : DisplayStyle.None;
+            objectiveMarker.style.left = objective.x - 18f;
+            objectiveMarker.style.top = objective.y - 18f;
+            objectiveMarker.BringToFront();
+            markerCard.BringToFront();
+            if (keyboardInspection && inspectedHex.HasValue) ShowHexInfo(inspectedHex.Value, true);
+            else if (hoverPoint.HasValue) UpdatePointerInfo(hoverPoint.Value);
         }
 
         private Label Marker(HexCoord hex, string text, int priority, Vector2 size, params string[] classes)
@@ -200,7 +287,7 @@ namespace SeaOfUncertainty.Prototype
             foreach (string className in classes) label.AddToClassList(className);
             Add(label);
             markers.Add(label);
-            markerLayouts.Add(new MarkerLayout { Label = label, Anchor = center, Size = size, Priority = priority });
+            markerLayouts.Add(new MarkerLayout { Label = label, Anchor = center, Size = size, Priority = priority, Hex = hex });
             return label;
         }
 
@@ -234,6 +321,7 @@ namespace SeaOfUncertainty.Prototype
                 occupied.Add(chosen);
                 marker.Label.style.left = chosen.x;
                 marker.Label.style.top = chosen.y;
+                marker.Bounds = chosen;
                 float priorityFloor = marker.Priority >= 100 ? .9f : marker.Priority >= 70 ? .68f : .42f;
                 float opacity = Mathf.Lerp(priorityFloor, 1f, distanceVisibility);
                 marker.Label.style.opacity = opacity;
@@ -256,11 +344,123 @@ namespace SeaOfUncertainty.Prototype
             return x * y;
         }
 
+        private static Label MarkerCardLabel(string className)
+        {
+            var label = new Label { pickingMode = PickingMode.Ignore };
+            label.AddToClassList(className);
+            return label;
+        }
+
+        private void UpdatePointerInfo(Vector2 point)
+        {
+            if (game?.Active == null || presentation == null || dragButton >= 0 || cameraKeys.Count > 0 || edgePanInput.sqrMagnitude > .01f) { HideMarkerInfo(); return; }
+            keyboardInspection = false;
+            hoverPoint = point;
+            MarkerLayout marker = markerLayouts.Where(item => item.Bounds.Contains(point) || Vector2.Distance(item.Anchor, point) <= 20f)
+                .OrderByDescending(item => item.Bounds.Contains(point))
+                .ThenBy(item => Vector2.Distance(item.Bounds.Contains(point) ? item.Bounds.center : item.Anchor, point))
+                .ThenByDescending(item => item.Priority).FirstOrDefault();
+            foreach (MarkerLayout item in markerLayouts) item.Label.EnableInClassList("marker-hovered", item == marker);
+            if (marker != null)
+            {
+                MapMarkerDetails details = marker.Formation != null ? MapMarkerDetails.Formation(game, marker.Formation) : MapMarkerDetails.Contact(game, marker.Contact, marker.Hex);
+                ShowMarkerInfo(details, marker.Bounds.center, false);
+                return;
+            }
+            Vector2 objective = presentation.Project(game.Area.Objective, contentRect);
+            if (Vector2.Distance(objective, point) <= 28f || (presentation.TryPickHex(point, contentRect, out HexCoord hex) && hex.Equals(game.Area.Objective)))
+            {
+                ShowMarkerInfo(MapMarkerDetails.Objective(game), objective, true);
+                return;
+            }
+            OperationalLocationDefinition location = game.Area.Locations.OrderBy(item => Vector2.Distance(presentation.Project(item.Hex, contentRect), point)).FirstOrDefault();
+            if (location != null && Vector2.Distance(presentation.Project(location.Hex, contentRect), point) <= 22f)
+                ShowMarkerInfo(MapMarkerDetails.Location(game, location), presentation.Project(location.Hex, contentRect), false);
+            else HideMarkerInfo();
+        }
+
+        private void InspectHex(HexCoord hex)
+        {
+            if (game?.Active == null || !game.Area.Contains(hex)) { HideMarkerInfo(); return; }
+            keyboardHex = hex;
+            keyboardInspection = true;
+            inspectedHex = hex;
+            hoverPoint = null;
+            presentation?.SetHoverHex(hex);
+            UpdateReadout(hex);
+            ShowHexInfo(hex, true);
+        }
+
+        private void ShowHexInfo(HexCoord hex, bool preferObjective)
+        {
+            Vector2 anchor = presentation == null ? contentRect.center : presentation.Project(hex, contentRect);
+            if (preferObjective && hex.Equals(game.Area.Objective)) { ShowMarkerInfo(MapMarkerDetails.Objective(game), anchor, true); return; }
+            FormationState formation = game.Formations.FirstOrDefault(item => item.Side == game.Active.Side && !item.IsDestroyed && item.Position.Equals(hex));
+            if (formation != null) { ShowMarkerInfo(MapMarkerDetails.Formation(game, formation), anchor, false); return; }
+            ContactState contact = game.Contacts.FirstOrDefault(item => item.Owner == game.Active.Side && !item.IsLost && (item.LastKnownPosition.Equals(hex) || (item.HasContradictoryPosition && item.ContradictoryPosition.Equals(hex))));
+            if (contact != null) { ShowMarkerInfo(MapMarkerDetails.Contact(game, contact, hex), anchor, false); return; }
+            OperationalLocationDefinition location = game.Area.Locations.FirstOrDefault(item => item.Hex.Equals(hex));
+            if (location != null) ShowMarkerInfo(MapMarkerDetails.Location(game, location), anchor, false);
+            else HideMarkerInfo();
+        }
+
+        private void ShowMarkerInfo(MapMarkerDetails details, Vector2 anchor, bool objective)
+        {
+            if (details == null) { HideMarkerInfo(); return; }
+            markerCategory.text = details.Category;
+            markerTitle.text = details.Title;
+            markerMetadata.text = details.Metadata;
+            markerDescription.text = details.Description;
+            markerCard.EnableInClassList("objective-info", objective);
+            markerCard.EnableInClassList("contact-info", details.Category == "CONTACT REPORT");
+            markerCard.style.display = DisplayStyle.Flex;
+            objectiveMarker.Emphasized = objective;
+            objectiveMarker.MarkDirtyRepaint();
+            presentation?.SetObjectiveEmphasis(objective);
+            PositionMarkerCard(anchor);
+            markerCard.BringToFront();
+        }
+
+        private void PositionMarkerCard(Vector2 anchor)
+        {
+            markerCardAnchor = anchor;
+            float width = Mathf.Min(360f, Mathf.Max(80f, contentRect.width - 24f));
+            float height = markerCard.resolvedStyle.height;
+            if (float.IsNaN(height) || height < 1f) height = 230f;
+            Rect bounds = MarkerCardBounds(anchor, contentRect.size, new Vector2(width, height));
+            markerCard.style.width = bounds.width;
+            markerCard.style.left = bounds.x;
+            markerCard.style.top = bounds.y;
+            markerCard.style.maxHeight = Mathf.Max(0f, contentRect.height - 64f);
+        }
+
+        private static Rect MarkerCardBounds(Vector2 anchor, Vector2 mapSize, Vector2 cardSize)
+        {
+            float width = Mathf.Min(cardSize.x, Mathf.Max(0f, mapSize.x - 24f));
+            float height = Mathf.Min(cardSize.y, Mathf.Max(0f, mapSize.y - 64f));
+            float left = anchor.x + 24f;
+            if (left + width > mapSize.x - 12f) left = anchor.x - width - 24f;
+            return new Rect(Mathf.Clamp(left, 12f, Mathf.Max(12f, mapSize.x - width - 12f)), Mathf.Clamp(anchor.y - 28f, 52f, Mathf.Max(52f, mapSize.y - height - 12f)), width, height);
+        }
+
+        private void HideMarkerInfo()
+        {
+            markerCard.style.display = DisplayStyle.None;
+            keyboardInspection = false;
+            inspectedHex = null;
+            hoverPoint = null;
+            foreach (MarkerLayout marker in markerLayouts) marker.Label.RemoveFromClassList("marker-hovered");
+            objectiveMarker.Emphasized = false;
+            objectiveMarker.MarkDirtyRepaint();
+            presentation?.SetObjectiveEmphasis(false);
+        }
+
         private void OnPointerDown(PointerDownEvent evt)
         {
             Focus();
             if (evt.button == 1 || evt.button == 2)
             {
+                HideMarkerInfo();
                 dragButton = evt.button;
                 activeFormationContextCandidate = evt.button == 1 && IsOverActiveFormation(evt.localPosition);
                 lastPointer = evt.localPosition;
@@ -305,6 +505,7 @@ namespace SeaOfUncertainty.Prototype
                 return;
             }
             UpdateEdgePan(evt.localPosition);
+            UpdatePointerInfo(evt.localPosition);
             if (presentation != null && presentation.TryPickHex(evt.localPosition, contentRect, out HexCoord hoverHex))
             {
                 presentation.SetHoverHex(hoverHex);
@@ -336,6 +537,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void OnWheel(WheelEvent evt)
         {
+            HideMarkerInfo();
             presentation?.Zoom(evt.delta.y);
             UpdateMarkers();
             UpdateReadout(null);
@@ -359,9 +561,7 @@ namespace SeaOfUncertainty.Prototype
             else if (evt.keyCode == KeyCode.Home) { presentation?.ResetCamera(); UpdateMarkers(); UpdateReadout(null); evt.StopPropagation(); return; }
             else if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.Space) { SubmitCursor(); evt.StopPropagation(); return; }
             else return;
-            keyboardHex = new HexCoord(Mathf.Clamp(q, 0, game.Area.Width - 1), Mathf.Clamp(r, 0, game.Area.Height - 1));
-            presentation?.SetHoverHex(keyboardHex);
-            UpdateReadout(keyboardHex);
+            InspectHex(new HexCoord(Mathf.Clamp(q, 0, game.Area.Width - 1), Mathf.Clamp(r, 0, game.Area.Height - 1)));
             evt.StopPropagation();
         }
 
@@ -374,7 +574,7 @@ namespace SeaOfUncertainty.Prototype
         public bool SetCameraKey(KeyCode key, bool pressed)
         {
             if (!IsCameraKey(key)) return false;
-            if (pressed) cameraKeys.Add(key); else cameraKeys.Remove(key);
+            if (pressed) { HideMarkerInfo(); cameraKeys.Add(key); } else cameraKeys.Remove(key);
             return true;
         }
 
@@ -391,14 +591,14 @@ namespace SeaOfUncertainty.Prototype
         {
             if (game?.Active == null) return;
             presentation?.FocusHex(game.Active.Position);
-            UpdateMarkers(); UpdateReadout(game.Active.Position);
+            UpdateMarkers(); InspectHex(game.Active.Position);
         }
 
         public void FocusObjective()
         {
             if (game?.Area == null) return;
             presentation?.FocusHex(game.Area.Objective);
-            UpdateMarkers(); UpdateReadout(game.Area.Objective);
+            UpdateMarkers(); InspectHex(game.Area.Objective);
         }
 
         public void SaveCameraView() => presentation?.SaveCameraView();
@@ -465,7 +665,7 @@ namespace SeaOfUncertainty.Prototype
         public void MoveCursor(int qDelta, int rDelta)
         {
             if (game?.Area == null) return;
-            keyboardHex = new HexCoord(Mathf.Clamp(keyboardHex.Q + qDelta, 0, game.Area.Width - 1), Mathf.Clamp(keyboardHex.R + rDelta, 0, game.Area.Height - 1));
+            InspectHex(new HexCoord(Mathf.Clamp(keyboardHex.Q + qDelta, 0, game.Area.Width - 1), Mathf.Clamp(keyboardHex.R + rDelta, 0, game.Area.Height - 1)));
         }
 
         public void SubmitCursor()

@@ -79,20 +79,18 @@
 .button.danger-button { background-color: rgb(102, 35, 34); border-bottom-color: rgb(234, 79, 70); }
 .button.selected { background-color: rgb(19, 126, 133); color: white; }
 
-.workspace { flex-grow: 1; flex-direction: row; padding: 10px; min-height: 0; }
-.timeline { width: 235px; min-width: 215px; margin-right: 10px; padding: 12px; overflow: hidden; }
-.map-column { flex-grow: 1; min-width: 500px; position: relative; }
-.dossier { width: 310px; min-width: 275px; margin-left: 10px; padding: 12px; overflow: hidden; }
-.dossier-scroll { flex-grow: 1; }
-.dossier-summary { margin-top: 7px; padding-top: 5px; border-top-width: 1px; border-top-color: rgba(52, 139, 150, 0.28); }
-.bottom-deck { height: 225px; min-height: 205px; flex-direction: row; padding: 0 10px 10px 10px; }
-.command-dock { height: 205px; min-height: 185px; }
-.command-dock .actions { margin-right: 0; }
-.actions { flex-grow: 1; min-width: 570px; margin-right: 10px; padding: 10px 12px; overflow: hidden; }
-.action-row { width: 100%; }
-.action-row > .button { flex-grow: 1; min-width: 0; height: 38px; margin: 3px; }
-.command-summary { height: 18px; }
-.action-preview { font-size: 12px; }
+.workspace { flex-grow: 1; flex-direction: row; padding: 0; min-height: 0; }
+.map-column { flex-grow: 1; min-width: 0; position: relative; }
+.command-status { flex-direction: row; flex-wrap: wrap; align-items: center; padding: 8px 12px; background-color: rgba(7, 27, 38, 0.98); border-bottom-width: 1px; border-bottom-color: rgba(52, 155, 166, 0.5); }
+.command-status-summary { flex-grow: 1; flex-shrink: 1; min-width: 280px; padding: 4px 8px; }
+.command-status-summary .subheading { font-size: 16px; white-space: normal; }
+.command-status-controls { flex-wrap: wrap; flex-shrink: 1; }
+.command-status-controls .button { height: 34px; min-width: 0; padding: 4px 10px; font-size: 11px; }
+.command-summary { white-space: normal; }
+.order-guidance { flex-shrink: 0; padding: 6px 16px; background-color: rgba(7, 27, 38, 0.96); }
+.order-guidance .button { align-self: flex-start; height: 30px; font-size: 11px; }
+.action-preview { font-size: 12px; white-space: normal; }
+.inspector-scroll, .ready-queue-scroll { flex-grow: 1; flex-shrink: 1; min-height: 80px; }
 .timeline-row {
     height: 56px;
     margin-top: 4px;
@@ -254,23 +252,6 @@
 .physical-card-action { width: 100%; min-width: 0; height: 38px; margin: 9px 0 0 0; font-size: 11px; }
 .empty-hand { width: 520px; max-width: 90%; margin-top: 80px; padding: 30px; align-items: center; background-color: rgba(5, 22, 27, 0.74); border-top-width: 1px; border-bottom-width: 1px; border-top-color: rgba(112, 186, 151, 0.35); border-bottom-color: rgba(112, 186, 151, 0.35); }
 .table-access { border-bottom-color: rgb(129, 201, 110); }
-.map-hud-toggle {
-    position: absolute;
-    right: 14px;
-    top: 50px;
-    min-width: 184px;
-    height: 34px;
-    background-color: rgba(5, 29, 37, 0.88);
-    border-bottom-color: rgb(129, 201, 110);
-    font-size: 10px;
-}
-.hud-hidden > .topbar { display: none; }
-.hud-hidden > .bottom-deck { display: none; }
-.hud-hidden > .audio-description { display: none; }
-.hud-hidden .workspace { padding: 0; }
-.hud-hidden .timeline, .hud-hidden .dossier, .hud-hidden .map-help { display: none; }
-.hud-hidden .map { border-top-width: 0; border-right-width: 0; border-bottom-width: 0; border-left-width: 0; }
-.hud-hidden .map-hud-toggle { top: 46px; right: 12px; }
 .scroll { flex-grow: 1; }
 .feedback-field { height: 92px; margin: 5px; background-color: rgb(5, 29, 37); color: white; }
 .settings-scroll { flex-grow: 1; }
@@ -324,37 +305,29 @@
     font-size: 11px;
     -unity-font-style: bold;
 }
-.map-marker { position: absolute; width: 54px; height: 42px; background-color: rgba(5, 35, 43, 0.95); color: white; -unity-text-align: middle-center; -unity-font-style: bold; border-left-width: 4px; }
-.map-marker.blue { border-left-color: rgb(45, 177, 211); }
-.map-marker.red { border-left-color: rgb(229, 71, 63); }
-.map-marker.active-formation {
-    width: 72px;
-    height: 58px;
-    margin-left: -9px;
-    margin-top: -8px;
-    background-color: rgba(91, 53, 9, 0.96);
-    color: rgb(255, 228, 139);
-    border-top-width: 2px;
-    border-right-width: 2px;
-    border-bottom-width: 2px;
-    border-left-width: 5px;
-    border-top-color: rgb(255, 190, 54);
-    border-right-color: rgb(255, 190, 54);
-    border-bottom-color: rgb(255, 190, 54);
-    border-left-color: rgb(255, 230, 136);
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
-    font-size: 11px;
-}
-.map-marker.contact { width: 64px; height: 52px; border-top-width: 2px; border-right-width: 2px; border-bottom-width: 2px; border-left-width: 2px; border-top-color: rgb(238, 126, 61); border-right-color: rgb(238, 126, 61); border-bottom-color: rgb(238, 126, 61); border-left-color: rgb(238, 126, 61); border-top-left-radius: 28px; border-top-right-radius: 28px; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; background-color: rgba(63, 25, 17, 0.68); }
-.map-marker.eligible { border-top-color: rgb(75, 244, 177); border-right-color: rgb(75, 244, 177); border-bottom-color: rgb(75, 244, 177); border-left-color: rgb(75, 244, 177); }
+.map-marker { position: absolute; width: 28px; height: 24px; background-color: rgba(5, 27, 35, 0.82); color: rgb(209, 236, 240); -unity-text-align: middle-center; -unity-font-style: bold; font-size: 10px; border-left-width: 2px; border-top-left-radius: 5px; border-top-right-radius: 5px; border-bottom-left-radius: 5px; border-bottom-right-radius: 5px; }
+.map-marker.blue { border-left-color: rgb(80, 205, 224); }
+.map-marker.red { border-left-color: rgb(239, 114, 98); }
+.map-marker.active-formation { width: 34px; height: 28px; background-color: rgba(71, 47, 14, 0.9); color: rgb(255, 226, 154); border-left-color: rgb(255, 198, 77); border-top-width: 1px; border-bottom-width: 1px; border-right-width: 1px; border-top-color: rgba(255, 198, 77, 0.6); border-bottom-color: rgba(255, 198, 77, 0.6); border-right-color: rgba(255, 198, 77, 0.6); }
+.map-marker.contact { width: 34px; height: 26px; border-left-color: rgb(238, 149, 92); color: rgb(255, 209, 169); background-color: rgba(49, 29, 23, 0.84); }
+.map-marker.eligible { border-bottom-width: 2px; border-bottom-color: rgb(92, 237, 171); }
+.map-marker.marker-hovered { background-color: rgb(21, 64, 75); color: white; }
+.objective-reticle { position: absolute; width: 36px; height: 36px; }
+.map-marker-card { position: absolute; width: 320px; padding: 13px 16px; overflow: hidden; background-color: rgba(5, 24, 33, 0.97); border-left-width: 3px; border-left-color: rgb(80, 205, 224); border-top-width: 1px; border-bottom-width: 1px; border-right-width: 1px; border-top-color: rgba(111, 183, 194, 0.45); border-bottom-color: rgba(111, 183, 194, 0.25); border-right-color: rgba(111, 183, 194, 0.25); border-top-left-radius: 8px; border-top-right-radius: 8px; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+.map-marker-card.objective-info { border-left-color: rgb(255, 195, 81); border-top-color: rgba(255, 195, 81, 0.5); }
+.map-marker-card.contact-info { border-left-color: rgb(238, 149, 92); }
+.marker-card-category { font-size: 11px; letter-spacing: 1px; color: rgb(109, 209, 222); -unity-font-style: bold; white-space: normal; }
+.objective-info .marker-card-category { color: rgb(255, 205, 109); }
+.contact-info .marker-card-category { color: rgb(255, 185, 129); }
+.marker-card-title { margin-top: 5px; font-size: 20px; color: rgb(237, 246, 247); -unity-font-style: bold; white-space: normal; }
+.marker-card-metadata { margin-top: 6px; font-size: 12px; color: rgb(149, 185, 197); white-space: normal; }
+.marker-card-description { margin-top: 9px; padding-top: 8px; border-top-width: 1px; border-top-color: rgba(112, 170, 181, 0.22); font-size: 14px; color: rgb(201, 222, 229); white-space: normal; }
+.large-text .marker-card-title { font-size: 20px; }
+.large-text .marker-card-description { font-size: 15px; }
+.extra-large-text .marker-card-title { font-size: 23px; }
+.extra-large-text .marker-card-description { font-size: 18px; }
 
-.compact .dossier { display: none; }
-.compact .timeline { width: 220px; min-width: 200px; }
 .compact .brand { font-size: 21px; }
-.short .bottom-deck { height: 205px; min-height: 190px; }
 .short .timeline-row { height: 52px; font-size: 11px; }
 
 .high-contrast .blue-accent { color: rgb(34, 220, 255); }

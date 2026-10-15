@@ -77,6 +77,8 @@ namespace SeaOfUncertainty.Prototype
         private LineRenderer hoverRing;
         private LineRenderer previewLine;
         private LineRenderer objectiveRing;
+        private bool objectiveEmphasized;
+        public bool ObjectiveEmphasized => objectiveEmphasized;
         private LineRenderer activeFormationRing;
         private float activePulsePhase;
         private Vector3 focus;
@@ -128,6 +130,7 @@ namespace SeaOfUncertainty.Prototype
         }
         private sealed class GeographicLabel
         {
+            public bool UseHoverCard;
             public Transform Transform;
             public TextMesh Text;
             public LineRenderer Leader;
@@ -460,6 +463,7 @@ namespace SeaOfUncertainty.Prototype
             reducedMotion = useReducedMotion;
             if (whitecapRoot != null) whitecapRoot.gameObject.SetActive(!reducedMotion);
             showPermanentGrid = showGrid;
+            objectiveEmphasized = false;
             UpdateHexStyles();
             RebuildStateObjects();
             UpdateObjectiveControl();
@@ -935,7 +939,7 @@ namespace SeaOfUncertainty.Prototype
                     }
                 }
             }
-            objectiveRing = Ring("Inner Sea Objective", area.Objective, 1.1f, new Color(1f, .62f, .12f, 1f), .09f);
+            objectiveRing = Ring("Operational Objective", area.Objective, .68f, new Color(1f, .73f, .28f, .4f), .035f);
             objectiveRing.transform.SetParent(root.transform, true);
         }
 
@@ -1418,6 +1422,7 @@ namespace SeaOfUncertainty.Prototype
             billboardLabels.Add(labelObject.transform);
             geographicLabels.Add(new GeographicLabel
             {
+                UseHoverCard = location.Kind == LocationKind.Objective && location.Hex.Equals(area.Objective),
                 Transform = labelObject.transform,
                 Text = text,
                 Leader = leader,
@@ -1562,8 +1567,8 @@ namespace SeaOfUncertainty.Prototype
                     }
                     if (pair.Key.Equals(area.Objective))
                     {
-                        color = Color.Lerp(color, new Color(1f, .72f, .16f, 1f), .65f);
-                        width = Mathf.Max(width, .075f);
+                        color = Color.Lerp(color, new Color(1f, .73f, .28f, .45f), .35f);
+                        width = Mathf.Max(width, .035f);
                     }
                 }
                 pair.Value.startColor = pair.Value.endColor = color;
@@ -2303,15 +2308,19 @@ namespace SeaOfUncertainty.Prototype
         // This is the correct GLSL-equivalent: normalize against the edges first, then smooth.
         private static float EdgeSmoothStep(float edge0, float edge1, float x) => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(edge0, edge1, x));
 
+        public void SetObjectiveEmphasis(bool emphasized)
+        {
+            objectiveEmphasized = emphasized;
+            UpdateObjectiveControl();
+        }
+
         private void UpdateObjectiveControl()
         {
             if (objectiveRing == null || game == null) return;
-            Side viewingSide = game.Active?.Side ?? Side.Blue;
-            bool blue = viewingSide == Side.Blue && game.HasControlPresence(Side.Blue, area.Objective);
-            bool red = viewingSide == Side.Red && game.HasControlPresence(Side.Red, area.Objective);
-            Color color = blue && !red ? blueMaterial.color : red && !blue ? redMaterial.color : blue && red ? new Color(1f, .72f, .14f, 1f) : new Color(.82f, .9f, .94f, .75f);
+            // A public geographic marker, never an indicator of hidden enemy control.
+            Color color = new Color(1f, .73f, .28f, objectiveEmphasized ? .95f : .4f);
             objectiveRing.startColor = objectiveRing.endColor = color;
-            objectiveRing.widthMultiplier = blue || red ? .12f : .075f;
+            objectiveRing.widthMultiplier = objectiveEmphasized ? .075f : .035f;
         }
 
         private void UpdateActiveFormationPulse(float deltaTime)
@@ -3381,7 +3390,7 @@ namespace SeaOfUncertainty.Prototype
                 if (label.Transform == null || label.Text == null) continue;
                 Vector3 viewport = camera.WorldToViewportPoint(label.Anchor);
                 MeshRenderer renderer = label.Transform.GetComponent<MeshRenderer>();
-                bool visible = viewport.z > 0f && viewport.x > -.08f && viewport.x < 1.08f && viewport.y > -.08f && viewport.y < 1.08f;
+                bool visible = !label.UseHoverCard && viewport.z > 0f && viewport.x > -.08f && viewport.x < 1.08f && viewport.y > -.08f && viewport.y < 1.08f;
                 if (renderer != null) renderer.enabled = visible;
                 if (!visible)
                 {

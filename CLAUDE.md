@@ -26,6 +26,8 @@ Three assemblies, enforced by `.asmdef` files:
 
 Rules rulings live in `design/*.md`; the backlog is `TODO.md`; original rules in `rules/`. When behavior and docs disagree, check the relevant design doc before changing either, and update the doc alongside rule changes.
 
+Keep `TODO.md` as the only active work queue. Historical TODO lists and QA checklists live under `design/archive/`; promote a specific archived item into the root TODO when it is scheduled rather than creating another competing backlog.
+
 ## Tests
 
 Close the Unity Editor, then from the repo root:

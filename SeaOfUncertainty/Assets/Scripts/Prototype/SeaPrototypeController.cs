@@ -146,7 +146,12 @@ namespace SeaOfUncertainty.Prototype
 
         public void ToolkitNewScenario() => ResetScenario(game?.Scenario?.Id);
         public void ToolkitNewScenario(string scenarioId) => ResetScenario(scenarioId);
-        public void ToolkitBeginDecision() => decisionStartedAt = Time.realtimeSinceStartup;
+        public void ToolkitBeginDecision()
+        {
+            decisionStartedAt = Time.realtimeSinceStartup;
+            // Feedback from the previous commander must not survive a secure handoff.
+            toast = game?.Active == null ? string.Empty : game.VisibleLog(game.Active.Side).FirstOrDefault() ?? string.Empty;
+        }
         public void ToolkitSave() => SaveOperation();
         public void ToolkitLoad() => LoadOperation();
         public void ToolkitExport() => ExportPlaytest();

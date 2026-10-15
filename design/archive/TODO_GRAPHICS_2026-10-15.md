@@ -1,10 +1,12 @@
+> Archived on **2026-10-15**. Historical checklist, superseded by the [active short-term TODO](../../TODO.md). Unchecked items remain unfinished; archiving does not mark them complete or approve a release.
+
 # Graphics Incremental Awesomeness TODO
 
-Last refreshed: **2026-09-13**
+Last refreshed: **2026-10-15**
 
 This is the separate, non-blocking visual-evolution backlog for Sea of Uncertainty. Its purpose is to make the game a little more convincing, readable, and delightful with each small pass without turning graphics work into an uncontrolled 1.0 beta dependency.
 
-The release-critical backlog remains [`TODO.md`](../TODO.md). An item here becomes a release blocker only when it fixes a readability, accessibility, information-security, crash, or performance defect.
+The release-critical backlog remains [`TODO.md`](TODO_BETA_CLOSURE_2026-10-15.md). An item here becomes a release blocker only when it fixes a readability, accessibility, information-security, crash, or performance defect.
 
 ## How we use this list
 
@@ -16,12 +18,13 @@ The release-critical backlog remains [`TODO.md`](../TODO.md). An item here becom
 - Make color redundant with silhouette, text, border, glyph, motion, or pattern.
 - Honor Reduced Motion and the current minimum-resolution presentation.
 - Compare before/after captures at approximately 24°, 33°, and 58° camera pitch before keeping a change.
-- Stay within the budgets in [`3D_MVP_BUDGETS_AND_ACCEPTANCE.md`](3D_MVP_BUDGETS_AND_ACCEPTANCE.md).
-- Record every new or modified external asset in [`3D_ASSET_LEDGER.md`](3D_ASSET_LEDGER.md).
+- Stay within the budgets in [`3D_MVP_BUDGETS_AND_ACCEPTANCE.md`](../3D_MVP_BUDGETS_AND_ACCEPTANCE.md).
+- Record every new or modified external asset in [`3D_ASSET_LEDGER.md`](../3D_ASSET_LEDGER.md).
 
 ## Current visual foundation
 
-- [x] 3D-first operational command table with optional edge HUD.
+- [x] 3D-first operational command table with compact command status, one shared map-order palette, and on-demand formation/Contact inspection and friendly Ready queue. Removed the duplicate edge-HUD action panel; preserved command recovery and synchronized-strike controls.
+- [x] Compact map badges and gold objective reticle with hover-first detail cards, keyboard inspection, viewport bounds, and side-safe public objective/Contact information.
 - [x] Physical Earth-radius globe curvature at the 20-NM operational scale.
 - [x] Curved Natural Earth coastline geometry without ocean cut-through.
 - [x] Traditional flat-top, edge-sharing hex presentation positioned at sea-surface depth so solid land naturally occludes it.
