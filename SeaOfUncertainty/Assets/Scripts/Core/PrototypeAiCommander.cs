@@ -70,7 +70,7 @@ namespace SeaOfUncertainty.Core
                 return new AiDecision { Action = ActionKind.Recover, Rationale = "Cautious profile clears recoverable Entropy before accepting combat risk." };
 
             ContactState strikeContact = contacts
-                .Where(contact => SelectSalvo(actor, contact, profile).HasValue)
+                .Where(contact => SelectSalvo(game, actor, contact, profile).HasValue)
                 .OrderByDescending(contact => contact.Identity)
                 .ThenByDescending(contact => contact.Location)
                 .ThenBy(contact => contact.Age)
@@ -95,7 +95,7 @@ namespace SeaOfUncertainty.Core
             }
             if (strikeContact != null)
             {
-                Salvo selectedSalvo = SelectSalvo(actor, strikeContact, profile).Value;
+                Salvo selectedSalvo = SelectSalvo(game, actor, strikeContact, profile).Value;
                 return new AiDecision { Action = ActionKind.Strike, TargetId = strikeContact.TargetId, Hex = strikeContact.LastKnownPosition, Salvo = selectedSalvo, Rationale = selectedSalvo == Salvo.Heavy ? "Commit the expendable Heavy capability to a high-quality identified Contact inside extended range." : "Engage the strongest usable owned Contact area already inside weapon range." };
             }
 
@@ -251,8 +251,8 @@ namespace SeaOfUncertainty.Core
                     HexCoord center = HexCoord.Distance(actor.Position, actor.MissionObjectiveHex) <= game.SearchRangeFor(actor, searchMode) ? actor.MissionObjectiveHex : actor.Position;
                     return new AiDecision { Action = ActionKind.Search, Hex = center, SearchMode = searchMode, Rationale = "No Command Attention is free; continue the assigned Standing Mission." };
                 case ActionKind.Strike:
-                    ContactState target = contacts.FirstOrDefault(contact => SelectSalvo(actor, contact, profile).HasValue);
-                    return target == null ? null : new AiDecision { Action = ActionKind.Strike, TargetId = target.TargetId, Hex = target.LastKnownPosition, Salvo = SelectSalvo(actor, target, profile).Value, Rationale = "No Command Attention is free; execute the assigned Strike Mission." };
+                    ContactState target = contacts.FirstOrDefault(contact => SelectSalvo(game, actor, contact, profile).HasValue);
+                    return target == null ? null : new AiDecision { Action = ActionKind.Strike, TargetId = target.TargetId, Hex = target.LastKnownPosition, Salvo = SelectSalvo(game, actor, target, profile).Value, Rationale = "No Command Attention is free; execute the assigned Strike Mission." };
                 case ActionKind.Patrol: return new AiDecision { Action = ActionKind.Patrol, Hex = actor.Position, PatrolPosture = profile == AiStrategyProfile.Aggressive ? PatrolPosture.Aggressive : profile == AiStrategyProfile.Cautious ? PatrolPosture.Defensive : PatrolPosture.Balanced, Rationale = "No Command Attention is free; establish the assigned Screen." };
                 case ActionKind.Support:
                     FormationState recipient = game.Formations.Where(candidate => candidate.Side == actor.Side && candidate != actor && !candidate.IsDestroyed && HexCoord.Distance(actor.Position, candidate.Position) <= Rules.SupportRange).OrderBy(candidate => candidate.Id).FirstOrDefault();
@@ -264,15 +264,15 @@ namespace SeaOfUncertainty.Core
             }
         }
 
-        private static Salvo? SelectSalvo(FormationState actor, ContactState contact, AiStrategyProfile profile)
+        private static Salvo? SelectSalvo(PrototypeGame game, FormationState actor, ContactState contact, AiStrategyProfile profile)
         {
             if (contact == null) return null;
             int distance = HexCoord.Distance(actor.Position, contact.LastKnownPosition);
             bool heavyAvailable = contact.Identity == IdentityQuality.Identified && contact.Location == LocationQuality.High && actor.CanFire(Salvo.Heavy);
-            if (heavyAvailable && distance <= Rules.StrikeRange(actor.Kind, Salvo.Heavy) &&
-                (profile != AiStrategyProfile.Cautious || distance > Rules.StrikeRange(actor.Kind, Salvo.Standard))) return Salvo.Heavy;
-            if (actor.CanFire(Salvo.Standard) && (contact.Domain != ContactDomain.Subsurface || contact.Identity == IdentityQuality.Identified) && distance <= Rules.StrikeRange(actor.Kind, Salvo.Standard)) return Salvo.Standard;
-            if (actor.CanFire(Salvo.Light) && distance <= Rules.StrikeRange(actor.Kind, Salvo.Light)) return Salvo.Light;
+            if (heavyAvailable && distance <= game.StrikeRangeFor(actor, Salvo.Heavy) &&
+                (profile != AiStrategyProfile.Cautious || distance > game.StrikeRangeFor(actor, Salvo.Standard))) return Salvo.Heavy;
+            if (actor.CanFire(Salvo.Standard) && (contact.Domain != ContactDomain.Subsurface || contact.Identity == IdentityQuality.Identified) && distance <= game.StrikeRangeFor(actor, Salvo.Standard)) return Salvo.Standard;
+            if (actor.CanFire(Salvo.Light) && distance <= game.StrikeRangeFor(actor, Salvo.Light)) return Salvo.Light;
             return null;
         }
 

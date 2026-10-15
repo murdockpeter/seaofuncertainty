@@ -347,10 +347,20 @@ namespace SeaOfUncertainty.Prototype
             ScrollView list = new ScrollView();
             list.AddToClassList("scenario-list");
             int operation = 1;
-            foreach (ScenarioDefinition scenario in ScenarioCatalog.All())
+            IReadOnlyList<ScenarioDefinition> scenarios;
+            try { scenarios = ScenarioCatalog.All(); }
+            catch (ArgumentException exception)
+            {
+                page.Add(Text("SCENARIO CATALOG ERROR", "heading"));
+                page.Add(Text(exception.Message, "body-copy"));
+                page.Add(ActionButton("BACK", ShowMode));
+                app.Add(page);
+                return;
+            }
+            foreach (ScenarioDefinition scenario in scenarios)
             {
                 VisualElement card = Panel("scenario-card", "scenario-option");
-                card.Add(Text($"OPERATION {operation++:00}  •  {(scenario.Id == "meridian-veil" ? "CORE-LOOP TEST" : "20 NM THEATER PILOT")}", "eyebrow"));
+                card.Add(Text($"OPERATION {operation++:00}  •  {scenario.Area.DisplayName.ToUpperInvariant()}", "eyebrow"));
                 card.Add(Text(scenario.DisplayName.ToUpperInvariant(), "heading"));
                 card.Add(Text(scenario.Summary, "body-copy"));
                 card.Add(Text($"MAP       {scenario.Area.Width} × {scenario.Area.Height}  •  {scenario.Area.NauticalMilesPerHex} NM HEXES\nFORCES    {scenario.Formations.Count(f => f.Side == Side.Blue)} BLUE / {scenario.Formations.Count(f => f.Side == Side.Red)} RED\nHORIZON   T{scenario.Horizon} / {scenario.Horizon * scenario.Area.ReadyTimeHours:0} HOURS\nWEATHER   {scenario.Weather.ToUpperInvariant()}", "body-copy"));
@@ -368,12 +378,12 @@ namespace SeaOfUncertainty.Prototype
             BeginScreen("OPERATION ORDER  •  " + backend.Game.Scenario.DisplayName.ToUpperInvariant());
             VisualElement page = El("front-page");
             VisualElement card = Panel("hero-card");
-            card.Add(Text("CONTROL THE OPERATIONAL OBJECTIVE", "heading"));
+            card.Add(Text("OPERATION OBJECTIVES", "heading"));
             card.Add(Text("MISSION", "eyebrow"));
-            card.Add(Text(backend.Game.Scenario.Summary + $" Resolve at Time {backend.Game.Scenario.Horizon}. Preserve your carrier group in combat-capable condition. Destruction is a means to those operational ends.", "body-copy"));
+            card.Add(Text(backend.Game.Scenario.Summary + $" Resolve at Time {backend.Game.Scenario.Horizon}.", "body-copy"));
             card.Add(Text("OPERATIONAL SCORING", "eyebrow"));
-            card.Add(Text(string.Join("\n", backend.Game.Scenario.Objectives.Select(objective => $"{objective.Points} VP — {objective.Title}")) + "\nTIES — combat-capable formations, lower damage burden, then closest surviving naval formation", "body-copy"));
-            card.Add(Text($"ASSUMPTIONS\n20 nm hexes • 2 hours / Ready Time • Formation-specific Strike ranges • Age-2 penalty {(backend.AgeTwoPenalty ? "ON" : "OFF")} • Automatic Defend • MODE {(backend.SelectedMode == OperationMode.SoloVsAi ? "SOLO VS AI" : "LOCAL HOTSEAT")}", "muted"));
+            card.Add(Text(string.Join("\n", backend.Game.Scenario.Objectives.Select(objective => $"{objective.Points} VP — {objective.Title}: {ScenarioScoring.DescribeObjective(backend.Game.Scenario, objective)}")) + "\nTIES — combat-capable formations, lower damage burden, then closest surviving naval formation", "body-copy"));
+            card.Add(Text($"ASSUMPTIONS\n{backend.Game.Area.NauticalMilesPerHex} nm hexes • {backend.Game.Area.ReadyTimeHours:0.##} hours / Ready Time • Formation-specific Strike ranges • Age-2 penalty {(backend.AgeTwoPenalty ? "ON" : "OFF")} • Automatic Defend • MODE {(backend.SelectedMode == OperationMode.SoloVsAi ? "SOLO VS AI" : "LOCAL HOTSEAT")}", "muted"));
             VisualElement row = El("row");
             row.Add(ActionButton("REVIEW SETUP", ShowSetup, "primary"));
             row.Add(ActionButton("BACK", ShowScenario));
@@ -658,12 +668,11 @@ namespace SeaOfUncertainty.Prototype
             }
             else if (actionMode == ToolkitActionMode.Strike)
             {
-                FormationKind kind = backend.Game.Active.Kind;
                 int scale = backend.Game.Area.NauticalMilesPerHex;
                 foreach (Salvo option in Enum.GetValues(typeof(Salvo)))
                 {
                     int remaining = backend.Game.Active.Weapons?.Available(option) ?? -1;
-                    Button weapon = ModeButton($"{option.ToString().ToUpperInvariant()} • +{Rules.SalvoModifier(option)} / {Rules.StrikeRange(kind, option) * scale} NM • {(remaining < 0 ? "LEGACY" : remaining.ToString())} LEFT", option);
+                    Button weapon = ModeButton($"{option.ToString().ToUpperInvariant()} • +{Rules.SalvoModifier(option)} / {backend.Game.StrikeRangeFor(backend.Game.Active, option) * scale} NM • {(remaining < 0 ? "LEGACY" : remaining.ToString())} LEFT", option);
                     weapon.SetEnabled(backend.Game.Active.CanFire(option));
                     modes.Add(weapon);
                 }
@@ -1167,7 +1176,7 @@ namespace SeaOfUncertainty.Prototype
             foreach (Salvo option in Enum.GetValues(typeof(Salvo)))
             {
                 Salvo selected = option;
-                int range = Rules.StrikeRange(active.Kind, selected) * backend.Game.Area.NauticalMilesPerHex;
+                int range = backend.Game.StrikeRangeFor(active, selected) * backend.Game.Area.NauticalMilesPerHex;
                 int remaining = active.Weapons?.Available(selected) ?? -1;
                 Button order = ActionButton($"{selected.ToString().ToUpperInvariant()}  •  {range} NM  •  {(remaining < 0 ? "AVAILABLE" : remaining + " LEFT")}", () => BeginMapOrder(ToolkitActionMode.Strike, moveMode, searchMode, searchPriority, selected), selected == salvo ? "selected" : null);
                 order.SetEnabled(active.CanFire(selected));
@@ -1255,7 +1264,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void ShowStrikeAim(ContactState contact)
         {
-            int range = Rules.StrikeRange(backend.Game.Active.Kind, salvo);
+            int range = backend.Game.StrikeRangeFor(backend.Game.Active, salvo);
             List<HexCoord> aims = backend.Game.ContactPossibleHexes(contact)
                 .Where(hex => HexCoord.Distance(backend.Game.Active.Position, hex) <= range)
                 .OrderBy(hex => HexCoord.Distance(hex, contact.LastKnownPosition)).ThenBy(hex => hex.Q).ThenBy(hex => hex.R).ToList();

@@ -333,7 +333,7 @@ namespace SeaOfUncertainty.Prototype
             string alternatives = LegalAlternatives();
             int range = HexCoord.Distance(actor.Position, aim);
             int attack = actor.EffectiveStrike + Rules.SalvoModifier(salvo) + game.PendingSupportBonus(actor, SupportKind.Strike) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
-            string calculation = $"Contact-area aim {aim}; range {range}/{Rules.StrikeRange(actor.Kind, salvo)}; Attack {attack}; hidden occupancy and defense resolved after commitment; reaction {reaction}";
+            string calculation = $"Contact-area aim {aim}; range {range}/{game.StrikeRangeFor(actor, salvo)}; Attack {attack}; hidden occupancy and defense resolved after commitment; reaction {reaction}";
             lastActionSucceeded = game.StrikeContact(actor, contact, aim, salvo, reaction, evadeDestination, out CombatResult result, out string message);
             if (lastActionSucceeded)
             {
@@ -436,7 +436,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void ResetScenario(string scenarioId = null)
         {
-            game = new PrototypeGame(1978, ScenarioCatalog.Find(string.IsNullOrEmpty(scenarioId) ? "meridian-veil" : scenarioId));
+            game = new PrototypeGame(1978, ScenarioCatalog.Require(string.IsNullOrEmpty(scenarioId) ? "meridian-veil" : scenarioId));
             AttachMissionAudio(game);
             game.AgeTwoTargetingPenalty = ageTwoTargetingPenalty;
             if (telemetry == null) telemetry = new PlaytestRecorder();
@@ -674,7 +674,7 @@ namespace SeaOfUncertainty.Prototype
             IEnumerable<HexCoord> mapHexes = Enumerable.Range(0, game.Area.Width).SelectMany(q => Enumerable.Range(0, game.Area.Height).Select(r => new HexCoord(q, r))).Where(game.Area.Contains);
             int legalMoveHexes = mapHexes.Count(hex => { int distance = HexCoord.Distance(game.Active.Position, hex); return distance > 0 && distance <= game.Active.EffectiveMove; });
             int searchable = mapHexes.Count(hex => HexCoord.Distance(game.Active.Position, hex) <= game.SearchRangeFor(game.Active, CurrentSearchMode()));
-            int strikeable = game.Contacts.Count(c => c.Owner == game.Active.Side && !c.IsLost && HexCoord.Distance(game.Active.Position, c.LastKnownPosition) <= Rules.StrikeRange(game.Active.Kind, CurrentSalvo()));
+            int strikeable = game.Contacts.Count(c => c.Owner == game.Active.Side && !c.IsLost && HexCoord.Distance(game.Active.Position, c.LastKnownPosition) <= game.StrikeRangeFor(game.Active, CurrentSalvo()));
             bool recover = game.Active.Friction || game.Active.Disruption;
             int supportable = game.Formations.Count(candidate => candidate.Side == game.Active.Side && candidate != game.Active && !candidate.IsDestroyed && HexCoord.Distance(game.Active.Position, candidate.Position) <= Rules.SupportRange);
             return $"Move({legalMoveHexes} hexes); Search({searchable} area hexes); Strike({strikeable} Contacts); Patrol(true); Support({supportable} formations); Recover({recover}); Replenish({game.HasLogisticsAccess(game.Active) && game.NeedsReplenishment(game.Active)}); Hold(true)";

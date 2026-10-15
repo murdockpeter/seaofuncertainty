@@ -86,6 +86,12 @@ namespace SeaOfUncertainty.Core
             return profile?.Range(mode) ?? Rules.SearchRange(mode);
         }
 
+        public int StrikeRangeFor(FormationState formation, Salvo salvo)
+        {
+            FormationKind kind = formation?.Kind ?? FormationKind.SurfaceGroup;
+            return Scenario.WeaponRanges?.FirstOrDefault(profile => profile.Kind == kind)?.Range(salvo) ?? Rules.StrikeRange(kind, salvo);
+        }
+
         public IReadOnlyList<HexCoord> ContactPossibleHexes(ContactState contact)
         {
             if (contact == null || contact.IsLost) return new List<HexCoord>();
@@ -691,7 +697,7 @@ namespace SeaOfUncertainty.Core
             return Formations.Where(formation => formation.Side == side && !formation.IsDestroyed && string.IsNullOrEmpty(formation.SynchronizedStrikeId))
                 .Where(CanParticipateInSynchronization)
                 .Where(formation => formation.CanFire(salvo))
-                .Where(formation => HexCoord.Distance(formation.Position, aim) <= Rules.StrikeRange(formation.Kind, salvo))
+                .Where(formation => HexCoord.Distance(formation.Position, aim) <= StrikeRangeFor(formation, salvo))
                 .OrderBy(formation => formation.Id, StringComparer.Ordinal).ToList();
         }
 
@@ -770,7 +776,7 @@ namespace SeaOfUncertainty.Core
             if (strike == null || ReadySynchronizedStrikeFor(Find(strike.LeaderId)) != strike) { message = "Retasking is available only at the event's Strike Time."; return false; }
             if (contact == null || contact.Owner != strike.Side || contact.IsLost || !ContactPossibleHexes(contact).Contains(aim)) { message = "Choose a usable friendly Contact aim area."; return false; }
             List<FormationState> participants = StrikeParticipants(strike);
-            if (participants.Any(item => HexCoord.Distance(item.Position, aim) > Rules.StrikeRange(item.Kind, strike.Participants.First(p => p.FormationId == item.Id).Salvo))) { message = "Every reserved participant must be in range of the new aim."; return false; }
+            if (participants.Any(item => HexCoord.Distance(item.Position, aim) > StrikeRangeFor(item, strike.Participants.First(p => p.FormationId == item.Id).Salvo))) { message = "Every reserved participant must be in range of the new aim."; return false; }
             strike.ContactTargetId = contact.TargetId;
             strike.Aim = aim;
             strike.DeclaredLocation = contact.Location;
@@ -796,7 +802,7 @@ namespace SeaOfUncertainty.Core
             foreach (FormationState participant in participants)
             {
                 Salvo participantSalvo = strike.Participants.First(item => item.FormationId == participant.Id).Salvo;
-                if (HexCoord.Distance(participant.Position, strike.Aim) > Rules.StrikeRange(participant.Kind, participantSalvo)) { message = $"{participant.Name} is outside range at resolution; abort or retask the strike."; return false; }
+                if (HexCoord.Distance(participant.Position, strike.Aim) > StrikeRangeFor(participant, participantSalvo)) { message = $"{participant.Name} is outside range at resolution; abort or retask the strike."; return false; }
             }
 
             FormationState target = contact != null && !contact.IsFalse ? Find(contact.TargetId) : null;
@@ -867,7 +873,7 @@ namespace SeaOfUncertainty.Core
             if (attacker != Active) { message = "Only the highlighted Ready formation may act."; return false; }
             if (contact == null || contact.Owner != attacker.Side || contact.IsLost || !Contacts.Contains(contact)) { message = "Choose one of your usable Contacts."; return false; }
             if (!ContactPossibleHexes(contact).Contains(aim)) { message = "Choose an aim hex inside the Contact's possible area."; return false; }
-            int strikeRange = Rules.StrikeRange(attacker.Kind, salvo);
+            int strikeRange = StrikeRangeFor(attacker, salvo);
             if (HexCoord.Distance(attacker.Position, aim) > strikeRange) { message = $"{attacker.Kind} {salvo} Strike range is {strikeRange} hexes ({strikeRange * Area.NauticalMilesPerHex} nm)."; return false; }
             if (!attacker.CanFire(salvo)) { message = $"{salvo} weapon inventory is exhausted or unavailable to this formation."; return false; }
             FormationState target = contact.IsFalse ? null : Find(contact.TargetId);
@@ -967,7 +973,7 @@ namespace SeaOfUncertainty.Core
             var reactions = new List<Reaction> { Reaction.Defend, Reaction.Evade, Reaction.Hold };
             ContactState returnContact = ContactFor(target.Side, attacker.Id);
             bool counterattackLegal = target.Damage != DamageState.Crippled && target.EntropySources < 2 && !target.HasEffect(EntropyCardIds.FireControlHit) &&
-                returnContact != null && HexCoord.Distance(target.Position, returnContact.LastKnownPosition) <= Rules.StrikeRange(target.Kind, Salvo.Light);
+                returnContact != null && HexCoord.Distance(target.Position, returnContact.LastKnownPosition) <= StrikeRangeFor(target, Salvo.Light);
             if (counterattackLegal) reactions.Insert(2, Reaction.Counterattack);
             return reactions;
         }
@@ -1325,12 +1331,14 @@ namespace SeaOfUncertainty.Core
 
         private void AdvanceToNextFormation()
         {
+            // Retry due entries once per advancement. A blocked entry must not pin Time forever.
+            ProcessScheduledEvents();
             while (true)
             {
                 FormationState next = Rules.NextReady(Formations, lastActingSide);
                 if (next == null) { Active = null; return; }
                 int nextEventTime = (Scenario.ScheduledEvents ?? new List<ScheduledScenarioEventDefinition>())
-                    .Where(item => !ResolvedScheduledEventIds.Contains(item.Id) && item.Time >= Time).Select(item => item.Time).DefaultIfEmpty(int.MaxValue).Min();
+                    .Where(item => !ResolvedScheduledEventIds.Contains(item.Id) && item.Time > Time).Select(item => item.Time).DefaultIfEmpty(int.MaxValue).Min();
                 int targetTime = Math.Min(next.ReadyTime, nextEventTime);
                 if (targetTime > Time)
                 {
@@ -1375,11 +1383,12 @@ namespace SeaOfUncertainty.Core
                 else if (scheduled.Kind == ScheduledEventKind.Reinforcement && scheduled.Reinforcement != null)
                 {
                     OperationalRegionDefinition region = (Scenario.ReinforcementRegions ?? new List<OperationalRegionDefinition>()).Concat(Scenario.Area.Regions ?? new List<OperationalRegionDefinition>()).FirstOrDefault(item => item.Id == scheduled.RegionId);
-                    HexCoord? entry = region?.Hexes.Where(Area.Contains).Where(hex => Area.TerrainAt(hex) != OperationalTerrain.Land && !Formations.Any(item => !item.IsDestroyed && item.Side == scheduled.Side && item.Position.Equals(hex))).OrderBy(hex => hex.Q).ThenBy(hex => hex.R).Cast<HexCoord?>().FirstOrDefault();
+                    HexCoord? entry = region?.Hexes.Where(Area.Contains).Where(hex => !IsRestricted(hex) && (scheduled.Reinforcement.Kind == FormationKind.AirGroup || Area.TerrainAt(hex) != OperationalTerrain.Land || HasFacility(hex, LocationKind.Port) || HasFacility(hex, LocationKind.Anchorage)) && !Formations.Any(item => !item.IsDestroyed && item.Side == scheduled.Side && item.Position.Equals(hex))).OrderBy(hex => hex.Q).ThenBy(hex => hex.R).Cast<HexCoord?>().FirstOrDefault();
                     if (!entry.HasValue) continue;
-                    FormationDefinition definition = scheduled.Reinforcement;
-                    definition.Q = entry.Value.Q; definition.R = entry.Value.R; definition.ReadyTime = Math.Max(Time, definition.ReadyTime);
-                    Formations.Add(CreateFormationState(definition));
+                    FormationState reinforcement = CreateFormationState(scheduled.Reinforcement);
+                    reinforcement.Position = entry.Value;
+                    reinforcement.ReadyTime = Math.Max(Time, reinforcement.ReadyTime);
+                    Formations.Add(reinforcement);
                 }
                 ResolvedScheduledEventIds.Add(scheduled.Id);
                 AddLog($"T{Time:00}  SCHEDULED EVENT — {(string.IsNullOrWhiteSpace(scheduled.Text) ? scheduled.Id : scheduled.Text)}");
@@ -1962,7 +1971,9 @@ namespace SeaOfUncertainty.Core
                 MissionPosture = MissionPosture.Balanced,
                 MissionTrigger = definition.Kind == FormationKind.SurfaceGroup ? MissionTrigger.ObjectiveReached : definition.Kind == FormationKind.LogisticsGroup ? MissionTrigger.LogisticsRequired : MissionTrigger.ContactLocated,
                 LastActionFollowedMission = true,
-                Ratings = definition.Ratings,
+                Ratings = new Ratings { Move = definition.Ratings.Move, Search = definition.Ratings.Search, Signature = definition.Ratings.Signature,
+                    Strike = definition.Ratings.Strike, Defense = definition.Ratings.Defense, Asw = definition.Ratings.Asw, Command = definition.Ratings.Command,
+                    ElectronicWarfare = definition.Ratings.ElectronicWarfare, Cyber = definition.Ratings.Cyber },
                 Weapons = CloneWeapons(definition.Weapons) ?? DefaultWeapons(definition.Kind),
                 SubmarineDepth = SubmarineDepthState.Deep
             };

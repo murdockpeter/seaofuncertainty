@@ -53,6 +53,20 @@ namespace SeaOfUncertainty.Core
 
     public static class ScenarioScoring
     {
+        public static string DescribeObjective(ScenarioDefinition scenario, ScenarioObjectiveDefinition objective)
+        {
+            string target = scenario.Area.Objective.ToString();
+            switch (objective.Kind)
+            {
+                case ScenarioObjectiveKind.Control: return $"Sole naval control within {Rules.ControlRadius} hex of {target}";
+                case ScenarioObjectiveKind.Transit: return $"Combat-capable naval transit: Blue to {objective.BlueRegionId}; Red to {objective.RedRegionId}";
+                case ScenarioObjectiveKind.Escort: return $"Combat-capable naval escort within {Math.Max(1, objective.Radius)} hexes of the carrier";
+                case ScenarioObjectiveKind.Denial: return $"No enemy combat-capable naval formation within {Math.Max(1, objective.Radius)} hexes of {target}";
+                case ScenarioObjectiveKind.Withdrawal: return $"Preserve the carrier below Heavy damage, or withdraw while combat-capable: Blue to {objective.BlueRegionId}; Red to {objective.RedRegionId}";
+                default: throw new ArgumentException("Unsupported objective kind: " + objective.Kind);
+            }
+        }
+
         public static ScenarioOutcome Evaluate(PrototypeGame game)
         {
             if (game == null) throw new ArgumentNullException(nameof(game));

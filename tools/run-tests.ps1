@@ -30,6 +30,7 @@ $suites = [ordered]@{
     AiEvaluation              = 'SeaOfUncertainty.Editor.PrototypeSceneBuilder.RunAiEvaluationTests'
     ContentSimulation         = 'SeaOfUncertainty.Editor.PrototypeSceneBuilder.RunContentSimulationFoundationTests'
     AdvancedContentSimulation = 'SeaOfUncertainty.Editor.PrototypeSceneBuilder.RunAdvancedContentSimulationTests'
+    ScenarioAuthoring         = 'SeaOfUncertainty.Editor.ScenarioAuthoringTests.Run'
     Build                     = 'SeaOfUncertainty.Editor.PrototypeSceneBuilder.RunBuildValidationSuite'
 }
 

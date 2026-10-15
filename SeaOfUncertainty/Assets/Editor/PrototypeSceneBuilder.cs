@@ -1240,6 +1240,7 @@ namespace SeaOfUncertainty.Editor
 
         public static void RunAdvancedContentSimulationTests()
         {
+            ScenarioAuthoringTests.Run();
             ScenarioDefinition authored = ScenarioCatalog.Find("meridian-veil");
             Assert(authored.Formations.Count == 10 && authored.SpecialRules.Contains("finite magazines"), "External JSON catalog supplies scenario metadata and all formation definitions");
             Assert(authored.Formations.All(item => item.Ratings != null && item.Weapons != null), "Every authored formation has ratings and a finite weapon inventory");
