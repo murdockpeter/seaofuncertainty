@@ -1545,7 +1545,7 @@ namespace SeaOfUncertainty.Prototype
                     }
                     else if (actionMode == ToolkitActionMode.Strike)
                     {
-                        bool inRange = distanceToHex <= Rules.StrikeRange(game.Active.Kind, salvo);
+                        bool inRange = distanceToHex <= game.StrikeRangeFor(game.Active, salvo);
                         color = inRange ? new Color(1f, .45f, .14f, .9f) : new Color(.3f, .34f, .38f, .2f);
                         width = inRange ? .06f : .02f;
                     }
@@ -2336,7 +2336,7 @@ namespace SeaOfUncertainty.Prototype
         private bool StrikeEligible(ContactState contact)
         {
             if (contact == null) return false;
-            if (!game.ContactPossibleHexes(contact).Any(hex => HexCoord.Distance(game.Active.Position, hex) <= Rules.StrikeRange(game.Active.Kind, salvo))) return false;
+            if (!game.ContactPossibleHexes(contact).Any(hex => HexCoord.Distance(game.Active.Position, hex) <= game.StrikeRangeFor(game.Active, salvo))) return false;
             return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
         }
 

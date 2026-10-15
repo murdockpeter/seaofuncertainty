@@ -492,7 +492,7 @@ namespace SeaOfUncertainty.Prototype
         private bool StrikeEligible(ContactState contact)
         {
             if (game?.Active == null || contact == null) return false;
-            if (!game.ContactPossibleHexes(contact).Any(hex => HexCoord.Distance(game.Active.Position, hex) <= Rules.StrikeRange(game.Active.Kind, salvo))) return false;
+            if (!game.ContactPossibleHexes(contact).Any(hex => HexCoord.Distance(game.Active.Position, hex) <= game.StrikeRangeFor(game.Active, salvo))) return false;
             return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
         }
 

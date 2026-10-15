@@ -149,6 +149,17 @@ namespace SeaOfUncertainty.Core
             => PointLayer + (salvo == Salvo.Heavy ? 0 : AreaLayer) + (salvo == Salvo.Light ? OuterLayer : 0);
     }
 
+    [Serializable]
+    public sealed class WeaponRangeDefinition
+    {
+        public FormationKind Kind;
+        public int Light;
+        public int Standard;
+        public int Heavy;
+
+        public int Range(Salvo salvo) => salvo == Salvo.Light ? Light : salvo == Salvo.Standard ? Standard : Heavy;
+    }
+
     public enum ScheduledEventKind { Reinforcement, WeatherChange, CommandArchitectureChange }
 
     [Serializable]
@@ -169,7 +180,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class ScenarioDefinition
     {
-        public int SchemaVersion = 4;
+        public int SchemaVersion = 6;
         public string Id;
         public string DisplayName;
         public string Summary;
@@ -182,6 +193,7 @@ namespace SeaOfUncertainty.Core
         public List<FormationDefinition> Formations = new List<FormationDefinition>();
         public List<ContactDefinition> Contacts = new List<ContactDefinition>();
         public List<SensorRangeDefinition> SensorRanges = new List<SensorRangeDefinition>();
+        public List<WeaponRangeDefinition> WeaponRanges = new List<WeaponRangeDefinition>();
         public List<MissileDefenseProfileDefinition> MissileDefenseProfiles = new List<MissileDefenseProfileDefinition>();
         public List<ScheduledScenarioEventDefinition> ScheduledEvents = new List<ScheduledScenarioEventDefinition>();
         public CommandArchitecture BlueCommandArchitecture = CommandArchitecture.MissionCommand;
@@ -256,12 +268,16 @@ namespace SeaOfUncertainty.Core
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Red, TargetId = "B-CV", Q = 2, R = 4, Location = LocationQuality.Medium, Identity = IdentityQuality.General, Age = 1 });
             AddPrototypeSensorRanges(scenario);
             AddPrototypeMissileDefenseProfiles(scenario);
+            scenario.WeaponRanges = ScenarioAuthoringCatalog.DefaultWeaponRanges();
             return scenario;
         }
 
         public static IReadOnlyList<ScenarioDefinition> All() => ScenarioAuthoringCatalog.Apply(new[] { MeridianVeil(), LuzonStrait() });
 
         public static ScenarioDefinition Find(string id) => All().FirstOrDefault(scenario => string.Equals(scenario.Id, id, StringComparison.OrdinalIgnoreCase)) ?? MeridianVeil();
+
+        public static ScenarioDefinition Require(string id) => All().FirstOrDefault(scenario => string.Equals(scenario.Id, id, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException("Unknown scenario ID: " + id);
 
         public static ScenarioDefinition LuzonStrait()
         {
@@ -339,6 +355,7 @@ namespace SeaOfUncertainty.Core
             scenario.Contacts.Add(new ContactDefinition { Owner = Side.Red, TargetId = "B-CV-L", Q = 6, R = 10, Location = LocationQuality.Low, Identity = IdentityQuality.General, Age = 2 });
             AddPrototypeSensorRanges(scenario);
             AddPrototypeMissileDefenseProfiles(scenario);
+            scenario.WeaponRanges = ScenarioAuthoringCatalog.DefaultWeaponRanges();
             scenario.BlueCommandArchitecture = CommandArchitecture.Distributed;
             scenario.RedCommandArchitecture = CommandArchitecture.Centralized;
             scenario.ReinforcementRegions.Add(area.Regions[0]);
@@ -438,6 +455,16 @@ namespace SeaOfUncertainty.Core
             if (scenario == null) { errors.Add("Scenario is null."); return errors; }
             if (string.IsNullOrWhiteSpace(scenario.Id)) errors.Add("Scenario ID is required.");
             if (scenario.Area == null) { errors.Add("Operational area is required."); return errors; }
+            if (MissingItems(scenario.Formations) || MissingItems(scenario.Contacts) || MissingItems(scenario.Objectives)
+                || MissingItems(scenario.ScheduledEvents) || MissingItems(scenario.SensorRanges) || MissingItems(scenario.WeaponRanges)
+                || MissingItems(scenario.MissileDefenseProfiles) || MissingItems(scenario.DeploymentRegions) || MissingItems(scenario.ReinforcementRegions)
+                || MissingItems(scenario.ExitRegions) || MissingItems(scenario.LogisticsRegions) || MissingItems(scenario.Area.Regions)
+                || MissingItems(scenario.Area.RestrictedAreas) || MissingItems(scenario.Area.Terrain) || MissingItems(scenario.Area.Locations)
+                || scenario.Area.ValidHexes == null)
+            { errors.Add("Scenario lists must be arrays without null entries; use [] to clear a list."); return errors; }
+            if (scenario.DeploymentRegions.Concat(scenario.ReinforcementRegions).Concat(scenario.ExitRegions).Concat(scenario.LogisticsRegions)
+                .Concat(scenario.Area.Regions).Concat(scenario.Area.RestrictedAreas).Any(region => region.Hexes == null))
+            { errors.Add("Region Hexes must be an array."); return errors; }
             if (string.IsNullOrWhiteSpace(scenario.Area.Id) || string.IsNullOrWhiteSpace(scenario.Area.DisplayName) || string.IsNullOrWhiteSpace(scenario.Area.Version) || string.IsNullOrWhiteSpace(scenario.Area.Attribution)) errors.Add("Operational-area identity, version, and attribution are required.");
             if (scenario.Horizon < 1 || string.IsNullOrWhiteSpace(scenario.Weather) || string.IsNullOrWhiteSpace(scenario.SpecialRules) || string.IsNullOrWhiteSpace(scenario.VictoryConditions)) errors.Add("Scenario horizon, weather, special rules, and victory conditions are required.");
             if (scenario.Objectives == null || scenario.Objectives.Count == 0) errors.Add("At least one scored scenario objective is required.");
@@ -467,14 +494,19 @@ namespace SeaOfUncertainty.Core
                 errors.Add("Location ID is missing or duplicated: " + duplicate.Key);
             foreach (OperationalLocationDefinition location in scenario.Area.Locations.Where(location => !scenario.Area.Contains(location.Hex))) errors.Add("Location is outside the operational area: " + location.Id);
             IEnumerable<OperationalRegionDefinition> allScenarioRegions = scenario.DeploymentRegions.Concat(scenario.ReinforcementRegions).Concat(scenario.ExitRegions).Concat(scenario.LogisticsRegions).Concat(scenario.Area.Regions).Concat(scenario.Area.RestrictedAreas).Distinct();
-            foreach (IGrouping<string, OperationalRegionDefinition> duplicate in allScenarioRegions.GroupBy(region => region.Id).Where(group => string.IsNullOrWhiteSpace(group.Key) || group.Count() > 1)) errors.Add("Region ID is missing or duplicated: " + duplicate.Key);
+            // A region may serve several roles, including after JSON round trips. Definitions must agree.
+            foreach (IGrouping<string, OperationalRegionDefinition> duplicate in allScenarioRegions.GroupBy(region => region.Id, StringComparer.OrdinalIgnoreCase)
+                .Where(group => string.IsNullOrWhiteSpace(group.Key) || group.Any(region => !region.Hexes.SequenceEqual(group.First().Hexes))))
+                errors.Add("Region ID is missing or duplicated with conflicting hexes: " + duplicate.Key);
+            foreach (List<OperationalRegionDefinition> role in new[] { scenario.Area.Regions, scenario.Area.RestrictedAreas, scenario.DeploymentRegions, scenario.ReinforcementRegions, scenario.ExitRegions, scenario.LogisticsRegions })
+                if (role.GroupBy(region => region.Id, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1)) errors.Add("Region ID is duplicated within a region list.");
             foreach (OperationalRegionDefinition region in allScenarioRegions)
             {
                 if (string.IsNullOrWhiteSpace(region.Id)) errors.Add("Region ID is missing.");
                 if (region.Hexes.Count == 0) errors.Add("Region has no hexes: " + region.Id);
                 if (region.Hexes.Any(hex => !scenario.Area.Contains(hex))) errors.Add("Region contains an invalid hex: " + region.Id);
                 bool requiresNavigableWater = scenario.DeploymentRegions.Contains(region) || scenario.ReinforcementRegions.Contains(region) || scenario.ExitRegions.Contains(region);
-                if (requiresNavigableWater && region.Hexes.All(hex => scenario.Area.TerrainAt(hex) == OperationalTerrain.Land)) errors.Add("Region has no navigable access hex: " + region.Id);
+                if (requiresNavigableWater && !region.Hexes.Any(hex => Navigable(scenario.Area, hex))) errors.Add("Region has no navigable access hex: " + region.Id);
                 bool isLogistics = scenario.LogisticsRegions.Contains(region);
                 bool anchoredByFacility = region.Hexes.Any(hex => scenario.Area.Locations.Any(location => location.Hex.Equals(hex) && (location.Kind == LocationKind.Port || location.Kind == LocationKind.Airfield || location.Kind == LocationKind.Anchorage)));
                 if (isLogistics && !anchoredByFacility) errors.Add("Logistics region has no port, airfield, or anchorage: " + region.Id);
@@ -500,12 +532,97 @@ namespace SeaOfUncertainty.Core
                 if (string.IsNullOrWhiteSpace(scheduled.Id) || scheduled.Time < 0 || scheduled.Time > scenario.Horizon) errors.Add("Scheduled event requires a stable ID and in-horizon time.");
                 if (scheduled.Kind == ScheduledEventKind.Reinforcement && (scheduled.Reinforcement == null || !allScenarioRegions.Any(region => region.Id == scheduled.RegionId))) errors.Add("Reinforcement event requires a formation and valid entry region: " + scheduled.Id);
             }
+            ValidateAuthoringDetails(scenario, errors);
             return errors;
+        }
+
+        private static bool MissingItems<T>(List<T> list) where T : class => list == null || list.Any(item => item == null);
+        private static bool Defined<T>(T value) where T : struct => Enum.IsDefined(typeof(T), value);
+
+        private static void ValidateAuthoringDetails(ScenarioDefinition scenario, List<string> errors)
+        {
+            OperationalAreaDefinition area = scenario.Area;
+            if (string.IsNullOrWhiteSpace(scenario.DisplayName)) errors.Add("Scenario display name is required.");
+            if (!Defined(scenario.BlueCommandArchitecture) || !Defined(scenario.RedCommandArchitecture)) errors.Add("Invalid command architecture.");
+            if (scenario.WeatherSeverity < 0 || scenario.WeatherSeverity > 3) errors.Add("Weather severity must be between 0 and 3.");
+            if (!Defined(area.Projection) || area.Terrain.Any(item => !Defined(item.Terrain)) || area.Locations.Any(item => !Defined(item.Kind))) errors.Add("Invalid operational-area enum value.");
+            if (area.Presentation != null && !Defined(area.Presentation.Palette)) errors.Add("Invalid presentation palette.");
+            if (float.IsNaN(area.ReadyTimeHours) || float.IsInfinity(area.ReadyTimeHours) || area.ReadyTimeHours <= 0) errors.Add("Ready-Time scale must be finite and positive.");
+            foreach (var group in scenario.Formations.GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase).Where(group => group.Count() > 1)) errors.Add("Formation ID is duplicated: " + group.Key);
+            foreach (FormationDefinition formation in scenario.Formations) ValidateFormation(scenario, formation, true, errors);
+            foreach (Side side in Enum.GetValues(typeof(Side)))
+                if (!scenario.Formations.Any(item => item.Side == side && item.Kind != FormationKind.LogisticsGroup)) errors.Add("A deployed combat formation is required for " + side + ".");
+            foreach (ContactDefinition contact in scenario.Contacts)
+            {
+                FormationDefinition target = scenario.Formations.FirstOrDefault(item => item.Id == contact.TargetId);
+                if (!Defined(contact.Owner) || !Defined(contact.Location) || !Defined(contact.Identity) || contact.Age < 0) errors.Add("Invalid Contact qualities, owner, or age: " + contact.TargetId);
+                if (target != null && target.Side == contact.Owner) errors.Add("Contact must refer to an opposing formation: " + contact.TargetId);
+            }
+            if (scenario.Contacts.GroupBy(item => item.Owner + ":" + item.TargetId, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1)) errors.Add("Contact is duplicated for an owner and target.");
+            if (scenario.Objectives.GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1)) errors.Add("Scenario objective ID is duplicated.");
+            foreach (ScenarioObjectiveDefinition objective in scenario.Objectives)
+            {
+                if (!Defined(objective.Kind) || objective.Radius < 0) errors.Add("Invalid objective kind or radius: " + objective.Id);
+                if (objective.Kind == ScenarioObjectiveKind.Control && objective.Radius != Rules.ControlRadius) errors.Add("Control objective radius must match the rules control radius: " + objective.Id);
+                if (objective.Kind == ScenarioObjectiveKind.Escort || objective.Kind == ScenarioObjectiveKind.Withdrawal)
+                    foreach (Side side in Enum.GetValues(typeof(Side)))
+                        if (!scenario.Formations.Any(item => item.Side == side && item.Kind == FormationKind.CarrierGroup)) errors.Add("Carrier objective requires a deployed carrier for " + side + ": " + objective.Id);
+            }
+            foreach (MissileDefenseProfileDefinition profile in scenario.MissileDefenseProfiles)
+                if (!Defined(profile.Kind) || profile.OuterLayer < 0 || profile.AreaLayer < 0 || profile.PointLayer < 0) errors.Add("Missile-defense layers must be nonnegative with a valid formation kind.");
+            foreach (SensorRangeDefinition profile in scenario.SensorRanges)
+                if (!Defined(profile.Kind)) errors.Add("Invalid sensor formation kind.");
+            if (scenario.WeaponRanges.Count != Enum.GetValues(typeof(FormationKind)).Length) errors.Add("One weapon-range profile is required for every Formation kind.");
+            foreach (FormationKind kind in Enum.GetValues(typeof(FormationKind)))
+                if (scenario.WeaponRanges.Count(profile => profile.Kind == kind) != 1) errors.Add("Weapon-range profile is missing or duplicated: " + kind);
+            foreach (WeaponRangeDefinition profile in scenario.WeaponRanges)
+                if (!Defined(profile.Kind) || profile.Light < 1 || profile.Standard < profile.Light || profile.Heavy < profile.Standard) errors.Add("Weapon ranges must be positive and ordered Light <= Standard <= Heavy: " + profile.Kind);
+            var formationIds = new HashSet<string>(scenario.Formations.Select(item => item.Id), StringComparer.OrdinalIgnoreCase);
+            var eventIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ScheduledScenarioEventDefinition scheduled in scenario.ScheduledEvents)
+            {
+                if (!eventIds.Add(scheduled.Id)) errors.Add("Scheduled event ID is duplicated: " + scheduled.Id);
+                if (!Defined(scheduled.Kind) || !Defined(scheduled.Side) || !Defined(scheduled.CommandArchitecture)) errors.Add("Invalid scheduled event enum value: " + scheduled.Id);
+                if (scheduled.Kind == ScheduledEventKind.WeatherChange && (string.IsNullOrWhiteSpace(scheduled.Weather) || scheduled.WeatherSeverity < 0 || scheduled.WeatherSeverity > 3)) errors.Add("Weather event requires weather and severity 0..3: " + scheduled.Id);
+                if (scheduled.Kind != ScheduledEventKind.Reinforcement || scheduled.Reinforcement == null) continue;
+                FormationDefinition reinforcement = scheduled.Reinforcement;
+                if (!formationIds.Add(reinforcement.Id)) errors.Add("Reinforcement formation ID is duplicated: " + reinforcement.Id);
+                if (reinforcement.Side != scheduled.Side) errors.Add("Reinforcement side must match event side: " + scheduled.Id);
+                ValidateFormation(scenario, reinforcement, false, errors);
+                OperationalRegionDefinition entry = scenario.ReinforcementRegions.Concat(area.Regions).FirstOrDefault(item => item.Id == scheduled.RegionId);
+                if (entry == null) errors.Add("Reinforcement event requires a reinforcement or area entry region: " + scheduled.Id);
+                else if (!entry.Hexes.Any(hex => CanDeploy(scenario, reinforcement.Kind, hex) && (reinforcement.Kind == FormationKind.AirGroup || HasWaterPath(area, hex, area.Objective)))) errors.Add("Reinforcement entry cannot reach the objective: " + scheduled.Id);
+            }
+            IEnumerable<OperationalRegionDefinition> destinations = scenario.ExitRegions.Concat(scenario.Objectives
+                .Where(item => item.Kind == ScenarioObjectiveKind.Transit || item.Kind == ScenarioObjectiveKind.Withdrawal)
+                .SelectMany(item => new[] { item.BlueRegionId, item.RedRegionId })
+                .Select(id => area.Regions.Concat(scenario.DeploymentRegions).Concat(scenario.ReinforcementRegions).Concat(scenario.ExitRegions).Concat(scenario.LogisticsRegions).FirstOrDefault(region => region.Id == id)).Where(region => region != null));
+            foreach (OperationalRegionDefinition region in destinations.Distinct())
+                if (!region.Hexes.Any(hex => CanDeploy(scenario, FormationKind.SurfaceGroup, hex) && HasWaterPath(area, hex, area.Objective))) errors.Add("Exit/objective region cannot reach the objective by water: " + region.Id);
+        }
+
+        private static bool CanDeploy(ScenarioDefinition scenario, FormationKind kind, HexCoord hex)
+            => scenario.Area.Contains(hex) && !scenario.Area.RestrictedAreas.Any(region => region.Hexes.Contains(hex))
+                && (kind == FormationKind.AirGroup || Navigable(scenario.Area, hex));
+
+        private static bool Navigable(OperationalAreaDefinition area, HexCoord hex)
+            => area.Contains(hex) && !area.RestrictedAreas.Any(region => region.Hexes.Contains(hex))
+                && (area.TerrainAt(hex) != OperationalTerrain.Land || area.Locations.Any(location => location.Hex.Equals(hex) && (location.Kind == LocationKind.Port || location.Kind == LocationKind.Anchorage)));
+
+        private static void ValidateFormation(ScenarioDefinition scenario, FormationDefinition formation, bool deployed, List<string> errors)
+        {
+            if (string.IsNullOrWhiteSpace(formation.Id) || string.IsNullOrWhiteSpace(formation.Name) || !Defined(formation.Side) || !Defined(formation.Kind)) errors.Add("Formation requires unique ID, name, valid side and kind: " + formation.Id);
+            if (formation.ReadyTime < 0) errors.Add("Formation Ready Time must be nonnegative: " + formation.Id);
+            if (formation.Ratings == null) errors.Add("Formation ratings are required: " + formation.Id);
+            else if (formation.Ratings.Move < 0 || formation.Ratings.Search < 0 || formation.Ratings.Strike < 0 || formation.Ratings.Defense < 0 || formation.Ratings.Asw < 0 || formation.Ratings.Command < 0 || formation.Ratings.ElectronicWarfare < 0 || formation.Ratings.Cyber < 0) errors.Add("Formation ratings other than Signature must be nonnegative: " + formation.Id);
+            WeaponInventoryState weapons = formation.Weapons;
+            if (weapons == null || weapons.Light < 0 || weapons.Standard < 0 || weapons.Heavy < 0 || weapons.MaxLight < weapons.Light || weapons.MaxStandard < weapons.Standard || weapons.MaxHeavy < weapons.Heavy) errors.Add("Weapon inventories must be nonnegative and no larger than capacity: " + formation.Id);
+            if (deployed && !CanDeploy(scenario, formation.Kind, new HexCoord(formation.Q, formation.R))) errors.Add("Illegal terrain, restricted area, or deployment hex: " + formation.Id);
         }
 
         private static bool HasWaterPath(OperationalAreaDefinition area, HexCoord start, HexCoord destination)
         {
-            if (area.TerrainAt(start) == OperationalTerrain.Land || area.TerrainAt(destination) == OperationalTerrain.Land) return false;
+            if (!Navigable(area, start) || !Navigable(area, destination)) return false;
             var queue = new Queue<HexCoord>();
             var visited = new HashSet<HexCoord>();
             queue.Enqueue(start); visited.Add(start);
@@ -518,7 +635,7 @@ namespace SeaOfUncertainty.Core
                     for (int r = Math.Max(0, current.R - 1); r <= Math.Min(area.Height - 1, current.R + 1); r++)
                     {
                         HexCoord next = new HexCoord(q, r);
-                        if (HexCoord.Distance(current, next) == 1 && area.Contains(next) && area.TerrainAt(next) != OperationalTerrain.Land && visited.Add(next)) queue.Enqueue(next);
+                        if (HexCoord.Distance(current, next) == 1 && Navigable(area, next) && visited.Add(next)) queue.Enqueue(next);
                     }
                 }
             }
@@ -529,7 +646,7 @@ namespace SeaOfUncertainty.Core
 
     public static class OperationalDataMigration
     {
-        public const int CurrentSchemaVersion = 5;
+        public const int CurrentSchemaVersion = 6;
 
         public static ScenarioDefinition Migrate(ScenarioDefinition scenario)
         {
@@ -542,6 +659,9 @@ namespace SeaOfUncertainty.Core
             if (scenario.ExitRegions == null) scenario.ExitRegions = new List<OperationalRegionDefinition>();
             if (scenario.LogisticsRegions == null) scenario.LogisticsRegions = new List<OperationalRegionDefinition>();
             if (scenario.SensorRanges == null) scenario.SensorRanges = new List<SensorRangeDefinition>();
+            if (scenario.WeaponRanges == null) scenario.WeaponRanges = new List<WeaponRangeDefinition>();
+            // Older scenarios used the conventional Rules envelopes. Preserve them explicitly.
+            if (scenario.WeaponRanges.Count == 0 && scenario.SchemaVersion < 6) scenario.WeaponRanges = ScenarioAuthoringCatalog.DefaultWeaponRanges();
             if (scenario.MissileDefenseProfiles == null) scenario.MissileDefenseProfiles = new List<MissileDefenseProfileDefinition>();
             if (scenario.ScheduledEvents == null) scenario.ScheduledEvents = new List<ScheduledScenarioEventDefinition>();
             if (scenario.Objectives == null) scenario.Objectives = new List<ScenarioObjectiveDefinition>();
