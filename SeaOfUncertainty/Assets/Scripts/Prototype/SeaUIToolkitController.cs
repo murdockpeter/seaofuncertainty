@@ -11,6 +11,7 @@ namespace SeaOfUncertainty.Prototype
     public sealed class SeaUIToolkitController : MonoBehaviour
     {
         private enum View { Main, Mode, Online, Scenario, Briefing, Setup, Handoff, AiPlanning, Game, Results }
+        private enum FormationCommand { Move, Search, Strike, Recover, Hold, Screen, Support, Replenish, SynchronizedStrike, Mission, PushThrough, HeadquartersRecovery }
 
         private SeaPrototypeController backend;
         private OnlineMultiplayerCoordinator online;
@@ -28,7 +29,6 @@ namespace SeaOfUncertainty.Prototype
         private Side previousSide;
         private bool aiRunning;
         private bool edgeScrollEnabled;
-        private bool edgeHudVisible;
         private bool entropyRevealBlocking;
         private FormationState pendingReactionTarget;
         private Salvo pendingReactionSalvo;
@@ -39,7 +39,7 @@ namespace SeaOfUncertainty.Prototype
         private bool pendingSynchronizedBlind;
         private bool controllerAxisReleased = true;
         private VisualElement focusBeforeOverlay;
-        private Button edgeHudToggle;
+        private FormationState inspectedFormation;
         private bool onlineKillSwitchRefreshed;
 
 #if UNITY_EDITOR
@@ -62,8 +62,10 @@ namespace SeaOfUncertainty.Prototype
         public void EditorShowResponseHand() => ShowResponseHand();
         public void EditorShowStrikeAim(ContactState contact) => ShowStrikeAim(contact);
         public bool EditorPersistentCardHandVisible => root?.Q<VisualElement>(className: "card-hand") != null;
-        public bool EditorEdgeHudVisible => edgeHudVisible;
-        public void EditorToggleEdgeHud() => ToggleEdgeHud();
+        public void EditorShowInspector() => ShowInspector();
+        public void EditorShowReadyQueue() => ShowReadyQueue();
+        public void EditorInspectContact(ContactState contact) => ShowInspector(contact);
+        public bool EditorGameShortcut(KeyCode key) => HandleGameShortcut(key);
         public void EditorShowFormationOrders() => ShowFormationOrders(new Vector2(640f, 320f));
         public string EditorActionMode => actionMode.ToString();
 
@@ -176,7 +178,7 @@ namespace SeaOfUncertainty.Prototype
             }
             if (Input.GetKeyDown(KeyCode.JoystickButton0)) SubmitFocused();
             if (Input.GetKeyDown(KeyCode.JoystickButton1)) CancelNavigation();
-            if (view == View.Game && Input.GetKeyDown(KeyCode.JoystickButton3)) ToggleEdgeHud();
+            if (view == View.Game && !HasOpenOverlay() && Input.GetKeyDown(KeyCode.JoystickButton3)) ShowFormationOrders(OrderAnchor());
         }
 
         private void ShowMain()
@@ -528,36 +530,23 @@ namespace SeaOfUncertainty.Prototype
             previousSide = active.Side;
 
             VisualElement workspace = El("workspace");
-            workspace.Add(BuildTimeline());
             VisualElement mapColumn = El("map-column");
             map = new TacticalMapElement();
             map.HexChosen = OnHexChosen;
             map.ContactChosen = OnContactChosen;
-            map.ContactHovered = contact => UpdateDossier(contact);
             map.ActiveFormationContextRequested = ShowFormationOrders;
             map.SetEdgeScroll(edgeScrollEnabled);
             map.SetState(backend.Game, actionMode, moveMode, searchMode, salvo, backend.ReducedMotion, backend.HexGridVisible);
             mapColumn.Add(map);
-            Label mapHelp = Text($"3D COMMAND MAP  •  {backend.Game.Area.NauticalMilesPerHex} NM / HEX  •  TAB EDGE HUD  •  H CARDS  •  L LOG  •  WASD MOVE  •  C ACTIVE  •  O OBJECTIVE  •  V EDGE PAN  •  HOME RESET", "muted", "map-help");
-            mapColumn.Add(mapHelp);
-            edgeHudToggle = ActionButton(edgeHudVisible ? "HIDE EDGE HUD  •  TAB" : "SHOW EDGE HUD  •  TAB", ToggleEdgeHud, "map-hud-toggle");
-            mapColumn.Add(edgeHudToggle);
             workspace.Add(mapColumn);
-            VisualElement dossierPanel = Panel("dossier");
-            var dossierScroll = new ScrollView();
-            dossierScroll.AddToClassList("dossier-scroll");
-            dossierScroll.verticalScrollerVisibility = ScrollerVisibility.Auto;
-            dossierScroll.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
-            dossier = dossierScroll;
-            UpdateDossier(null);
-            dossierPanel.Add(dossierScroll);
-            workspace.Add(dossierPanel);
+            app.Add(BuildCommandStatus());
             app.Add(workspace);
-
-            VisualElement bottom = El("bottom-deck", "command-dock");
-            bottom.Add(BuildActions());
-            app.Add(bottom);
-            ApplyEdgeHudState();
+            VisualElement instruction = El("order-guidance");
+            instruction.Add(Text(ActionPreview(), "body-copy", "amber", "action-preview"));
+            if (actionMode != ToolkitActionMode.None)
+                instruction.Add(ActionButton("CANCEL ORDER  •  ESC", CancelMapOrder));
+            instruction.Add(Text(backend.LastMessage, "muted"));
+            app.Add(instruction);
             if (backend.AudioDescriptions)
             {
                 Label audioDescription = Text("AUDIO DESCRIPTION  •  " + backend.LastAudioDescription, "audio-description");
@@ -575,112 +564,76 @@ namespace SeaOfUncertainty.Prototype
             }
         }
 
-        private VisualElement BuildTimeline()
+        private VisualElement BuildCommandStatus()
         {
-            VisualElement panel = Panel("timeline");
-            panel.Add(Text("FORMATION TIMELINE", "subheading"));
-            Label reason = Text(backend.ToolkitActivationReason(), "muted");
-            reason.tooltip = "Lowest Ready Time. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable ID.";
-            panel.Add(reason);
-            ScrollView scroll = new ScrollView();
-            foreach (SynchronizedStrikeState strike in backend.Game.SynchronizedStrikes.Where(item => item.Side == backend.Game.Active.Side).OrderBy(item => item.StrikeTime))
-            {
-                Button sync = ActionButton($"SYNC EVENT  •  T{strike.StrikeTime:00}\n{strike.Participants.Count} FORMATIONS  •  AIM {strike.Aim}\nCOMMAND SLOT HELD", () => UpdateDossier(null), "selected");
-                sync.AddToClassList("timeline-row");
-                scroll.Add(sync);
-            }
-            int queuePosition = 0;
-            foreach (FormationState formation in backend.Game.ActivationQueue())
-            {
-                string queueLabel = queuePosition++ == 0 ? "NOW" : $"NEXT {queuePosition - 1}";
-                string reactionState = formation.Replenishing ? "LOCKED" : formation.HasReacted ? "SPENT" : "READY";
-                string assignment = formation.PatrolActive ? $" • Screen {formation.PatrolPosture}" : formation.SupportActive ? $" • Support {formation.SupportKind}" : string.Empty;
-                Button row = ActionButton($"{queueLabel}  •  T{formation.ReadyTime:00}\n{formation.Name}\n{KindTag(formation.Kind)}  •  R:{reactionState}  •  E:{formation.Endurance.ToString().ToUpperInvariant()} {Math.Min(formation.MajorActions, 2)}/3", () => UpdateDossier(null));
-                row.AddToClassList("timeline-row");
-                if (formation == backend.Game.Active) row.AddToClassList("active");
-                row.tooltip = $"Activation queue position {queuePosition} • {formation.Side} • Ready T{formation.ReadyTime:00} • {formation.Kind} • {formation.Cohesion} • Reaction {reactionState} • Endurance {formation.EnduranceProgress} • Entropy {formation.EntropySources} • Command {formation.EffectiveCommand}{assignment}";
-                scroll.Add(row);
-            }
-            panel.Add(scroll);
-            return panel;
+            FormationState active = backend.Game.Active;
+            SideState side = backend.Game.Sides[active.Side];
+            IReadOnlyList<CommandSlotState> slots = backend.Game.CommandSlotsFor(active.Side);
+            VisualElement status = El("command-status");
+            VisualElement summary = El("command-status-summary");
+            summary.Add(Text($"T{backend.Game.Time:00}  •  {active.Side.ToString().ToUpperInvariant()}  •  {active.Name}", "subheading"));
+            FormationState next = backend.Game.ActivationQueue().FirstOrDefault(item => item.Side == active.Side && item != active);
+            Label readiness = Text(next == null ? "NO OTHER FRIENDLY FORMATION READY" : $"NEXT FRIENDLY  •  {next.Name}  •  T{next.ReadyTime:00}", "muted");
+            readiness.tooltip = backend.ToolkitActivationReason();
+            summary.Add(readiness);
+            Label command = Text($"COMMAND {side.CommandSlots}/{slots.Count} FREE  •  STRAIN {side.CommandStrain}", "muted", "command-summary");
+            command.tooltip = string.Join("\n", slots.Select(slot => $"Slot {slot.Index}: {slot.Status} {slot.Purpose}"));
+            summary.Add(command);
+            status.Add(summary);
+            VisualElement controls = El("row", "command-status-controls");
+            bool strikeReady = backend.Game.ReadySynchronizedStrikeFor(active) != null;
+            controls.Add(ActionButton(strikeReady ? "SYNC READY • ORDERS" : "ORDERS • SPACE", () => ShowFormationOrders(OrderAnchor()), strikeReady ? "warning" : "primary"));
+            controls.Add(ActionButton("INSPECT • I", () => ShowInspector()));
+            controls.Add(ActionButton("READY QUEUE • T", ShowReadyQueue));
+            controls.Add(ActionButton($"CARDS {HeldCardCount(active.Side)} • H", ShowResponseHand));
+            controls.Add(ActionButton("LOG • L", ShowEventInspector));
+            controls.Add(ActionButton("MENU", ShowPause));
+            status.Add(controls);
+            return status;
         }
 
-        private VisualElement BuildActions()
+        private Vector2 OrderAnchor() => new Vector2(map == null ? 320f : map.layout.width * .5f, map == null ? 160f : map.layout.height * .35f);
+
+        private void ShowReadyQueue()
         {
-            VisualElement panel = Panel("actions");
-            SynchronizedStrikeState readyStrike = backend.Game.ReadySynchronizedStrikeFor(backend.Game.Active);
-            if (readyStrike != null)
+            VisualElement modal = Modal("FRIENDLY READY QUEUE");
+            modal.Add(Text(backend.ToolkitActivationReason(), "body-copy"));
+            modal.Add(Text("Only your formations are listed. Cross-side ties pass priority away from the last acting side; same-side ties use lower Entropy, higher Command, then stable ID.", "muted"));
+            ScrollView scroll = new ScrollView();
+            scroll.AddToClassList("ready-queue-scroll");
+            foreach (SynchronizedStrikeState strike in backend.Game.SynchronizedStrikes.Where(item => item.Side == backend.Game.Active.Side).OrderBy(item => item.StrikeTime))
+                scroll.Add(Text($"SYNC EVENT • T{strike.StrikeTime:00} • {strike.Participants.Count} formations • aim {strike.Aim}", "body-copy", "amber"));
+            foreach (FormationState formation in backend.Game.ActivationQueue().Where(item => item.Side == backend.Game.Active.Side))
             {
-                ContactState current = backend.Game.Contacts.FirstOrDefault(item => item.Owner == readyStrike.Side && item.TargetId == readyStrike.ContactTargetId);
-                panel.Add(Text($"SYNCHRONIZED STRIKE READY  •  T{readyStrike.StrikeTime:00}", "subheading", "amber"));
-                panel.Add(Text($"{readyStrike.Participants.Count} reserved formations  •  aim {readyStrike.Aim}  •  one defender Reaction  •  Defense −1 after each attack\nContact: {(current == null || current.IsLost ? "LOST — abort, retask, or continue blind" : current.Summary)}", "body-copy"));
-                VisualElement resolution = El("row");
-                resolution.Add(ActionButton(current == null || current.IsLost ? "CONTINUE BLIND" : "RESOLVE VOLLEY", () => BeginSynchronizedStrikeResolution(readyStrike, current == null || current.IsLost), "primary"));
-                resolution.Add(ActionButton("RETASK  •  +1 TIME / FRICTION", () => ShowSynchronizedRetaskContacts(readyStrike), "warning"));
-                resolution.Add(ActionButton("ABORT  •  +1 TIME / FRICTION", () => ResolveAction(() => backend.ToolkitAbortSynchronizedStrike(readyStrike))));
-                panel.Add(resolution);
-                panel.Add(Text(backend.LastMessage, "muted"));
-                return panel;
+                FormationState selected = formation;
+                string reaction = formation.Replenishing ? "LOCKED" : formation.HasReacted ? "SPENT" : "READY";
+                Button row = ActionButton($"{(formation == backend.Game.Active ? "NOW" : "READY")} • T{formation.ReadyTime:00} • {formation.Name}\n{KindTag(formation.Kind)} • REACTION {reaction} • ENDURANCE {formation.Endurance}", () => ShowInspector(null, selected), "timeline-row");
+                row.tooltip = $"Entropy {formation.EntropySources} • Command {formation.EffectiveCommand} • {formation.Cohesion}";
+                scroll.Add(row);
             }
-            SideState commandSide = backend.Game.Sides[backend.Game.Active.Side];
-            VisualElement actionHeader = El("row");
-            actionHeader.Add(Text("CHOOSE AN ACTION", "subheading"));
-            actionHeader.Add(El("spacer"));
-            actionHeader.Add(ActionButton("MISSION", ShowMissionFormationChoices));
-            if (backend.Game.Active.EntropySources >= 3) actionHeader.Add(ActionButton("PUSH THROUGH • +1 STRAIN", () => { backend.ToolkitPushThrough(); ShowGame(); }, "warning"));
-            if (backend.Game.Active.Kind == FormationKind.CarrierGroup && backend.Game.HasLogisticsAccess(backend.Game.Active) && commandSide.CommandStrain > 0)
-                actionHeader.Add(ActionButton("HQ RECOVERY • 2", () => ResolveAction(() => backend.ToolkitRestoreCommand()), "primary"));
-            panel.Add(actionHeader);
-            string slotSummary = string.Join("  ", backend.Game.CommandSlotsFor(commandSide.Side).Select(slot => $"◆{slot.Index} {slot.Status.ToString().ToUpperInvariant()}{(string.IsNullOrEmpty(slot.Purpose) ? string.Empty : " " + slot.Purpose)}"));
-            Label commandSummary = Text($"COMMAND {commandSide.CommandSlots}/3 FREE  •  STRAIN {commandSide.CommandStrain}", "muted", "command-summary");
-            commandSummary.tooltip = slotSummary;
-            panel.Add(commandSummary);
-            VisualElement actions = El("row", "action-row");
-            actions.Add(ActionButton("1  ⇢ MOVE  •2", () => SelectAction(ToolkitActionMode.Move), actionMode == ToolkitActionMode.Move ? "selected" : null));
-            actions.Add(ActionButton("2  ◎ SEARCH  •2", () => SelectAction(ToolkitActionMode.Search), actionMode == ToolkitActionMode.Search ? "selected" : null));
-            actions.Add(ActionButton("3  ✦ STRIKE  •2", () => SelectAction(ToolkitActionMode.Strike), actionMode == ToolkitActionMode.Strike ? "selected" : null));
-            actions.Add(ActionButton("4  ↻ RECOVER  •2", () => ResolveAction(() => backend.ToolkitRecover())));
-            actions.Add(ActionButton("5  ■ HOLD  •1", () => ResolveAction(() => backend.ToolkitHold())));
-            panel.Add(actions);
-            if (actionMode == ToolkitActionMode.None)
-            {
-                VisualElement assignments = El("row", "action-row");
-                assignments.Add(ActionButton("6  ◉ SCREEN  •1", ShowPatrolSetup));
-                assignments.Add(ActionButton("7  + SUPPORT  •1", ShowSupportSetup));
-                assignments.Add(ActionButton("8  ⟳ REPLENISH  •3", () => { SelectAction(ToolkitActionMode.Replenish); ShowReplenishmentSetup(); }));
-                assignments.Add(ActionButton("9  ✦✦ SYNC STRIKE", ShowSynchronizedStrikeContacts));
-                panel.Add(assignments);
-            }
-            VisualElement modes = El("row", "action-row");
-            if (actionMode == ToolkitActionMode.Move)
-            {
-                FormationState active = backend.Game.Active;
-                int cautious = Rules.MoveAllowance(active, MoveMode.Cautious), normal = Rules.MoveAllowance(active, MoveMode.Normal), high = Rules.MoveAllowance(active, MoveMode.HighTempo);
-                modes.Add(ModeButton($"CAUTIOUS • {cautious} / {cautious * backend.Game.Area.NauticalMilesPerHex} NM", MoveMode.Cautious)); modes.Add(ModeButton($"NORMAL • {normal} / {normal * backend.Game.Area.NauticalMilesPerHex} NM", MoveMode.Normal)); modes.Add(ModeButton($"HIGH TEMPO • {high} / {high * backend.Game.Area.NauticalMilesPerHex} NM + F", MoveMode.HighTempo));
-            }
-            else if (actionMode == ToolkitActionMode.Search)
-            {
-                int scale = backend.Game.Area.NauticalMilesPerHex;
-                FormationState active = backend.Game.Active;
-                modes.Add(ModeButton($"PASSIVE • +0 / {backend.Game.SearchRangeFor(active, SearchMode.Passive) * scale} NM", SearchMode.Passive)); modes.Add(ModeButton($"ACTIVE • +1 / {backend.Game.SearchRangeFor(active, SearchMode.Active) * scale} NM LOUD", SearchMode.Active)); modes.Add(ModeButton($"FOCUSED • +2 / {backend.Game.SearchRangeFor(active, SearchMode.Focused) * scale} NM / 1◆", SearchMode.Focused));
-                modes.Add(ModeButton("IMPROVE LOCATION", SearchPriority.Location));
-                modes.Add(ModeButton("IMPROVE IDENTITY", SearchPriority.Identity));
-            }
-            else if (actionMode == ToolkitActionMode.Strike)
-            {
-                int scale = backend.Game.Area.NauticalMilesPerHex;
-                foreach (Salvo option in Enum.GetValues(typeof(Salvo)))
-                {
-                    int remaining = backend.Game.Active.Weapons?.Available(option) ?? -1;
-                    Button weapon = ModeButton($"{option.ToString().ToUpperInvariant()} • +{Rules.SalvoModifier(option)} / {backend.Game.StrikeRangeFor(backend.Game.Active, option) * scale} NM • {(remaining < 0 ? "LEGACY" : remaining.ToString())} LEFT", option);
-                    weapon.SetEnabled(backend.Game.Active.CanFire(option));
-                    modes.Add(weapon);
-                }
-            }
-            panel.Add(modes);
-            panel.Add(Text(ActionPreview(), "body-copy", "amber", "action-preview"));
-            if (actionMode == ToolkitActionMode.None) panel.Add(Text(backend.LastMessage, "muted"));
-            return panel;
+            modal.Add(scroll);
+            modal.Add(ActionButton("CLOSE", CloseOverlay));
+        }
+
+        private void ShowInspector(ContactState contact = null, FormationState formation = null)
+        {
+            Side side = backend.Game.Active.Side;
+            if (contact != null && (contact.Owner != side || contact.IsLost || !backend.Game.Contacts.Contains(contact))) return;
+            if (formation != null && (formation.Side != side || !backend.Game.Formations.Contains(formation))) return;
+            VisualElement modal = Modal(contact == null ? "FORMATION INSPECTOR" : "CONTACT INTELLIGENCE");
+            inspectedFormation = formation ?? backend.Game.Active;
+            ScrollView scroll = new ScrollView();
+            scroll.AddToClassList("inspector-scroll");
+            dossier = scroll.contentContainer;
+            UpdateDossier(contact);
+            modal.Add(scroll);
+            modal.Add(ActionButton("CLOSE", CloseOverlay));
+        }
+
+        private void CancelMapOrder()
+        {
+            actionMode = ToolkitActionMode.None;
+            ShowGame();
         }
 
         private void ShowHeldEntropyCard(FormationState formation, EntropyEffectDefinition card)
@@ -710,10 +663,10 @@ namespace SeaOfUncertainty.Prototype
         {
             if (dossier == null) return;
             dossier.Clear();
-            if (contact != null && actionMode != ToolkitActionMode.None)
+            if (contact != null)
             {
                 FormationState target = backend.Game.Find(contact.TargetId);
-                dossier.Add(Text("PRE-COMMITMENT PREVIEW", "eyebrow"));
+                dossier.Add(Text(actionMode == ToolkitActionMode.None ? "OWNED CONTACT REPORT" : "PRE-COMMITMENT PREVIEW", "eyebrow"));
                 dossier.Add(Text(contact.Identity == IdentityQuality.Identified && target != null ? target.Name.ToUpperInvariant() : "UNRESOLVED CONTACT", "heading"));
                 dossier.Add(Text(contact.Summary + "\nLAST KNOWN " + contact.LastKnownPosition, "body-copy"));
                 if (actionMode == ToolkitActionMode.Search)
@@ -730,7 +683,7 @@ namespace SeaOfUncertainty.Prototype
                 return;
             }
 
-            FormationState formation = backend.Game.Active;
+            FormationState formation = inspectedFormation ?? backend.Game.Active;
             dossier.Add(Text(formation.Side.ToString().ToUpperInvariant() + " FORMATION DOSSIER", "eyebrow"));
             dossier.Add(Text(formation.Name.ToUpperInvariant(), "heading"));
             dossier.Add(Text(formation.Kind + " • HEX " + formation.Position, "body-copy"));
@@ -1095,11 +1048,28 @@ namespace SeaOfUncertainty.Prototype
             modal.Add(ActionButton("BACK", () => ShowSynchronizedRetaskContacts(strike)));
         }
 
-        private void SelectAction(ToolkitActionMode mode)
+        private Button CommandButton(string label, FormationCommand command, Vector2 anchor)
+            => ActionButton(label, () => ExecuteFormationCommand(command, anchor));
+
+        private void ExecuteFormationCommand(FormationCommand command, Vector2? anchor = null)
         {
-            actionMode = actionMode == mode ? ToolkitActionMode.None : mode;
-            backend.ToolkitRecordChoice(mode.ToString(), mode == ToolkitActionMode.Move ? moveMode.ToString() : mode == ToolkitActionMode.Search ? searchMode.ToString() : salvo.ToString());
-            ShowGame();
+            Vector2 position = anchor ?? OrderAnchor();
+            if (backend.Game.ReadySynchronizedStrikeFor(backend.Game.Active) != null) { ShowFormationOrders(position); return; }
+            switch (command)
+            {
+                case FormationCommand.Move: ShowMoveOrders(position); break;
+                case FormationCommand.Search: ShowSearchOrders(position); break;
+                case FormationCommand.Strike: ShowStrikeOrders(position); break;
+                case FormationCommand.Recover: ResolveAction(() => backend.ToolkitRecover()); break;
+                case FormationCommand.Hold: ResolveAction(() => backend.ToolkitHold()); break;
+                case FormationCommand.Screen: ShowPatrolSetup(); break;
+                case FormationCommand.Support: ShowSupportSetup(); break;
+                case FormationCommand.Replenish: actionMode = ToolkitActionMode.Replenish; ShowReplenishmentSetup(); break;
+                case FormationCommand.SynchronizedStrike: ShowSynchronizedStrikeContacts(); break;
+                case FormationCommand.Mission: ShowMissionFormationChoices(); break;
+                case FormationCommand.PushThrough: backend.ToolkitPushThrough(); ShowGame(); break;
+                case FormationCommand.HeadquartersRecovery: ResolveAction(() => backend.ToolkitRestoreCommand()); break;
+            }
         }
 
         private void ShowFormationOrders(Vector2 mapPosition)
@@ -1116,24 +1086,49 @@ namespace SeaOfUncertainty.Prototype
             chips.Add(Text(active.Cohesion.ToUpperInvariant(), "context-chip", "cohesion"));
             identity.Add(chips);
             menu.Add(identity);
+            SynchronizedStrikeState readyStrike = backend.Game.ReadySynchronizedStrikeFor(active);
+            if (readyStrike != null)
+            {
+                AddReadyStrikeOrders(menu, readyStrike);
+                menu.Add(ActionButton("INSPECT FORMATION • I", () => ShowInspector()));
+                return;
+            }
             menu.Add(Text("PRIMARY ORDERS", "eyebrow", "context-section"));
-            menu.Add(ActionButton("⇢  MOVE ORDERS  ›", () => ShowMoveOrders(mapPosition), actionMode == ToolkitActionMode.Move ? "selected" : null));
-            menu.Add(ActionButton("◎  SEARCH ORDERS  ›", () => ShowSearchOrders(mapPosition), actionMode == ToolkitActionMode.Search ? "selected" : null));
-            menu.Add(ActionButton("✦  STRIKE ORDERS  ›", () => ShowStrikeOrders(mapPosition), actionMode == ToolkitActionMode.Strike ? "selected" : null));
+            menu.Add(CommandButton("⇢  MOVE ORDERS  ›", FormationCommand.Move, mapPosition));
+            menu.Add(CommandButton("◎  SEARCH ORDERS  ›", FormationCommand.Search, mapPosition));
+            menu.Add(CommandButton("✦  STRIKE ORDERS  ›", FormationCommand.Strike, mapPosition));
             menu.Add(Text("IMMEDIATE ACTION", "eyebrow", "context-section"));
             VisualElement immediate = El("row", "context-order-row");
-            immediate.Add(ActionButton("↻  RECOVER • 2", () => ResolveAction(() => backend.ToolkitRecover())));
-            immediate.Add(ActionButton("■  HOLD • 1", () => ResolveAction(() => backend.ToolkitHold())));
+            immediate.Add(CommandButton("↻  RECOVER • 2", FormationCommand.Recover, mapPosition));
+            immediate.Add(CommandButton("■  HOLD • 1", FormationCommand.Hold, mapPosition));
             menu.Add(immediate);
             menu.Add(Text("ASSIGNMENTS & COMMAND", "eyebrow", "context-section"));
             VisualElement assignments = El("row", "context-order-row");
-            assignments.Add(ActionButton("◉  SCREEN", ShowPatrolSetup));
-            assignments.Add(ActionButton("+  SUPPORT", ShowSupportSetup));
+            assignments.Add(CommandButton("◉  SCREEN", FormationCommand.Screen, mapPosition));
+            assignments.Add(CommandButton("+  SUPPORT", FormationCommand.Support, mapPosition));
             menu.Add(assignments);
-            menu.Add(ActionButton("⟳  REPLENISHMENT  ›", () => { actionMode = ToolkitActionMode.Replenish; ShowReplenishmentSetup(); }));
-            menu.Add(ActionButton("✦✦  SYNCHRONIZED STRIKE  ›", ShowSynchronizedStrikeContacts));
-            menu.Add(ActionButton("MISSION ORDERS  ›", ShowMissionFormationChoices));
+            menu.Add(CommandButton("⟳  REPLENISHMENT  ›", FormationCommand.Replenish, mapPosition));
+            menu.Add(CommandButton("✦✦  SYNCHRONIZED STRIKE  ›", FormationCommand.SynchronizedStrike, mapPosition));
+            menu.Add(CommandButton("MISSION ORDERS  ›", FormationCommand.Mission, mapPosition));
+            if (active.EntropySources >= 3 && !active.PushThroughReady)
+                menu.Add(CommandButton("PUSH THROUGH • +1 STRAIN", FormationCommand.PushThrough, mapPosition));
+            SideState side = backend.Game.Sides[active.Side];
+            if (active.Kind == FormationKind.CarrierGroup && backend.Game.HasLogisticsAccess(active) && side.CommandStrain > 0)
+                menu.Add(CommandButton("HQ RECOVERY • 2", FormationCommand.HeadquartersRecovery, mapPosition));
+            menu.Add(ActionButton("INSPECT FORMATION • I", () => ShowInspector()));
             menu.Add(ActionButton("▤  OPEN CARD TABLE  •  H", ShowResponseHand, "context-utility"));
+        }
+
+        private void AddReadyStrikeOrders(VisualElement menu, SynchronizedStrikeState strike)
+        {
+            ContactState contact = backend.Game.Contacts.FirstOrDefault(item => item.Owner == strike.Side && item.TargetId == strike.ContactTargetId);
+            bool lost = contact == null || contact.IsLost;
+            menu.Add(Text($"SYNCHRONIZED STRIKE READY • T{strike.StrikeTime:00}", "subheading", "amber"));
+            menu.Add(Text($"{strike.Participants.Count} reserved formations • aim {strike.Aim} • one defender Reaction\nContact: {(lost ? "LOST — abort, retask, or continue blind" : contact.Summary)}", "body-copy"));
+            menu.Add(ActionButton(lost ? "CONTINUE BLIND" : "RESOLVE VOLLEY", () => BeginSynchronizedStrikeResolution(strike, lost), "primary"));
+            menu.Add(ActionButton("RETASK • +1 TIME / FRICTION", () => ShowSynchronizedRetaskContacts(strike), "warning"));
+            menu.Add(ActionButton("ABORT • +1 TIME / FRICTION", () => ResolveAction(() => backend.ToolkitAbortSynchronizedStrike(strike))));
+            menu.Add(Text(backend.LastMessage, "muted"));
         }
 
         private void ShowMoveOrders(Vector2 mapPosition)
@@ -1237,11 +1232,6 @@ namespace SeaOfUncertainty.Prototype
             return scroll.contentContainer;
         }
 
-        private Button ModeButton(string text, MoveMode mode) => ActionButton(text, () => { moveMode = mode; backend.ToolkitRecordChoice("Move", mode.ToString()); ShowGame(); }, moveMode == mode ? "selected" : null);
-        private Button ModeButton(string text, SearchMode mode) => ActionButton(text, () => { searchMode = mode; backend.ToolkitRecordChoice("Search", mode.ToString()); ShowGame(); }, searchMode == mode ? "selected" : null);
-        private Button ModeButton(string text, SearchPriority priority) => ActionButton(text, () => { searchPriority = priority; backend.ToolkitRecordChoice("Search priority", priority.ToString()); ShowGame(); }, searchPriority == priority ? "selected" : null);
-        private Button ModeButton(string text, Salvo mode) => ActionButton(text, () => { salvo = mode; backend.ToolkitRecordChoice("Strike", mode.ToString()); ShowGame(); }, salvo == mode ? "selected" : null);
-
         private void OnHexChosen(HexCoord hex)
         {
             if (actionMode == ToolkitActionMode.Move) ResolveAction(() => backend.ToolkitMove(hex, moveMode));
@@ -1260,6 +1250,7 @@ namespace SeaOfUncertainty.Prototype
             {
                 ShowStrikeAim(contact);
             }
+            else ShowInspector(contact);
         }
 
         private void ShowStrikeAim(ContactState contact)
@@ -1456,9 +1447,8 @@ namespace SeaOfUncertainty.Prototype
 
         private string ActionPreview()
         {
-            if (actionMode == ToolkitActionMode.None) return "SELECT AN ACTION • Keyboard shortcuts: 1–8.";
+            if (actionMode == ToolkitActionMode.None) return "SELECT YOUR FORMATION FOR ORDERS • 1–9 orders • I inspector • T Ready queue • H cards • L log • G grid";
             if (actionMode == ToolkitActionMode.Replenish) return $"REPLENISH AT A COMPATIBLE LOGISTICS FACILITY\nTIME 3{(backend.Game.Active.HasEffect(EntropyCardIds.HullBreach) ? " +1 HULL BREACH" : string.Empty)} • {backend.Game.ReplenishmentPreview(backend.Game.Active)}";
-            if (actionMode == ToolkitActionMode.None) return "SELECT AN ACTION  •  Keyboard shortcuts: 1–5.";
             FormationState active = backend.Game.Active;
             int friction = active.Friction || actionMode == ToolkitActionMode.Move && moveMode == MoveMode.HighTempo ? 1 : 0;
             string consequence = actionMode == ToolkitActionMode.Move ? (moveMode == MoveMode.Cautious ? "Signature −1" : moveMode == MoveMode.HighTempo ? "Signature +1 • mark Friction" : "balanced movement") : actionMode == ToolkitActionMode.Search ? (searchMode == SearchMode.Active ? "become Loud" : searchMode == SearchMode.Focused ? "temporarily occupy 1 Command" : "remain quiet") : salvo == Salvo.Heavy ? "expend Heavy capability" : $"Attack {Rules.SalvoModifier(salvo):+0;-0;0}";
@@ -1481,6 +1471,8 @@ namespace SeaOfUncertainty.Prototype
             if (backend.HasSave) modal.Add(ActionButton("LOAD SAVED OPERATION", LoadOperationAndContinue));
             modal.Add(ActionButton("EXPORT PLAYTEST DATA", () => { backend.ToolkitExport(); ShowGame(); }));
             modal.Add(ActionButton("SETTINGS", ShowSettings));
+            modal.Add(ActionButton("FIELD MANUAL", ShowRules));
+            modal.Add(ActionButton(backend.HexGridVisible ? "HIDE HEX GRID • G" : "SHOW HEX GRID • G", () => { backend.ToolkitToggleHexGrid(); ShowGame(); }));
             modal.Add(ActionButton("RESTART OPERATION", () => { backend.ToolkitNewScenario(); OperationalMap3D.ResetPresentationMemory(); ShowBriefing(); }, "warning"));
             modal.Add(ActionButton("RETURN TO MAIN MENU", ShowMain, "danger-button"));
             modal.Add(ActionButton("EXIT GAME", ShowExitConfirmation, "danger-button"));
@@ -1764,8 +1756,9 @@ namespace SeaOfUncertainty.Prototype
         private void BeginScreen(string context, bool gameHeader = false)
         {
             root.Clear();
+            dossier = null;
+            inspectedFormation = null;
             app = El("app");
-            app.EnableInClassList("hud-hidden", gameHeader && !edgeHudVisible);
             if (backend.HighContrast) app.AddToClassList("high-contrast");
             ApplyAccessibilityClasses();
             root.Add(app);
@@ -1775,21 +1768,7 @@ namespace SeaOfUncertainty.Prototype
             brand.Add(Text(context, "eyebrow"));
             top.Add(brand);
             top.Add(El("spacer"));
-            if (gameHeader)
-            {
-                if (backend.SelectedMode == OperationMode.SoloVsAi) top.Add(Text("SOLO • BLUE COMMAND", "eyebrow"));
-                top.Add(Text($"NOW READY  •  {backend.Game.Active.Name.ToUpperInvariant()}", "subheading"));
-                top.Add(ActionButton($"CARD TABLE {HeldCardCount(backend.Game.Active.Side)}  •  H", ShowResponseHand, "table-access"));
-                top.Add(ActionButton("LOG  •  L", ShowEventInspector));
-                top.Add(ActionButton(backend.HexGridVisible ? "HEXES ON" : "HEXES OFF", () =>
-                {
-                    backend.ToolkitToggleHexGrid();
-                    ShowGame();
-                }, backend.HexGridVisible ? "selected" : null));
-                top.Add(ActionButton("RULES", ShowRules));
-                top.Add(ActionButton("MENU", ShowPause));
-            }
-            app.Add(top);
+            if (!gameHeader) app.Add(top);
             ApplyResponsiveClass(root.resolvedStyle.width, root.resolvedStyle.height);
         }
 
@@ -1812,6 +1791,8 @@ namespace SeaOfUncertainty.Prototype
         private void CloseOverlay()
         {
             root?.Q<VisualElement>("overlay")?.RemoveFromHierarchy();
+            dossier = null;
+            inspectedFormation = null;
             VisualElement restore = focusBeforeOverlay;
             focusBeforeOverlay = null;
             if (restore != null && restore.panel != null) restore.schedule.Execute(restore.Focus);
@@ -1819,17 +1800,13 @@ namespace SeaOfUncertainty.Prototype
 
         private void OnGlobalKeyDown(KeyDownEvent evt)
         {
-            if (evt.keyCode == KeyCode.Tab && view == View.Game && root.Q<VisualElement>("overlay") == null)
-            {
-                ToggleEdgeHud();
-                evt.PreventDefault();
-                evt.StopPropagation();
-                return;
-            }
             if (evt.keyCode == KeyCode.Escape)
             {
                 if (entropyRevealBlocking) { evt.StopPropagation(); return; }
-                if (root.Q<VisualElement>("overlay") != null) CloseOverlay(); else if (view == View.Game) ShowPause();
+                if (root.Q<VisualElement>("overlay") != null) CloseOverlay();
+                else if (view == View.Game && actionMode != ToolkitActionMode.None) CancelMapOrder();
+                else if (view == View.Game) ShowPause();
+                evt.StopPropagation();
                 return;
             }
             VisualElement focused = root.panel?.focusController?.focusedElement as VisualElement;
@@ -1852,15 +1829,35 @@ namespace SeaOfUncertainty.Prototype
             if (evt.keyCode == KeyCode.G) { backend.ToolkitToggleHexGrid(); ShowGame(); return; }
             if (evt.keyCode == KeyCode.H) { ShowResponseHand(); evt.StopPropagation(); return; }
             if (evt.keyCode == KeyCode.L) { ShowEventInspector(); evt.StopPropagation(); return; }
-            if (evt.keyCode == KeyCode.Alpha1 || evt.keyCode == KeyCode.Keypad1) SelectAction(ToolkitActionMode.Move);
-            else if (evt.keyCode == KeyCode.Alpha2 || evt.keyCode == KeyCode.Keypad2) SelectAction(ToolkitActionMode.Search);
-            else if (evt.keyCode == KeyCode.Alpha3 || evt.keyCode == KeyCode.Keypad3) SelectAction(ToolkitActionMode.Strike);
-            else if (evt.keyCode == KeyCode.Alpha4 || evt.keyCode == KeyCode.Keypad4) ResolveAction(() => backend.ToolkitRecover());
-            else if (evt.keyCode == KeyCode.Alpha5 || evt.keyCode == KeyCode.Keypad5) ResolveAction(() => backend.ToolkitHold());
-            else if (evt.keyCode == KeyCode.Alpha6 || evt.keyCode == KeyCode.Keypad6) ShowPatrolSetup();
-            else if (evt.keyCode == KeyCode.Alpha7 || evt.keyCode == KeyCode.Keypad7) ShowSupportSetup();
-            else if (evt.keyCode == KeyCode.Alpha8 || evt.keyCode == KeyCode.Keypad8) { SelectAction(ToolkitActionMode.Replenish); ShowReplenishmentSetup(); }
+            if (evt.keyCode == KeyCode.Space && focused == map && actionMode == ToolkitActionMode.None)
+            {
+                ShowFormationOrders(OrderAnchor());
+                evt.PreventDefault(); evt.StopPropagation(); return;
+            }
+            if (HandleGameShortcut(evt.keyCode)) { evt.PreventDefault(); evt.StopPropagation(); }
         }
+
+        private bool HandleGameShortcut(KeyCode key)
+        {
+            if (view != View.Game || HasOpenOverlay()) return false;
+            if (key == KeyCode.I) { ShowInspector(); return true; }
+            if (key == KeyCode.T) { ShowReadyQueue(); return true; }
+            FormationCommand? command = null;
+            if (key == KeyCode.Alpha1 || key == KeyCode.Keypad1) command = FormationCommand.Move;
+            else if (key == KeyCode.Alpha2 || key == KeyCode.Keypad2) command = FormationCommand.Search;
+            else if (key == KeyCode.Alpha3 || key == KeyCode.Keypad3) command = FormationCommand.Strike;
+            else if (key == KeyCode.Alpha4 || key == KeyCode.Keypad4) command = FormationCommand.Recover;
+            else if (key == KeyCode.Alpha5 || key == KeyCode.Keypad5) command = FormationCommand.Hold;
+            else if (key == KeyCode.Alpha6 || key == KeyCode.Keypad6) command = FormationCommand.Screen;
+            else if (key == KeyCode.Alpha7 || key == KeyCode.Keypad7) command = FormationCommand.Support;
+            else if (key == KeyCode.Alpha8 || key == KeyCode.Keypad8) command = FormationCommand.Replenish;
+            else if (key == KeyCode.Alpha9 || key == KeyCode.Keypad9) command = FormationCommand.SynchronizedStrike;
+            if (!command.HasValue) return false;
+            ExecuteFormationCommand(command.Value);
+            return true;
+        }
+
+        private bool HasOpenOverlay() => root?.Q<VisualElement>("overlay") != null;
 
         private void OnGlobalKeyUp(KeyUpEvent evt)
         {
@@ -1872,23 +1869,6 @@ namespace SeaOfUncertainty.Prototype
         {
             ApplyResponsiveClass(evt.newRect.width, evt.newRect.height);
             EnsureNativeFullscreenResolution();
-        }
-
-        private void ToggleEdgeHud()
-        {
-            if (view != View.Game || app == null) return;
-            edgeHudVisible = !edgeHudVisible;
-            ApplyEdgeHudState();
-            map?.schedule.Execute(map.Refresh);
-        }
-
-        private void ApplyEdgeHudState()
-        {
-            if (app == null || view != View.Game) return;
-            app.EnableInClassList("hud-hidden", !edgeHudVisible);
-            if (edgeHudToggle == null) return;
-            edgeHudToggle.text = edgeHudVisible ? "HIDE EDGE HUD  •  TAB" : "SHOW EDGE HUD  •  TAB";
-            edgeHudToggle.tooltip = edgeHudVisible ? "Hide the 2D timeline, dossier, and action controls." : "Show the 2D timeline, dossier, and action controls.";
         }
 
         private void ToggleFullscreen()
@@ -1957,6 +1937,7 @@ namespace SeaOfUncertainty.Prototype
         {
             if (entropyRevealBlocking) return;
             if (root?.Q<VisualElement>("overlay") != null) CloseOverlay();
+            else if (view == View.Game && actionMode != ToolkitActionMode.None) CancelMapOrder();
             else if (view == View.Game) ShowPause();
         }
 

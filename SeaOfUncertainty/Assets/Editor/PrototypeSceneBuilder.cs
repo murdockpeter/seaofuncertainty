@@ -746,7 +746,10 @@ namespace SeaOfUncertainty.Editor
                 Assert(operationalMap.UsesFictionalTerrainTreatment && !operationalMap.UsesGeographicElevation, "The no-ETOPO Meridian Veil theater uses the deliberately schematic fictional-terrain material, not the photographic ETOPO land textures");
                 operationalMap.SetState(game, ToolkitActionMode.Move, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
                 operationalMap.SetHoverHex(new HexCoord(2, 3));
+                operationalMap.SetObjectiveEmphasis(true);
+                Assert(operationalMap.ObjectiveEmphasized, "Objective hover emphasizes its public marker");
                 operationalMap.SetState(game, ToolkitActionMode.Search, MoveMode.Normal, SearchMode.Active, Salvo.Standard);
+                Assert(!operationalMap.ObjectiveEmphasized, "Changing map state clears transient objective emphasis");
                 int baselineContactCount = game.Contacts.Count;
                 string enemyId = game.Formations.Find(formation => formation.Side != game.Active.Side).Id;
                 game.Contacts.Add(new ContactState { Owner = game.Active.Side, TargetId = enemyId, LastKnownPosition = new HexCoord(4, 3), Location = LocationQuality.High, Identity = IdentityQuality.Identified, Age = 0 });

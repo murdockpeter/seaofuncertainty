@@ -1,3 +1,5 @@
+> Archived on **2026-10-15**. Historical checklist, superseded by the [active short-term TODO](../../TODO.md). Unchecked items remain unfinished; archiving does not mark them complete or approve a release.
+
 # UI, Accessibility, and Audio QA
 
 Use a clean Windows build and record the build commit, display model, GPU, Windows scaling, input device, and result for every run. A checkbox requires direct observation; automated smoke tests are supporting evidence only.
