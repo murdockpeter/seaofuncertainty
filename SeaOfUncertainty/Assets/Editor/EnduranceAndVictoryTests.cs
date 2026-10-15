@@ -112,7 +112,8 @@ namespace SeaOfUncertainty.EditorTools
             blueSurface.Position = contested.Area.Objective; redSurface.Position = contested.Area.Objective;
             Assert(!contested.Controls(Side.Blue, contested.Area.Objective) && !contested.Controls(Side.Red, contested.Area.Objective), "Opposing capable naval presence must contest control for both sides.");
 
-            var mutual = new PrototypeGame(5702);
+            // Tie fixtures require equal force rosters; the live catalog adds a Red battery.
+            var mutual = new PrototypeGame(5702, ScenarioCatalog.MeridianVeil());
             foreach (FormationState formation in mutual.Formations) formation.Damage = DamageState.Destroyed;
             ScenarioOutcome tied = ScenarioScoring.Evaluate(mutual);
             Assert(!tied.HasWinner && tied.Blue.Eliminated && tied.Red.Eliminated, "Mutual elimination with equal objectives and tie-breaks must remain contested.");
@@ -122,7 +123,7 @@ namespace SeaOfUncertainty.EditorTools
             ScenarioOutcome elimination = ScenarioScoring.Evaluate(eliminated);
             Assert(elimination.HasWinner && elimination.Winner == Side.Red && elimination.DecidingFactor.Contains("eliminated"), "One-sided operational elimination must override points.");
 
-            var damageTieBreak = new PrototypeGame(5704);
+            var damageTieBreak = new PrototypeGame(5704, ScenarioCatalog.MeridianVeil());
             foreach (FormationState formation in damageTieBreak.Formations)
             {
                 formation.Position = formation.Side == Side.Blue ? new HexCoord(3, 3) : new HexCoord(10, 2);

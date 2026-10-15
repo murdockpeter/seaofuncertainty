@@ -24,7 +24,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class AuthoritativeCommand
     {
-        public int Version = 1;
+        public int Version = 3;
         public int Sequence;
         public AuthoritativeCommandKind Kind;
         public Side Side;
@@ -39,6 +39,7 @@ namespace SeaOfUncertainty.Core
         public SearchMode SearchMode;
         public SearchPriority SearchPriority;
         public Salvo Salvo;
+        public WeaponDelivery WeaponDelivery;
         public Reaction Reaction;
         public bool HasEvadeDestination;
         public int EvadeQ;
@@ -67,7 +68,7 @@ namespace SeaOfUncertainty.Core
                     !string.IsNullOrEmpty(decision.SynchronizedStrikeId) ? AuthoritativeCommandKind.ResolveSynchronizedStrike : AuthoritativeCommandKind.Action,
                 Side = actor.Side, ActorId = actor.Id, Action = decision.Action, TargetId = decision.TargetId,
                 EventId = decision.SynchronizedStrikeId, Q = decision.Hex.Q, R = decision.Hex.R,
-                MoveMode = decision.MoveMode, SearchMode = decision.SearchMode, Salvo = decision.Salvo,
+                MoveMode = decision.MoveMode, SearchMode = decision.SearchMode, Salvo = decision.Salvo, WeaponDelivery = string.IsNullOrEmpty(decision.SynchronizedStrikeId) ? decision.WeaponDelivery : WeaponDelivery.Conventional,
                 PatrolPosture = decision.PatrolPosture, SupportKind = decision.SupportKind,
                 UsePriorPlanning = decision.UsePriorPlanning, DeconflictedFormationId = decision.DeconflictedFormationId,
                 ParticipantIds = decision.ParticipantIds == null ? new List<string>() : new List<string>(decision.ParticipantIds)
@@ -121,7 +122,11 @@ namespace SeaOfUncertainty.Core
         {
             message = "Command or game is missing.";
             if (game == null || command == null) return false;
-            if (command.Version != 1) { message = $"Unsupported command version {command.Version}."; return false; }
+            if (command.Version < 1 || command.Version > 3 || !Enum.IsDefined(typeof(WeaponDelivery), command.WeaponDelivery)
+                || command.Version == 1 && command.WeaponDelivery != WeaponDelivery.Conventional)
+            { message = $"Unsupported command version or weapon delivery {command.Version}."; return false; }
+            if (command.WeaponDelivery == WeaponDelivery.Ballistic && !(command.Kind == AuthoritativeCommandKind.Action && command.Action == ActionKind.Strike || command.Version >= 3 && command.Kind == AuthoritativeCommandKind.DeclareSynchronizedStrike))
+            { message = "Ballistic delivery requires an individual Strike or a version 3 synchronized declaration."; return false; }
             FormationState actor = game.Find(command.ActorId);
             if (actor == null) { message = $"Formation {command.ActorId} does not exist."; return false; }
             if (actor.Side != command.Side) { message = "Command side does not own the acting Formation."; return false; }
@@ -138,7 +143,7 @@ namespace SeaOfUncertainty.Core
                         case ActionKind.Search: return game.SearchArea(actor, command.Hex, command.SearchMode, command.SearchPriority, out message);
                         case ActionKind.Strike:
                             if (contact == null) { message = "Command target is not a usable owned Contact."; return false; }
-                            return game.StrikeContact(actor, contact, command.Hex, command.Salvo, command.Reaction, evade, out _, out message);
+                            return game.StrikeContact(actor, contact, command.Hex, command.Salvo, command.Reaction, evade, out _, out message, command.WeaponDelivery);
                         case ActionKind.Patrol: return game.Patrol(actor, command.Hex, command.PatrolPosture, game.Find(command.TargetId), out message);
                         case ActionKind.Support: return game.Support(actor, game.Find(command.TargetId), command.SupportKind, out message);
                         case ActionKind.Recover: return string.IsNullOrEmpty(command.CardId) ? game.Recover(actor, out message) : game.Recover(actor, command.EntropySource, command.CardId, out message);
@@ -157,7 +162,7 @@ namespace SeaOfUncertainty.Core
                     return game.RestoreCommand(actor, out message);
                 case AuthoritativeCommandKind.DeclareSynchronizedStrike:
                     return game.DeclareSynchronizedStrike(actor, command.ParticipantIds.Select(game.Find), contact, command.Hex, command.Salvo,
-                        command.UsePriorPlanning, command.DeconflictedFormationId, out _, out message);
+                        command.UsePriorPlanning, command.DeconflictedFormationId, out _, out message, command.WeaponDelivery);
                 case AuthoritativeCommandKind.ResolveSynchronizedStrike:
                     return game.ResolveSynchronizedStrike(game.SynchronizedStrikes.FirstOrDefault(item => item.Id == command.EventId), command.Reaction,
                         evade, command.ContinueBlind, out _, out message);

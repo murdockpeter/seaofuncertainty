@@ -37,7 +37,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class SideSnapshot
     {
-        public int Version = 1;
+        public int Version = 3;
         public string MatchId;
         public string ScenarioId;
         public Side Viewer;

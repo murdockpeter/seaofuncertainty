@@ -20,6 +20,7 @@ namespace SeaOfUncertainty.Prototype
         private MoveMode moveMode;
         private SearchMode searchMode;
         private Salvo salvo;
+        private WeaponDelivery weaponDelivery;
         private HexCoord keyboardHex;
         private OperationalMap3D presentation;
         private int dragButton = -1;
@@ -28,6 +29,8 @@ namespace SeaOfUncertainty.Prototype
         private bool activeFormationContextCandidate;
         private readonly Label hexReadout;
         private readonly Label headingReadout;
+        private readonly Label coverageReadout;
+        private FormationState pinnedCoverageFormation;
         private bool reducedMotion;
         private Vector2 edgePanInput;
         private readonly ObjectiveReticle objectiveMarker;
@@ -43,6 +46,7 @@ namespace SeaOfUncertainty.Prototype
 
 #if UNITY_EDITOR
         public bool EditorMarkerCardVisible => markerCard.style.display.value == DisplayStyle.Flex;
+        public int EditorEffectCount => presentation?.ActiveEffectCount ?? 0;
         public string EditorMarkerCardText => string.Join("\n", new[] { markerCategory.text, markerTitle.text, markerMetadata.text, markerDescription.text });
         public void EditorInspectHex(HexCoord hex) => InspectHex(hex);
         public void EditorClearMarkerInfo() => HideMarkerInfo();
@@ -162,6 +166,14 @@ namespace SeaOfUncertainty.Prototype
             commandHud.Add(hexReadout);
             commandHud.Add(headingReadout);
             Add(commandHud);
+            coverageReadout = new Label { name = "ballistic-coverage-readout", pickingMode = PickingMode.Ignore };
+            coverageReadout.AddToClassList("map-readout");
+            coverageReadout.style.position = Position.Absolute;
+            coverageReadout.style.left = 12f; coverageReadout.style.bottom = 12f;
+            coverageReadout.style.maxWidth = 480f;
+            coverageReadout.style.whiteSpace = WhiteSpace.Normal;
+            coverageReadout.style.display = DisplayStyle.None;
+            Add(coverageReadout);
             markerLeaders = new MarkerLeaderOverlay();
             Add(markerLeaders);
             objectiveMarker = new ObjectiveReticle();
@@ -196,18 +208,20 @@ namespace SeaOfUncertainty.Prototype
             schedule.Execute(TickPresentation).Every(16);
         }
 
-        public void SetState(PrototypeGame currentGame, ToolkitActionMode mode, MoveMode currentMoveMode, SearchMode currentSearchMode, Salvo currentSalvo, bool useReducedMotion = false, bool showHexGrid = false)
+        public void SetState(PrototypeGame currentGame, ToolkitActionMode mode, MoveMode currentMoveMode, SearchMode currentSearchMode, Salvo currentSalvo, bool useReducedMotion = false, bool showHexGrid = false, WeaponDelivery delivery = WeaponDelivery.Conventional)
         {
             game = currentGame;
+            pinnedCoverageFormation = null;
             actionMode = mode;
             moveMode = currentMoveMode;
             searchMode = currentSearchMode;
             salvo = currentSalvo;
+            weaponDelivery = delivery;
             reducedMotion = useReducedMotion;
             HideMarkerInfo();
             if (game?.Active != null) keyboardHex = game.Active.Position;
             EnsurePresentation();
-            presentation?.SetState(game, actionMode, moveMode, searchMode, salvo, reducedMotion, showHexGrid);
+            presentation?.SetState(game, actionMode, moveMode, searchMode, salvo, reducedMotion, showHexGrid, weaponDelivery);
             UpdateMarkers();
         }
 
@@ -215,6 +229,37 @@ namespace SeaOfUncertainty.Prototype
         {
             UpdateMarkers();
             MarkDirtyRepaint();
+        }
+
+        public void PinBallisticCoverage(FormationState formation)
+        {
+            pinnedCoverageFormation = formation != null && game?.Active != null && formation.Side == game.Active.Side && game.Formations.Contains(formation) ? formation : null;
+            ShowBallisticCoverage(pinnedCoverageFormation);
+        }
+
+        public void ShowFriendlyBallisticCue(SeaPrototypeController.FriendlyBallisticCue cue)
+        {
+            if (cue == null || game?.Active == null || cue.Side != game.Active.Side || !game.Area.Contains(cue.Position)
+                || cue.Kind != OperationalEffectKind.Launch && cue.Kind != OperationalEffectKind.Interception) return;
+            FormationState provider = game.Find(cue.FormationId);
+            if (provider == null || provider.Side != game.Active.Side) return;
+            presentation?.TriggerEffect(cue.Kind, cue.Position);
+        }
+
+        private void ShowBallisticCoverage(FormationState formation)
+        {
+            FormationState provider = null;
+            if (game?.Active != null && formation != null && formation.Side == game.Active.Side && game.Formations.Contains(formation) && !formation.IsDestroyed)
+                provider = formation.BallisticDefense?.Capacity > 0 && !formation.BallisticDefense.SelfDefenseOnly ? formation
+                    : game.FriendlyBallisticCoverage(game.Active.Side, formation).FirstOrDefault() ?? (formation.BallisticDefense?.Capacity > 0 ? formation : null);
+            presentation?.SetBallisticCoverage(provider);
+            coverageReadout.style.display = provider == null ? DisplayStyle.None : DisplayStyle.Flex;
+            if (provider == null) { coverageReadout.text = string.Empty; return; }
+            bool ready = game.FriendlyBallisticDefenseAvailable(game.Active.Side, provider);
+            coverageReadout.text = $"BALLISTIC COVERAGE: {provider.Name} | {provider.BallisticDefense.Interceptors}/{provider.BallisticDefense.Capacity} PACKAGES\n"
+                + (ready ? "GREEN: eligible friendly formations circled. " : "AMBER: nominal range only. ")
+                + game.FriendlyBallisticDefenseStatus(game.Active.Side, provider);
+            coverageReadout.BringToFront();
         }
 
         private void EnsurePresentation()
@@ -254,7 +299,7 @@ namespace SeaOfUncertainty.Prototype
             {
                 bool eligible = actionMode == ToolkitActionMode.Search ? SearchEligible(contact) : actionMode == ToolkitActionMode.Strike && StrikeEligible(contact);
                 FormationState target = game.Find(contact.TargetId);
-                string contactCode = contact.Identity == IdentityQuality.Identified && target != null ? Code(target.Kind) : "?";
+                string contactCode = contact.Identity == IdentityQuality.Identified && target != null ? Code(target.Kind) : contact.Domain == ContactDomain.Land ? "L" : "?";
                 Label marker = Marker(contact.LastKnownPosition, "◇ " + contactCode, eligible ? 88 : 76, new Vector2(34f, 26f), "map-marker", "contact");
                 markerLayouts.Last().Contact = contact;
                 if (eligible) marker.AddToClassList("eligible");
@@ -271,6 +316,7 @@ namespace SeaOfUncertainty.Prototype
             }
             LayoutMarkers();
             Vector2 objective = presentation.Project(game.Area.Objective, contentRect);
+            ShowBallisticCoverage(pinnedCoverageFormation);
             objectiveMarker.style.display = contentRect.Contains(objective) ? DisplayStyle.Flex : DisplayStyle.None;
             objectiveMarker.style.left = objective.x - 18f;
             objectiveMarker.style.top = objective.y - 18f;
@@ -365,6 +411,7 @@ namespace SeaOfUncertainty.Prototype
             {
                 MapMarkerDetails details = marker.Formation != null ? MapMarkerDetails.Formation(game, marker.Formation) : MapMarkerDetails.Contact(game, marker.Contact, marker.Hex);
                 ShowMarkerInfo(details, marker.Bounds.center, false);
+                ShowBallisticCoverage(marker.Formation ?? pinnedCoverageFormation);
                 return;
             }
             Vector2 objective = presentation.Project(game.Area.Objective, contentRect);
@@ -394,9 +441,10 @@ namespace SeaOfUncertainty.Prototype
         private void ShowHexInfo(HexCoord hex, bool preferObjective)
         {
             Vector2 anchor = presentation == null ? contentRect.center : presentation.Project(hex, contentRect);
-            if (preferObjective && hex.Equals(game.Area.Objective)) { ShowMarkerInfo(MapMarkerDetails.Objective(game), anchor, true); return; }
+            if (preferObjective && hex.Equals(game.Area.Objective)) { ShowBallisticCoverage(pinnedCoverageFormation); ShowMarkerInfo(MapMarkerDetails.Objective(game), anchor, true); return; }
             FormationState formation = game.Formations.FirstOrDefault(item => item.Side == game.Active.Side && !item.IsDestroyed && item.Position.Equals(hex));
-            if (formation != null) { ShowMarkerInfo(MapMarkerDetails.Formation(game, formation), anchor, false); return; }
+            if (formation != null) { ShowMarkerInfo(MapMarkerDetails.Formation(game, formation), anchor, false); ShowBallisticCoverage(formation); return; }
+            ShowBallisticCoverage(pinnedCoverageFormation);
             ContactState contact = game.Contacts.FirstOrDefault(item => item.Owner == game.Active.Side && !item.IsLost && (item.LastKnownPosition.Equals(hex) || (item.HasContradictoryPosition && item.ContradictoryPosition.Equals(hex))));
             if (contact != null) { ShowMarkerInfo(MapMarkerDetails.Contact(game, contact, hex), anchor, false); return; }
             OperationalLocationDefinition location = game.Area.Locations.FirstOrDefault(item => item.Hex.Equals(hex));
@@ -453,6 +501,7 @@ namespace SeaOfUncertainty.Prototype
             objectiveMarker.Emphasized = false;
             objectiveMarker.MarkDirtyRepaint();
             presentation?.SetObjectiveEmphasis(false);
+            ShowBallisticCoverage(pinnedCoverageFormation);
         }
 
         private void OnPointerDown(PointerDownEvent evt)
@@ -692,12 +741,11 @@ namespace SeaOfUncertainty.Prototype
         private bool StrikeEligible(ContactState contact)
         {
             if (game?.Active == null || contact == null) return false;
-            if (!game.ContactPossibleHexes(contact).Any(hex => HexCoord.Distance(game.Active.Position, hex) <= game.StrikeRangeFor(game.Active, salvo))) return false;
-            return salvo != Salvo.Heavy || game.Active.CanHeavySalvo;
+            return game.ContactPossibleHexes(contact).Any(hex => game.CanStrikeContact(game.Active, contact, hex, salvo, weaponDelivery, out _));
         }
 
         private bool SearchEligible(ContactState contact) => game?.Active != null && contact != null && HexCoord.Distance(game.Active.Position, contact.LastKnownPosition) <= game.SearchRangeFor(game.Active, searchMode);
 
-        private static string Code(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SG" : kind == FormationKind.Submarine ? "SS" : kind == FormationKind.AirGroup ? "AG" : "LG";
+        private static string Code(FormationKind kind) => kind == FormationKind.CarrierGroup ? "CV" : kind == FormationKind.SurfaceGroup ? "SG" : kind == FormationKind.Submarine ? "SS" : kind == FormationKind.AirGroup ? "AG" : kind == FormationKind.BallisticMissileBattery ? "BM" : "LG";
     }
 }

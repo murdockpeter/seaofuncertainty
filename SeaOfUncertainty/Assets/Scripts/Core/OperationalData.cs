@@ -32,6 +32,8 @@ namespace SeaOfUncertainty.Core
     {
         public string Id;
         public string Name;
+        public bool SupportsBallisticReload;
+        public bool SupportsInterceptorReload;
         public List<HexCoord> Hexes = new List<HexCoord>();
     }
 
@@ -74,7 +76,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class OperationalAreaDefinition
     {
-        public int SchemaVersion = 3;
+        public int SchemaVersion = 8;
         public string Id;
         public string DisplayName;
         public string Version;
@@ -112,6 +114,8 @@ namespace SeaOfUncertainty.Core
         public int ReadyTime;
         public Ratings Ratings;
         public WeaponInventoryState Weapons = new WeaponInventoryState();
+        public BallisticWeaponProfile BallisticWeapons = new BallisticWeaponProfile();
+        public BallisticDefenseProfile BallisticDefense = new BallisticDefenseProfile();
     }
 
     [Serializable]
@@ -180,7 +184,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class ScenarioDefinition
     {
-        public int SchemaVersion = 6;
+        public int SchemaVersion = 8;
         public string Id;
         public string DisplayName;
         public string Summary;
@@ -433,6 +437,7 @@ namespace SeaOfUncertainty.Core
             scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.Submarine, Passive = 6, Active = 8, Focused = 10 });
             scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.AirGroup, Passive = 10, Active = 12, Focused = 14 });
             scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.LogisticsGroup, Passive = 4, Active = 6, Focused = 8 });
+            scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.BallisticMissileBattery, Passive = 2, Active = 3, Focused = 4 });
         }
 
         public static void AddPrototypeMissileDefenseProfiles(ScenarioDefinition scenario)
@@ -444,6 +449,7 @@ namespace SeaOfUncertainty.Core
             scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.Submarine, OuterLayer = 0, AreaLayer = 0, PointLayer = 0 });
             scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.AirGroup, OuterLayer = 0, AreaLayer = 1, PointLayer = 1 });
             scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.LogisticsGroup, OuterLayer = 0, AreaLayer = 0, PointLayer = 1 });
+            scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.BallisticMissileBattery });
         }
     }
 
@@ -496,7 +502,7 @@ namespace SeaOfUncertainty.Core
             IEnumerable<OperationalRegionDefinition> allScenarioRegions = scenario.DeploymentRegions.Concat(scenario.ReinforcementRegions).Concat(scenario.ExitRegions).Concat(scenario.LogisticsRegions).Concat(scenario.Area.Regions).Concat(scenario.Area.RestrictedAreas).Distinct();
             // A region may serve several roles, including after JSON round trips. Definitions must agree.
             foreach (IGrouping<string, OperationalRegionDefinition> duplicate in allScenarioRegions.GroupBy(region => region.Id, StringComparer.OrdinalIgnoreCase)
-                .Where(group => string.IsNullOrWhiteSpace(group.Key) || group.Any(region => !region.Hexes.SequenceEqual(group.First().Hexes))))
+                .Where(group => string.IsNullOrWhiteSpace(group.Key) || group.Any(region => !region.Hexes.SequenceEqual(group.First().Hexes) || region.SupportsBallisticReload != group.First().SupportsBallisticReload || region.SupportsInterceptorReload != group.First().SupportsInterceptorReload)))
                 errors.Add("Region ID is missing or duplicated with conflicting hexes: " + duplicate.Key);
             foreach (List<OperationalRegionDefinition> role in new[] { scenario.Area.Regions, scenario.Area.RestrictedAreas, scenario.DeploymentRegions, scenario.ReinforcementRegions, scenario.ExitRegions, scenario.LogisticsRegions })
                 if (role.GroupBy(region => region.Id, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1)) errors.Add("Region ID is duplicated within a region list.");
@@ -505,12 +511,13 @@ namespace SeaOfUncertainty.Core
                 if (string.IsNullOrWhiteSpace(region.Id)) errors.Add("Region ID is missing.");
                 if (region.Hexes.Count == 0) errors.Add("Region has no hexes: " + region.Id);
                 if (region.Hexes.Any(hex => !scenario.Area.Contains(hex))) errors.Add("Region contains an invalid hex: " + region.Id);
-                bool requiresNavigableWater = scenario.DeploymentRegions.Contains(region) || scenario.ReinforcementRegions.Contains(region) || scenario.ExitRegions.Contains(region);
+                bool groundSetup = !scenario.ExitRegions.Contains(region) && region.Hexes.Any(hex => scenario.Area.TerrainAt(hex) == OperationalTerrain.Land) && scenario.Formations.Concat(scenario.ScheduledEvents.Where(item => item.Reinforcement != null).Select(item => item.Reinforcement)).Any(item => item.Kind == FormationKind.BallisticMissileBattery);
+                bool requiresNavigableWater = (scenario.DeploymentRegions.Contains(region) || scenario.ReinforcementRegions.Contains(region) || scenario.ExitRegions.Contains(region)) && !groundSetup;
                 if (requiresNavigableWater && !region.Hexes.Any(hex => Navigable(scenario.Area, hex))) errors.Add("Region has no navigable access hex: " + region.Id);
                 bool isLogistics = scenario.LogisticsRegions.Contains(region);
                 bool anchoredByFacility = region.Hexes.Any(hex => scenario.Area.Locations.Any(location => location.Hex.Equals(hex) && (location.Kind == LocationKind.Port || location.Kind == LocationKind.Airfield || location.Kind == LocationKind.Anchorage)));
                 if (isLogistics && !anchoredByFacility) errors.Add("Logistics region has no port, airfield, or anchorage: " + region.Id);
-                if ((scenario.DeploymentRegions.Contains(region) || scenario.ReinforcementRegions.Contains(region)) && !region.Hexes.Any(hex => HasWaterPath(scenario.Area, hex, scenario.Area.Objective))) errors.Add("Setup region cannot reach the objective by water: " + region.Id);
+                if (!groundSetup && (scenario.DeploymentRegions.Contains(region) || scenario.ReinforcementRegions.Contains(region)) && !region.Hexes.Any(hex => HasWaterPath(scenario.Area, hex, scenario.Area.Objective))) errors.Add("Setup region cannot reach the objective by water: " + region.Id);
             }
             foreach (ContactDefinition contact in scenario.Contacts)
             {
@@ -576,7 +583,7 @@ namespace SeaOfUncertainty.Core
             foreach (FormationKind kind in Enum.GetValues(typeof(FormationKind)))
                 if (scenario.WeaponRanges.Count(profile => profile.Kind == kind) != 1) errors.Add("Weapon-range profile is missing or duplicated: " + kind);
             foreach (WeaponRangeDefinition profile in scenario.WeaponRanges)
-                if (!Defined(profile.Kind) || profile.Light < 1 || profile.Standard < profile.Light || profile.Heavy < profile.Standard) errors.Add("Weapon ranges must be positive and ordered Light <= Standard <= Heavy: " + profile.Kind);
+                if (!Defined(profile.Kind) || (profile.Kind == FormationKind.BallisticMissileBattery ? profile.Light != 0 || profile.Standard != 0 || profile.Heavy != 0 : profile.Light < 1 || profile.Standard < profile.Light || profile.Heavy < profile.Standard)) errors.Add("Weapon ranges must be positive and ordered Light <= Standard <= Heavy: " + profile.Kind);
             var formationIds = new HashSet<string>(scenario.Formations.Select(item => item.Id), StringComparer.OrdinalIgnoreCase);
             var eventIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (ScheduledScenarioEventDefinition scheduled in scenario.ScheduledEvents)
@@ -591,7 +598,7 @@ namespace SeaOfUncertainty.Core
                 ValidateFormation(scenario, reinforcement, false, errors);
                 OperationalRegionDefinition entry = scenario.ReinforcementRegions.Concat(area.Regions).FirstOrDefault(item => item.Id == scheduled.RegionId);
                 if (entry == null) errors.Add("Reinforcement event requires a reinforcement or area entry region: " + scheduled.Id);
-                else if (!entry.Hexes.Any(hex => CanDeploy(scenario, reinforcement.Kind, hex) && (reinforcement.Kind == FormationKind.AirGroup || HasWaterPath(area, hex, area.Objective)))) errors.Add("Reinforcement entry cannot reach the objective: " + scheduled.Id);
+                else if (!entry.Hexes.Any(hex => CanDeploy(scenario, reinforcement.Kind, hex) && (reinforcement.Kind == FormationKind.AirGroup || reinforcement.Kind == FormationKind.BallisticMissileBattery || HasWaterPath(area, hex, area.Objective)))) errors.Add("Reinforcement entry cannot reach the objective: " + scheduled.Id);
             }
             IEnumerable<OperationalRegionDefinition> destinations = scenario.ExitRegions.Concat(scenario.Objectives
                 .Where(item => item.Kind == ScenarioObjectiveKind.Transit || item.Kind == ScenarioObjectiveKind.Withdrawal)
@@ -603,7 +610,7 @@ namespace SeaOfUncertainty.Core
 
         private static bool CanDeploy(ScenarioDefinition scenario, FormationKind kind, HexCoord hex)
             => scenario.Area.Contains(hex) && !scenario.Area.RestrictedAreas.Any(region => region.Hexes.Contains(hex))
-                && (kind == FormationKind.AirGroup || Navigable(scenario.Area, hex));
+                && (kind == FormationKind.BallisticMissileBattery ? scenario.Area.TerrainAt(hex) == OperationalTerrain.Land : kind == FormationKind.AirGroup || Navigable(scenario.Area, hex));
 
         private static bool Navigable(OperationalAreaDefinition area, HexCoord hex)
             => area.Contains(hex) && !area.RestrictedAreas.Any(region => region.Hexes.Contains(hex))
@@ -616,6 +623,10 @@ namespace SeaOfUncertainty.Core
             if (formation.Ratings == null) errors.Add("Formation ratings are required: " + formation.Id);
             else if (formation.Ratings.Move < 0 || formation.Ratings.Search < 0 || formation.Ratings.Strike < 0 || formation.Ratings.Defense < 0 || formation.Ratings.Asw < 0 || formation.Ratings.Command < 0 || formation.Ratings.ElectronicWarfare < 0 || formation.Ratings.Cyber < 0) errors.Add("Formation ratings other than Signature must be nonnegative: " + formation.Id);
             WeaponInventoryState weapons = formation.Weapons;
+            if (formation.BallisticDefense == null || !formation.BallisticDefense.IsValid) errors.Add("Ballistic defense requires rating 0..6, finite stocks, legal coverage/domains/depth and self-defense settings: " + formation.Id);
+            BallisticWeaponProfile ballistic = formation.BallisticWeapons;
+            if (ballistic == null || !ballistic.IsValid)
+                errors.Add("Ballistic profile requires legal range, bounded modifier (-6..6), finite inventory, explicit domains/depth and Contact thresholds: " + formation.Id);
             if (weapons == null || weapons.Light < 0 || weapons.Standard < 0 || weapons.Heavy < 0 || weapons.MaxLight < weapons.Light || weapons.MaxStandard < weapons.Standard || weapons.MaxHeavy < weapons.Heavy) errors.Add("Weapon inventories must be nonnegative and no larger than capacity: " + formation.Id);
             if (deployed && !CanDeploy(scenario, formation.Kind, new HexCoord(formation.Q, formation.R))) errors.Add("Illegal terrain, restricted area, or deployment hex: " + formation.Id);
         }
@@ -646,7 +657,7 @@ namespace SeaOfUncertainty.Core
 
     public static class OperationalDataMigration
     {
-        public const int CurrentSchemaVersion = 6;
+        public const int CurrentSchemaVersion = 8;
 
         public static ScenarioDefinition Migrate(ScenarioDefinition scenario)
         {
@@ -664,6 +675,18 @@ namespace SeaOfUncertainty.Core
             if (scenario.WeaponRanges.Count == 0 && scenario.SchemaVersion < 6) scenario.WeaponRanges = ScenarioAuthoringCatalog.DefaultWeaponRanges();
             if (scenario.MissileDefenseProfiles == null) scenario.MissileDefenseProfiles = new List<MissileDefenseProfileDefinition>();
             if (scenario.ScheduledEvents == null) scenario.ScheduledEvents = new List<ScheduledScenarioEventDefinition>();
+            if (scenario.SchemaVersion < 7)
+            {
+                foreach (FormationDefinition formation in scenario.Formations.Concat(scenario.ScheduledEvents.Where(item => item.Reinforcement != null).Select(item => item.Reinforcement)))
+                    formation.BallisticWeapons = new BallisticWeaponProfile();
+                foreach (OperationalRegionDefinition region in scenario.LogisticsRegions) region.SupportsBallisticReload = false;
+                AddBatteryProfiles(scenario);
+            }
+            if (scenario.SchemaVersion < 8)
+            {
+                foreach (FormationDefinition formation in scenario.Formations.Concat(scenario.ScheduledEvents.Where(item => item.Reinforcement != null).Select(item => item.Reinforcement))) formation.BallisticDefense = new BallisticDefenseProfile();
+                foreach (OperationalRegionDefinition region in scenario.LogisticsRegions) region.SupportsInterceptorReload = false;
+            }
             if (scenario.Objectives == null) scenario.Objectives = new List<ScenarioObjectiveDefinition>();
             ScenarioCatalog.AddPrototypeSensorRanges(scenario);
             ScenarioCatalog.AddPrototypeMissileDefenseProfiles(scenario);
@@ -671,6 +694,13 @@ namespace SeaOfUncertainty.Core
             scenario.SchemaVersion = CurrentSchemaVersion;
             scenario.Area.SchemaVersion = CurrentSchemaVersion;
             return scenario;
+        }
+
+        public static void AddBatteryProfiles(ScenarioDefinition scenario)
+        {
+            if (scenario.SensorRanges != null && !scenario.SensorRanges.Any(profile => profile != null && profile.Kind == FormationKind.BallisticMissileBattery)) scenario.SensorRanges.Add(new SensorRangeDefinition { Kind = FormationKind.BallisticMissileBattery, Passive = 2, Active = 3, Focused = 4 });
+            if (scenario.WeaponRanges != null && !scenario.WeaponRanges.Any(profile => profile != null && profile.Kind == FormationKind.BallisticMissileBattery)) scenario.WeaponRanges.Add(new WeaponRangeDefinition { Kind = FormationKind.BallisticMissileBattery });
+            if (scenario.MissileDefenseProfiles != null && !scenario.MissileDefenseProfiles.Any(profile => profile != null && profile.Kind == FormationKind.BallisticMissileBattery)) scenario.MissileDefenseProfiles.Add(new MissileDefenseProfileDefinition { Kind = FormationKind.BallisticMissileBattery });
         }
     }
 

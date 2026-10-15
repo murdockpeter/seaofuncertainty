@@ -1,53 +1,2466 @@
 {
-  "Version": 1,
-  "Scenarios": [
-    {
-      "Id": "meridian-veil",
-      "DisplayName": "Meridian Veil",
-      "Summary": "Two naval forces converge on the Inner Sea.",
-      "Horizon": 16,
-      "Weather": "Clear",
-      "WeatherSeverity": 0,
-      "SpecialRules": "Fixed paired-test deployment with finite magazines and layered defense.",
-      "VictoryConditions": "Score operational control, transit, escort, denial, and carrier preservation/withdrawal at T16. Damage breaks tied operational scores.",
-      "BlueCommandArchitecture": 1,
-      "RedCommandArchitecture": 1,
-      "Formations": [
-        {"Id":"B-CV","Name":"CSG Resolute","Side":0,"Kind":0,"Q":1,"R":4,"ReadyTime":1,"Ratings":{"Move":2,"Search":3,"Signature":1,"Strike":4,"Defense":3,"Asw":1,"Command":1,"ElectronicWarfare":2,"Cyber":2},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
-        {"Id":"B-SG","Name":"SAG Valiant","Side":0,"Kind":1,"Q":2,"R":7,"ReadyTime":0,"Ratings":{"Move":2,"Search":2,"Signature":2,"Strike":3,"Defense":3,"Asw":3,"Command":2,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
-        {"Id":"B-SS","Name":"SSN Nightfall","Side":0,"Kind":2,"Q":0,"R":7,"ReadyTime":0,"Ratings":{"Move":2,"Search":3,"Signature":-1,"Strike":3,"Defense":2,"Asw":3,"Command":3,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":3,"Standard":2,"Heavy":1,"MaxLight":3,"MaxStandard":2,"MaxHeavy":1}},
-        {"Id":"B-AG","Name":"Air Group Kestrel","Side":0,"Kind":3,"Q":3,"R":2,"ReadyTime":1,"Ratings":{"Move":3,"Search":3,"Signature":2,"Strike":3,"Defense":2,"Asw":2,"Command":2,"ElectronicWarfare":2,"Cyber":1},"Weapons":{"Light":4,"Standard":2,"Heavy":1,"MaxLight":4,"MaxStandard":2,"MaxHeavy":1}},
-        {"Id":"B-LG","Name":"Fleet Train Haven","Side":0,"Kind":4,"Q":1,"R":3,"ReadyTime":2,"Ratings":{"Move":1,"Search":1,"Signature":3,"Strike":1,"Defense":2,"Asw":0,"Command":1,"ElectronicWarfare":0,"Cyber":0},"Weapons":{"Light":1,"Standard":0,"Heavy":0,"MaxLight":1,"MaxStandard":0,"MaxHeavy":0}},
-        {"Id":"R-CV","Name":"CVG Tempest","Side":1,"Kind":0,"Q":10,"R":5,"ReadyTime":1,"Ratings":{"Move":2,"Search":3,"Signature":1,"Strike":4,"Defense":3,"Asw":1,"Command":1,"ElectronicWarfare":2,"Cyber":2},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
-        {"Id":"R-SG","Name":"Surface Action Two","Side":1,"Kind":1,"Q":9,"R":2,"ReadyTime":0,"Ratings":{"Move":2,"Search":2,"Signature":2,"Strike":3,"Defense":3,"Asw":3,"Command":2,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
-        {"Id":"R-SS","Name":"Hunter Submarine","Side":1,"Kind":2,"Q":11,"R":2,"ReadyTime":0,"Ratings":{"Move":2,"Search":3,"Signature":-1,"Strike":3,"Defense":2,"Asw":3,"Command":3,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":3,"Standard":2,"Heavy":1,"MaxLight":3,"MaxStandard":2,"MaxHeavy":1}},
-        {"Id":"R-AG","Name":"Air Group Ember","Side":1,"Kind":3,"Q":8,"R":8,"ReadyTime":1,"Ratings":{"Move":3,"Search":3,"Signature":2,"Strike":3,"Defense":2,"Asw":2,"Command":2,"ElectronicWarfare":2,"Cyber":1},"Weapons":{"Light":4,"Standard":2,"Heavy":1,"MaxLight":4,"MaxStandard":2,"MaxHeavy":1}},
-        {"Id":"R-LG","Name":"Fleet Train Harbor","Side":1,"Kind":4,"Q":10,"R":6,"ReadyTime":2,"Ratings":{"Move":1,"Search":1,"Signature":3,"Strike":1,"Defense":2,"Asw":0,"Command":1,"ElectronicWarfare":0,"Cyber":0},"Weapons":{"Light":1,"Standard":0,"Heavy":0,"MaxLight":1,"MaxStandard":0,"MaxHeavy":0}}
-      ]
-    },
-    {
-      "Id": "northern-gateway",
-      "DisplayName": "Northern Gateway",
-      "Summary": "Fictional forces contest the Luzon Strait and its northern approaches.",
-      "Horizon": 24,
-      "Weather": "Maritime haze",
-      "WeatherSeverity": 1,
-      "SpecialRules": "Real geography with asymmetric command architectures, scheduled reinforcement, and changing weather.",
-      "VictoryConditions": "Score operational control, transit, escort, denial, and carrier preservation/withdrawal at T24. Damage breaks tied operational scores.",
-      "BlueCommandArchitecture": 2,
-      "RedCommandArchitecture": 0,
-      "Formations": [
-        {"Id":"B-CV-L","Name":"CSG Horizon","Side":0,"Kind":0,"Q":2,"R":10,"ReadyTime":1,"Ratings":{"Move":2,"Search":3,"Signature":1,"Strike":4,"Defense":3,"Asw":1,"Command":2,"ElectronicWarfare":2,"Cyber":2},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
-        {"Id":"B-SG-L","Name":"SAG Lantern","Side":0,"Kind":1,"Q":3,"R":7,"ReadyTime":0,"Ratings":{"Move":2,"Search":2,"Signature":2,"Strike":3,"Defense":3,"Asw":3,"Command":2,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
-        {"Id":"B-SS-L","Name":"SSN Wayfinder","Side":0,"Kind":2,"Q":4,"R":13,"ReadyTime":0,"Ratings":{"Move":2,"Search":3,"Signature":-1,"Strike":3,"Defense":2,"Asw":3,"Command":3,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":3,"Standard":2,"Heavy":1,"MaxLight":3,"MaxStandard":2,"MaxHeavy":1}},
-        {"Id":"B-AG-L","Name":"Air Group Meridian","Side":0,"Kind":3,"Q":5,"R":9,"ReadyTime":1,"Ratings":{"Move":3,"Search":3,"Signature":2,"Strike":3,"Defense":2,"Asw":2,"Command":2,"ElectronicWarfare":2,"Cyber":1},"Weapons":{"Light":4,"Standard":2,"Heavy":1,"MaxLight":4,"MaxStandard":2,"MaxHeavy":1}},
-        {"Id":"B-LG-L","Name":"Fleet Train West","Side":0,"Kind":4,"Q":2,"R":12,"ReadyTime":2,"Ratings":{"Move":1,"Search":1,"Signature":3,"Strike":1,"Defense":2,"Asw":0,"Command":1,"ElectronicWarfare":0,"Cyber":0},"Weapons":{"Light":1,"Standard":0,"Heavy":0,"MaxLight":1,"MaxStandard":0,"MaxHeavy":0}},
-        {"Id":"R-CV-L","Name":"CVG Typhoon","Side":1,"Kind":0,"Q":21,"R":8,"ReadyTime":1,"Ratings":{"Move":2,"Search":3,"Signature":1,"Strike":4,"Defense":3,"Asw":1,"Command":2,"ElectronicWarfare":2,"Cyber":2},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
-        {"Id":"R-SG-L","Name":"SAG Monsoon","Side":1,"Kind":1,"Q":20,"R":12,"ReadyTime":0,"Ratings":{"Move":2,"Search":2,"Signature":2,"Strike":3,"Defense":3,"Asw":3,"Command":2,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":4,"Standard":3,"Heavy":1,"MaxLight":4,"MaxStandard":3,"MaxHeavy":1}},
-        {"Id":"R-SS-L","Name":"Submarine Shade","Side":1,"Kind":2,"Q":18,"R":6,"ReadyTime":0,"Ratings":{"Move":2,"Search":3,"Signature":-1,"Strike":3,"Defense":2,"Asw":3,"Command":3,"ElectronicWarfare":1,"Cyber":1},"Weapons":{"Light":3,"Standard":2,"Heavy":1,"MaxLight":3,"MaxStandard":2,"MaxHeavy":1}},
-        {"Id":"R-AG-L","Name":"Air Group Squall","Side":1,"Kind":3,"Q":19,"R":10,"ReadyTime":1,"Ratings":{"Move":3,"Search":3,"Signature":2,"Strike":3,"Defense":2,"Asw":2,"Command":2,"ElectronicWarfare":2,"Cyber":1},"Weapons":{"Light":4,"Standard":2,"Heavy":1,"MaxLight":4,"MaxStandard":2,"MaxHeavy":1}},
-        {"Id":"R-LG-L","Name":"Fleet Train East","Side":1,"Kind":4,"Q":21,"R":10,"ReadyTime":2,"Ratings":{"Move":1,"Search":1,"Signature":3,"Strike":1,"Defense":2,"Asw":0,"Command":1,"ElectronicWarfare":0,"Cyber":0},"Weapons":{"Light":1,"Standard":0,"Heavy":0,"MaxLight":1,"MaxStandard":0,"MaxHeavy":0}}
-      ]
-    }
-  ]
+    "Version": 4,
+    "Scenarios": [
+        {
+            "Id": "meridian-veil",
+            "TheaterTemplateId": "meridian-veil-archipelago",
+            "DisplayName": "Meridian Veil",
+            "Summary": "Two naval forces converge on the Inner Sea. Limited ballistic salvos and finite escort interception add missile-defense decisions.",
+            "Horizon": 16,
+            "Weather": "Clear",
+            "WeatherSeverity": 0,
+            "SpecialRules": "Fixed paired-test deployment with finite magazines and layered defense. Ballistic playtest: each submarine and the Red land battery carries two ballistic packages (surface/land targets only). Surface groups carry three interceptor packages, rating 4, covering friendly surface formations within four hexes; carriers carry one rating-2 self-defense package. Initial intelligence provides a fresh general carrier fix to each side. Existing logistics sites support separate ballistic and interceptor reloads, subject to normal logistics access. Launching raises signature; interceptions spend ammunition without consuming the ordinary Reaction. Stocks and ratings are provisional playtest values.",
+            "VictoryConditions": "Score operational control, transit, escort, denial, and carrier preservation/withdrawal at T16. Damage breaks tied operational scores.",
+            "BlueCommandArchitecture": 1,
+            "RedCommandArchitecture": 1,
+            "Formations": [
+                {
+                    "Id": "B-CV",
+                    "Name": "CSG Resolute",
+                    "Side": 0,
+                    "Kind": 0,
+                    "Q": 1,
+                    "R": 4,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 3,
+                        "Signature": 1,
+                        "Strike": 4,
+                        "Defense": 3,
+                        "Asw": 1,
+                        "Command": 1,
+                        "ElectronicWarfare": 2,
+                        "Cyber": 2
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 3,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 3,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 2,
+                        "Interceptors": 1,
+                        "Capacity": 1,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [
+                            1
+                        ],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": true,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "B-SG",
+                    "Name": "SAG Valiant",
+                    "Side": 0,
+                    "Kind": 1,
+                    "Q": 2,
+                    "R": 7,
+                    "ReadyTime": 0,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 2,
+                        "Signature": 2,
+                        "Strike": 3,
+                        "Defense": 3,
+                        "Asw": 3,
+                        "Command": 2,
+                        "ElectronicWarfare": 1,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 3,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 3,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 4,
+                        "Interceptors": 3,
+                        "Capacity": 3,
+                        "CoverageRadius": 4,
+                        "ProtectedDomains": [
+                            1
+                        ],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "B-SS",
+                    "Name": "SSN Nightfall",
+                    "Side": 0,
+                    "Kind": 2,
+                    "Q": 0,
+                    "R": 7,
+                    "ReadyTime": 0,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 3,
+                        "Signature": -1,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 3,
+                        "Command": 3,
+                        "ElectronicWarfare": 1,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 3,
+                        "Standard": 2,
+                        "Heavy": 1,
+                        "MaxLight": 3,
+                        "MaxStandard": 2,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 14,
+                        "AttackModifier": 1,
+                        "Ammunition": 2,
+                        "Capacity": 2,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [
+                            1,
+                            4
+                        ],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "B-AG",
+                    "Name": "Air Group Kestrel",
+                    "Side": 0,
+                    "Kind": 3,
+                    "Q": 3,
+                    "R": 2,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 3,
+                        "Search": 3,
+                        "Signature": 2,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 2,
+                        "Command": 2,
+                        "ElectronicWarfare": 2,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 2,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 2,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "B-LG",
+                    "Name": "Fleet Train Haven",
+                    "Side": 0,
+                    "Kind": 4,
+                    "Q": 1,
+                    "R": 3,
+                    "ReadyTime": 2,
+                    "Ratings": {
+                        "Move": 1,
+                        "Search": 1,
+                        "Signature": 3,
+                        "Strike": 1,
+                        "Defense": 2,
+                        "Asw": 0,
+                        "Command": 1,
+                        "ElectronicWarfare": 0,
+                        "Cyber": 0
+                    },
+                    "Weapons": {
+                        "Light": 1,
+                        "Standard": 0,
+                        "Heavy": 0,
+                        "MaxLight": 1,
+                        "MaxStandard": 0,
+                        "MaxHeavy": 0
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-CV",
+                    "Name": "CVG Tempest",
+                    "Side": 1,
+                    "Kind": 0,
+                    "Q": 10,
+                    "R": 5,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 3,
+                        "Signature": 1,
+                        "Strike": 4,
+                        "Defense": 3,
+                        "Asw": 1,
+                        "Command": 1,
+                        "ElectronicWarfare": 2,
+                        "Cyber": 2
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 3,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 3,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 2,
+                        "Interceptors": 1,
+                        "Capacity": 1,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [
+                            1
+                        ],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": true,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-SG",
+                    "Name": "Surface Action Two",
+                    "Side": 1,
+                    "Kind": 1,
+                    "Q": 9,
+                    "R": 2,
+                    "ReadyTime": 0,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 2,
+                        "Signature": 2,
+                        "Strike": 3,
+                        "Defense": 3,
+                        "Asw": 3,
+                        "Command": 2,
+                        "ElectronicWarfare": 1,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 3,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 3,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 4,
+                        "Interceptors": 3,
+                        "Capacity": 3,
+                        "CoverageRadius": 4,
+                        "ProtectedDomains": [
+                            1
+                        ],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-SS",
+                    "Name": "Hunter Submarine",
+                    "Side": 1,
+                    "Kind": 2,
+                    "Q": 11,
+                    "R": 2,
+                    "ReadyTime": 0,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 3,
+                        "Signature": -1,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 3,
+                        "Command": 3,
+                        "ElectronicWarfare": 1,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 3,
+                        "Standard": 2,
+                        "Heavy": 1,
+                        "MaxLight": 3,
+                        "MaxStandard": 2,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 14,
+                        "AttackModifier": 1,
+                        "Ammunition": 2,
+                        "Capacity": 2,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [
+                            1,
+                            4
+                        ],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-AG",
+                    "Name": "Air Group Ember",
+                    "Side": 1,
+                    "Kind": 3,
+                    "Q": 8,
+                    "R": 8,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 3,
+                        "Search": 3,
+                        "Signature": 2,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 2,
+                        "Command": 2,
+                        "ElectronicWarfare": 2,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 2,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 2,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-LG",
+                    "Name": "Fleet Train Harbor",
+                    "Side": 1,
+                    "Kind": 4,
+                    "Q": 10,
+                    "R": 6,
+                    "ReadyTime": 2,
+                    "Ratings": {
+                        "Move": 1,
+                        "Search": 1,
+                        "Signature": 3,
+                        "Strike": 1,
+                        "Defense": 2,
+                        "Asw": 0,
+                        "Command": 1,
+                        "ElectronicWarfare": 0,
+                        "Cyber": 0
+                    },
+                    "Weapons": {
+                        "Light": 1,
+                        "Standard": 0,
+                        "Heavy": 0,
+                        "MaxLight": 1,
+                        "MaxStandard": 0,
+                        "MaxHeavy": 0
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-BM",
+                    "Name": "Battery Cinder",
+                    "Side": 1,
+                    "Kind": 5,
+                    "Q": 10,
+                    "R": 8,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 1,
+                        "Search": 2,
+                        "Signature": 1,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 0,
+                        "Command": 2,
+                        "ElectronicWarfare": 0,
+                        "Cyber": 0
+                    },
+                    "Weapons": {
+                        "Light": 0,
+                        "Standard": 0,
+                        "Heavy": 0,
+                        "MaxLight": 0,
+                        "MaxStandard": 0,
+                        "MaxHeavy": 0
+                    },
+                    "BallisticWeapons": {
+                        "Range": 14,
+                        "AttackModifier": 1,
+                        "Ammunition": 2,
+                        "Capacity": 2,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [
+                            1,
+                            4
+                        ],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                }
+            ],
+            "Contacts": [
+                {
+                    "Owner": 0,
+                    "TargetId": "R-SG",
+                    "Q": 8,
+                    "R": 3,
+                    "Location": 0,
+                    "Identity": 0,
+                    "Age": 2
+                },
+                {
+                    "Owner": 0,
+                    "TargetId": "R-CV",
+                    "Q": 10,
+                    "R": 5,
+                    "Location": 2,
+                    "Identity": 1,
+                    "Age": 0
+                },
+                {
+                    "Owner": 1,
+                    "TargetId": "B-CV",
+                    "Q": 1,
+                    "R": 4,
+                    "Location": 2,
+                    "Identity": 1,
+                    "Age": 0
+                }
+            ],
+            "Objectives": [
+                {
+                    "Id": "control",
+                    "Title": "Sole control of the operational objective",
+                    "Kind": 0,
+                    "Points": 6,
+                    "Radius": 1,
+                    "BlueRegionId": "",
+                    "RedRegionId": ""
+                },
+                {
+                    "Id": "transit",
+                    "Title": "Transit a combat-capable naval formation into the opposing approach",
+                    "Kind": 1,
+                    "Points": 3,
+                    "Radius": 0,
+                    "BlueRegionId": "blue-transit-zone",
+                    "RedRegionId": "red-transit-zone"
+                },
+                {
+                    "Id": "escort",
+                    "Title": "Maintain a combat-capable naval escort within two hexes of the carrier",
+                    "Kind": 2,
+                    "Points": 3,
+                    "Radius": 2,
+                    "BlueRegionId": "",
+                    "RedRegionId": ""
+                },
+                {
+                    "Id": "denial",
+                    "Title": "Deny enemy combat-capable naval presence within two hexes of the objective",
+                    "Kind": 3,
+                    "Points": 2,
+                    "Radius": 2,
+                    "BlueRegionId": "",
+                    "RedRegionId": ""
+                },
+                {
+                    "Id": "withdrawal",
+                    "Title": "Preserve the carrier or withdraw it after Heavy damage",
+                    "Kind": 4,
+                    "Points": 2,
+                    "Radius": 0,
+                    "BlueRegionId": "blue-withdrawal-zone",
+                    "RedRegionId": "red-withdrawal-zone"
+                }
+            ],
+            "ScheduledEvents": [],
+            "DeploymentRegions": [],
+            "ReinforcementRegions": [],
+            "ExitRegions": [],
+            "LogisticsRegions": [
+                {
+                    "Id": "west-haven-logistics",
+                    "Name": "West Haven Logistics Access",
+                    "SupportsBallisticReload": true,
+                    "SupportsInterceptorReload": true,
+                    "Hexes": [
+                        {
+                            "Q": 1,
+                            "R": 2
+                        },
+                        {
+                            "Q": 1,
+                            "R": 1
+                        }
+                    ]
+                },
+                {
+                    "Id": "east-haven-logistics",
+                    "Name": "East Haven Logistics Access",
+                    "SupportsBallisticReload": true,
+                    "SupportsInterceptorReload": true,
+                    "Hexes": [
+                        {
+                            "Q": 10,
+                            "R": 7
+                        },
+                        {
+                            "Q": 10,
+                            "R": 8
+                        }
+                    ]
+                }
+            ],
+            "ReplaceAreaRegions": true,
+            "AreaRegions": [
+                {
+                    "Id": "blue-transit-zone",
+                    "Name": "Eastern Transit Zone",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 9,
+                            "R": 0
+                        },
+                        {
+                            "Q": 9,
+                            "R": 1
+                        },
+                        {
+                            "Q": 9,
+                            "R": 2
+                        },
+                        {
+                            "Q": 9,
+                            "R": 3
+                        },
+                        {
+                            "Q": 9,
+                            "R": 4
+                        },
+                        {
+                            "Q": 9,
+                            "R": 5
+                        },
+                        {
+                            "Q": 9,
+                            "R": 6
+                        },
+                        {
+                            "Q": 9,
+                            "R": 7
+                        },
+                        {
+                            "Q": 9,
+                            "R": 8
+                        },
+                        {
+                            "Q": 9,
+                            "R": 9
+                        }
+                    ]
+                },
+                {
+                    "Id": "red-transit-zone",
+                    "Name": "Western Transit Zone",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 2,
+                            "R": 0
+                        },
+                        {
+                            "Q": 2,
+                            "R": 2
+                        },
+                        {
+                            "Q": 2,
+                            "R": 3
+                        },
+                        {
+                            "Q": 2,
+                            "R": 4
+                        },
+                        {
+                            "Q": 2,
+                            "R": 5
+                        },
+                        {
+                            "Q": 2,
+                            "R": 6
+                        },
+                        {
+                            "Q": 2,
+                            "R": 7
+                        },
+                        {
+                            "Q": 2,
+                            "R": 8
+                        }
+                    ]
+                },
+                {
+                    "Id": "blue-withdrawal-zone",
+                    "Name": "Western Withdrawal Zone",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 2,
+                            "R": 0
+                        },
+                        {
+                            "Q": 2,
+                            "R": 2
+                        },
+                        {
+                            "Q": 1,
+                            "R": 3
+                        },
+                        {
+                            "Q": 2,
+                            "R": 3
+                        },
+                        {
+                            "Q": 1,
+                            "R": 4
+                        },
+                        {
+                            "Q": 2,
+                            "R": 4
+                        },
+                        {
+                            "Q": 1,
+                            "R": 5
+                        },
+                        {
+                            "Q": 2,
+                            "R": 5
+                        },
+                        {
+                            "Q": 1,
+                            "R": 6
+                        },
+                        {
+                            "Q": 2,
+                            "R": 6
+                        },
+                        {
+                            "Q": 1,
+                            "R": 7
+                        },
+                        {
+                            "Q": 2,
+                            "R": 7
+                        },
+                        {
+                            "Q": 1,
+                            "R": 8
+                        },
+                        {
+                            "Q": 2,
+                            "R": 8
+                        },
+                        {
+                            "Q": 1,
+                            "R": 9
+                        }
+                    ]
+                },
+                {
+                    "Id": "red-withdrawal-zone",
+                    "Name": "Eastern Withdrawal Zone",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 9,
+                            "R": 0
+                        },
+                        {
+                            "Q": 10,
+                            "R": 0
+                        },
+                        {
+                            "Q": 9,
+                            "R": 1
+                        },
+                        {
+                            "Q": 10,
+                            "R": 1
+                        },
+                        {
+                            "Q": 9,
+                            "R": 2
+                        },
+                        {
+                            "Q": 10,
+                            "R": 2
+                        },
+                        {
+                            "Q": 9,
+                            "R": 3
+                        },
+                        {
+                            "Q": 10,
+                            "R": 3
+                        },
+                        {
+                            "Q": 9,
+                            "R": 4
+                        },
+                        {
+                            "Q": 10,
+                            "R": 4
+                        },
+                        {
+                            "Q": 9,
+                            "R": 5
+                        },
+                        {
+                            "Q": 10,
+                            "R": 5
+                        },
+                        {
+                            "Q": 9,
+                            "R": 6
+                        },
+                        {
+                            "Q": 10,
+                            "R": 6
+                        },
+                        {
+                            "Q": 9,
+                            "R": 7
+                        },
+                        {
+                            "Q": 9,
+                            "R": 8
+                        },
+                        {
+                            "Q": 9,
+                            "R": 9
+                        },
+                        {
+                            "Q": 10,
+                            "R": 9
+                        }
+                    ]
+                }
+            ],
+            "ReplaceRestrictedAreas": true,
+            "RestrictedAreas": [],
+            "OverrideObjective": true,
+            "Objective": {
+                "Q": 6,
+                "R": 5
+            },
+            "OverridePresentation": true,
+            "Presentation": {
+                "CameraPitch": 58.0,
+                "CameraYaw": 0.0,
+                "CameraZoomMultiplier": 1.7999999523162842,
+                "LightingProfile": "MaritimeDay",
+                "WaterProfile": "DeepBlue",
+                "TerrainAssetSet": "PrototypeOperational",
+                "TimeOfDay": 12.0,
+                "Visibility": 1.0,
+                "Palette": 0,
+                "MinimumZoom": 9.0,
+                "MaximumZoomMultiplier": 2.5,
+                "PanPadding": 1.0,
+                "SeaState": 0.3499999940395355,
+                "CloudCover": 0.18000000715255738,
+                "HazeDensity": 0.2199999988079071,
+                "WeatherPreset": "Clear",
+                "Precipitation": 0.0,
+                "ElevationResource": "",
+                "ElevationExaggeration": 4.0
+            },
+            "ReplaceSensorRanges": true,
+            "SensorRanges": [
+                {
+                    "Kind": 0,
+                    "Passive": 8,
+                    "Active": 10,
+                    "Focused": 12
+                },
+                {
+                    "Kind": 1,
+                    "Passive": 7,
+                    "Active": 9,
+                    "Focused": 11
+                },
+                {
+                    "Kind": 2,
+                    "Passive": 6,
+                    "Active": 8,
+                    "Focused": 10
+                },
+                {
+                    "Kind": 3,
+                    "Passive": 10,
+                    "Active": 12,
+                    "Focused": 14
+                },
+                {
+                    "Kind": 4,
+                    "Passive": 4,
+                    "Active": 6,
+                    "Focused": 8
+                },
+                {
+                    "Kind": 5,
+                    "Passive": 2,
+                    "Active": 3,
+                    "Focused": 4
+                }
+            ],
+            "ReplaceWeaponRanges": true,
+            "WeaponRanges": [
+                {
+                    "Kind": 0,
+                    "Light": 4,
+                    "Standard": 8,
+                    "Heavy": 12
+                },
+                {
+                    "Kind": 1,
+                    "Light": 3,
+                    "Standard": 6,
+                    "Heavy": 9
+                },
+                {
+                    "Kind": 2,
+                    "Light": 3,
+                    "Standard": 5,
+                    "Heavy": 7
+                },
+                {
+                    "Kind": 3,
+                    "Light": 6,
+                    "Standard": 10,
+                    "Heavy": 14
+                },
+                {
+                    "Kind": 4,
+                    "Light": 1,
+                    "Standard": 1,
+                    "Heavy": 1
+                },
+                {
+                    "Kind": 5,
+                    "Light": 0,
+                    "Standard": 0,
+                    "Heavy": 0
+                }
+            ],
+            "ReplaceMissileDefenseProfiles": true,
+            "MissileDefenseProfiles": [
+                {
+                    "Kind": 0,
+                    "OuterLayer": 1,
+                    "AreaLayer": 1,
+                    "PointLayer": 1
+                },
+                {
+                    "Kind": 1,
+                    "OuterLayer": 1,
+                    "AreaLayer": 1,
+                    "PointLayer": 1
+                },
+                {
+                    "Kind": 2,
+                    "OuterLayer": 0,
+                    "AreaLayer": 0,
+                    "PointLayer": 0
+                },
+                {
+                    "Kind": 3,
+                    "OuterLayer": 0,
+                    "AreaLayer": 1,
+                    "PointLayer": 1
+                },
+                {
+                    "Kind": 4,
+                    "OuterLayer": 0,
+                    "AreaLayer": 0,
+                    "PointLayer": 1
+                },
+                {
+                    "Kind": 5,
+                    "OuterLayer": 0,
+                    "AreaLayer": 0,
+                    "PointLayer": 0
+                }
+            ]
+        },
+        {
+            "Id": "northern-gateway",
+            "TheaterTemplateId": "luzon-strait-northern-approaches",
+            "DisplayName": "Northern Gateway",
+            "Summary": "Fictional forces contest the Luzon Strait and its northern approaches. Limited ballistic salvos and finite escort interception add missile-defense decisions.",
+            "Horizon": 24,
+            "Weather": "Maritime haze",
+            "WeatherSeverity": 1,
+            "SpecialRules": "Real geography with asymmetric command architectures, scheduled reinforcement, and changing weather. Ballistic playtest: each submarine and the Red land battery carries two ballistic packages (surface/land targets only). Surface groups carry three interceptor packages, rating 4, covering friendly surface formations within four hexes; carriers carry one rating-2 self-defense package. Initial intelligence provides a fresh general carrier fix to each side. Existing logistics sites support separate ballistic and interceptor reloads, subject to normal logistics access. Launching raises signature; interceptions spend ammunition without consuming the ordinary Reaction. Stocks and ratings are provisional playtest values.",
+            "VictoryConditions": "Score operational control, transit, escort, denial, and carrier preservation/withdrawal at T24. Damage breaks tied operational scores.",
+            "BlueCommandArchitecture": 2,
+            "RedCommandArchitecture": 0,
+            "Formations": [
+                {
+                    "Id": "B-CV-L",
+                    "Name": "CSG Horizon",
+                    "Side": 0,
+                    "Kind": 0,
+                    "Q": 2,
+                    "R": 10,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 3,
+                        "Signature": 1,
+                        "Strike": 4,
+                        "Defense": 3,
+                        "Asw": 1,
+                        "Command": 2,
+                        "ElectronicWarfare": 2,
+                        "Cyber": 2
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 3,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 3,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 2,
+                        "Interceptors": 1,
+                        "Capacity": 1,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [
+                            1
+                        ],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": true,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "B-SG-L",
+                    "Name": "SAG Lantern",
+                    "Side": 0,
+                    "Kind": 1,
+                    "Q": 3,
+                    "R": 7,
+                    "ReadyTime": 0,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 2,
+                        "Signature": 2,
+                        "Strike": 3,
+                        "Defense": 3,
+                        "Asw": 3,
+                        "Command": 2,
+                        "ElectronicWarfare": 1,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 3,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 3,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 4,
+                        "Interceptors": 3,
+                        "Capacity": 3,
+                        "CoverageRadius": 4,
+                        "ProtectedDomains": [
+                            1
+                        ],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "B-SS-L",
+                    "Name": "SSN Wayfinder",
+                    "Side": 0,
+                    "Kind": 2,
+                    "Q": 4,
+                    "R": 13,
+                    "ReadyTime": 0,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 3,
+                        "Signature": -1,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 3,
+                        "Command": 3,
+                        "ElectronicWarfare": 1,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 3,
+                        "Standard": 2,
+                        "Heavy": 1,
+                        "MaxLight": 3,
+                        "MaxStandard": 2,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 24,
+                        "AttackModifier": 1,
+                        "Ammunition": 2,
+                        "Capacity": 2,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [
+                            1,
+                            4
+                        ],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "B-AG-L",
+                    "Name": "Air Group Meridian",
+                    "Side": 0,
+                    "Kind": 3,
+                    "Q": 5,
+                    "R": 9,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 3,
+                        "Search": 3,
+                        "Signature": 2,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 2,
+                        "Command": 2,
+                        "ElectronicWarfare": 2,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 2,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 2,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "B-LG-L",
+                    "Name": "Fleet Train West",
+                    "Side": 0,
+                    "Kind": 4,
+                    "Q": 2,
+                    "R": 12,
+                    "ReadyTime": 2,
+                    "Ratings": {
+                        "Move": 1,
+                        "Search": 1,
+                        "Signature": 3,
+                        "Strike": 1,
+                        "Defense": 2,
+                        "Asw": 0,
+                        "Command": 1,
+                        "ElectronicWarfare": 0,
+                        "Cyber": 0
+                    },
+                    "Weapons": {
+                        "Light": 1,
+                        "Standard": 0,
+                        "Heavy": 0,
+                        "MaxLight": 1,
+                        "MaxStandard": 0,
+                        "MaxHeavy": 0
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-CV-L",
+                    "Name": "CVG Typhoon",
+                    "Side": 1,
+                    "Kind": 0,
+                    "Q": 21,
+                    "R": 8,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 3,
+                        "Signature": 1,
+                        "Strike": 4,
+                        "Defense": 3,
+                        "Asw": 1,
+                        "Command": 2,
+                        "ElectronicWarfare": 2,
+                        "Cyber": 2
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 3,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 3,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 2,
+                        "Interceptors": 1,
+                        "Capacity": 1,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [
+                            1
+                        ],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": true,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-SG-L",
+                    "Name": "SAG Monsoon",
+                    "Side": 1,
+                    "Kind": 1,
+                    "Q": 20,
+                    "R": 12,
+                    "ReadyTime": 0,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 2,
+                        "Signature": 2,
+                        "Strike": 3,
+                        "Defense": 3,
+                        "Asw": 3,
+                        "Command": 2,
+                        "ElectronicWarfare": 1,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 3,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 3,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 4,
+                        "Interceptors": 3,
+                        "Capacity": 3,
+                        "CoverageRadius": 4,
+                        "ProtectedDomains": [
+                            1
+                        ],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-SS-L",
+                    "Name": "Submarine Shade",
+                    "Side": 1,
+                    "Kind": 2,
+                    "Q": 18,
+                    "R": 6,
+                    "ReadyTime": 0,
+                    "Ratings": {
+                        "Move": 2,
+                        "Search": 3,
+                        "Signature": -1,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 3,
+                        "Command": 3,
+                        "ElectronicWarfare": 1,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 3,
+                        "Standard": 2,
+                        "Heavy": 1,
+                        "MaxLight": 3,
+                        "MaxStandard": 2,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 24,
+                        "AttackModifier": 1,
+                        "Ammunition": 2,
+                        "Capacity": 2,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [
+                            1,
+                            4
+                        ],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-AG-L",
+                    "Name": "Air Group Squall",
+                    "Side": 1,
+                    "Kind": 3,
+                    "Q": 19,
+                    "R": 10,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 3,
+                        "Search": 3,
+                        "Signature": 2,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 2,
+                        "Command": 2,
+                        "ElectronicWarfare": 2,
+                        "Cyber": 1
+                    },
+                    "Weapons": {
+                        "Light": 4,
+                        "Standard": 2,
+                        "Heavy": 1,
+                        "MaxLight": 4,
+                        "MaxStandard": 2,
+                        "MaxHeavy": 1
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-LG-L",
+                    "Name": "Fleet Train East",
+                    "Side": 1,
+                    "Kind": 4,
+                    "Q": 21,
+                    "R": 10,
+                    "ReadyTime": 2,
+                    "Ratings": {
+                        "Move": 1,
+                        "Search": 1,
+                        "Signature": 3,
+                        "Strike": 1,
+                        "Defense": 2,
+                        "Asw": 0,
+                        "Command": 1,
+                        "ElectronicWarfare": 0,
+                        "Cyber": 0
+                    },
+                    "Weapons": {
+                        "Light": 1,
+                        "Standard": 0,
+                        "Heavy": 0,
+                        "MaxLight": 1,
+                        "MaxStandard": 0,
+                        "MaxHeavy": 0
+                    },
+                    "BallisticWeapons": {
+                        "Range": 0,
+                        "AttackModifier": 0,
+                        "Ammunition": 0,
+                        "Capacity": 0,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                },
+                {
+                    "Id": "R-BM-L",
+                    "Name": "Battery Breakwater",
+                    "Side": 1,
+                    "Kind": 5,
+                    "Q": 11,
+                    "R": 10,
+                    "ReadyTime": 1,
+                    "Ratings": {
+                        "Move": 1,
+                        "Search": 2,
+                        "Signature": 1,
+                        "Strike": 3,
+                        "Defense": 2,
+                        "Asw": 0,
+                        "Command": 2,
+                        "ElectronicWarfare": 0,
+                        "Cyber": 0
+                    },
+                    "Weapons": {
+                        "Light": 0,
+                        "Standard": 0,
+                        "Heavy": 0,
+                        "MaxLight": 0,
+                        "MaxStandard": 0,
+                        "MaxHeavy": 0
+                    },
+                    "BallisticWeapons": {
+                        "Range": 24,
+                        "AttackModifier": 1,
+                        "Ammunition": 2,
+                        "Capacity": 2,
+                        "MinimumLocation": 1,
+                        "MinimumIdentity": 1,
+                        "TargetDomains": [
+                            1,
+                            4
+                        ],
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false
+                    },
+                    "BallisticDefense": {
+                        "InterceptionRating": 0,
+                        "Interceptors": 0,
+                        "Capacity": 0,
+                        "CoverageRadius": 0,
+                        "ProtectedDomains": [],
+                        "CanProtectSelf": true,
+                        "SelfDefenseOnly": false,
+                        "RequireReady": false,
+                        "AllowShallowSubmarines": false,
+                        "AllowDeepSubmarines": false,
+                        "CanInterceptWhileDeep": false
+                    }
+                }
+            ],
+            "Contacts": [
+                {
+                    "Owner": 0,
+                    "TargetId": "R-SG-L",
+                    "Q": 17,
+                    "R": 11,
+                    "Location": 0,
+                    "Identity": 0,
+                    "Age": 2
+                },
+                {
+                    "Owner": 0,
+                    "TargetId": "R-CV-L",
+                    "Q": 21,
+                    "R": 8,
+                    "Location": 2,
+                    "Identity": 1,
+                    "Age": 0
+                },
+                {
+                    "Owner": 1,
+                    "TargetId": "B-CV-L",
+                    "Q": 2,
+                    "R": 10,
+                    "Location": 2,
+                    "Identity": 1,
+                    "Age": 0
+                }
+            ],
+            "Objectives": [
+                {
+                    "Id": "control",
+                    "Title": "Sole control of the operational objective",
+                    "Kind": 0,
+                    "Points": 6,
+                    "Radius": 1,
+                    "BlueRegionId": "",
+                    "RedRegionId": ""
+                },
+                {
+                    "Id": "transit",
+                    "Title": "Transit a combat-capable naval formation into the opposing approach",
+                    "Kind": 1,
+                    "Points": 3,
+                    "Radius": 0,
+                    "BlueRegionId": "red-east",
+                    "RedRegionId": "blue-west"
+                },
+                {
+                    "Id": "escort",
+                    "Title": "Maintain a combat-capable naval escort within two hexes of the carrier",
+                    "Kind": 2,
+                    "Points": 3,
+                    "Radius": 2,
+                    "BlueRegionId": "",
+                    "RedRegionId": ""
+                },
+                {
+                    "Id": "denial",
+                    "Title": "Deny enemy combat-capable naval presence within two hexes of the objective",
+                    "Kind": 3,
+                    "Points": 2,
+                    "Radius": 2,
+                    "BlueRegionId": "",
+                    "RedRegionId": ""
+                },
+                {
+                    "Id": "withdrawal",
+                    "Title": "Preserve the carrier or withdraw it after Heavy damage",
+                    "Kind": 4,
+                    "Points": 2,
+                    "Radius": 0,
+                    "BlueRegionId": "blue-west",
+                    "RedRegionId": "red-east"
+                }
+            ],
+            "ScheduledEvents": [
+                {
+                    "Id": "weather-clears",
+                    "Time": 12,
+                    "Kind": 1,
+                    "Side": 0,
+                    "RegionId": "",
+                    "Text": "The maritime haze begins to clear.",
+                    "Weather": "Clear",
+                    "WeatherSeverity": 0,
+                    "CommandArchitecture": 0,
+                    "Reinforcement": {
+                        "Id": "",
+                        "Name": "",
+                        "Side": 0,
+                        "Kind": 0,
+                        "Q": 0,
+                        "R": 0,
+                        "ReadyTime": 0,
+                        "Ratings": {
+                            "Move": 0,
+                            "Search": 0,
+                            "Signature": 0,
+                            "Strike": 0,
+                            "Defense": 0,
+                            "Asw": 0,
+                            "Command": 0,
+                            "ElectronicWarfare": 0,
+                            "Cyber": 0
+                        },
+                        "Weapons": {
+                            "Light": 0,
+                            "Standard": 0,
+                            "Heavy": 0,
+                            "MaxLight": 0,
+                            "MaxStandard": 0,
+                            "MaxHeavy": 0
+                        },
+                        "BallisticWeapons": {
+                            "Range": 0,
+                            "AttackModifier": 0,
+                            "Ammunition": 0,
+                            "Capacity": 0,
+                            "MinimumLocation": 1,
+                            "MinimumIdentity": 1,
+                            "TargetDomains": [],
+                            "AllowShallowSubmarines": false,
+                            "AllowDeepSubmarines": false
+                        },
+                        "BallisticDefense": {
+                            "InterceptionRating": 0,
+                            "Interceptors": 0,
+                            "Capacity": 0,
+                            "CoverageRadius": 0,
+                            "ProtectedDomains": [],
+                            "CanProtectSelf": true,
+                            "SelfDefenseOnly": false,
+                            "RequireReady": false,
+                            "AllowShallowSubmarines": false,
+                            "AllowDeepSubmarines": false,
+                            "CanInterceptWhileDeep": false
+                        }
+                    }
+                },
+                {
+                    "Id": "blue-reinforcement",
+                    "Time": 8,
+                    "Kind": 0,
+                    "Side": 0,
+                    "RegionId": "blue-west",
+                    "Text": "Blue reinforcement enters from the western approach.",
+                    "Weather": "",
+                    "WeatherSeverity": 0,
+                    "CommandArchitecture": 0,
+                    "Reinforcement": {
+                        "Id": "B-SG-R1",
+                        "Name": "SAG Relay",
+                        "Side": 0,
+                        "Kind": 1,
+                        "Q": 0,
+                        "R": 7,
+                        "ReadyTime": 8,
+                        "Ratings": {
+                            "Move": 2,
+                            "Search": 2,
+                            "Signature": 2,
+                            "Strike": 3,
+                            "Defense": 3,
+                            "Asw": 3,
+                            "Command": 2,
+                            "ElectronicWarfare": 1,
+                            "Cyber": 1
+                        },
+                        "Weapons": {
+                            "Light": 4,
+                            "Standard": 3,
+                            "Heavy": 1,
+                            "MaxLight": 4,
+                            "MaxStandard": 3,
+                            "MaxHeavy": 1
+                        },
+                        "BallisticWeapons": {
+                            "Range": 0,
+                            "AttackModifier": 0,
+                            "Ammunition": 0,
+                            "Capacity": 0,
+                            "MinimumLocation": 1,
+                            "MinimumIdentity": 1,
+                            "TargetDomains": [],
+                            "AllowShallowSubmarines": false,
+                            "AllowDeepSubmarines": false
+                        },
+                        "BallisticDefense": {
+                            "InterceptionRating": 0,
+                            "Interceptors": 0,
+                            "Capacity": 0,
+                            "CoverageRadius": 0,
+                            "ProtectedDomains": [],
+                            "CanProtectSelf": true,
+                            "SelfDefenseOnly": false,
+                            "RequireReady": false,
+                            "AllowShallowSubmarines": false,
+                            "AllowDeepSubmarines": false,
+                            "CanInterceptWhileDeep": false
+                        }
+                    }
+                }
+            ],
+            "DeploymentRegions": [
+                {
+                    "Id": "blue-west",
+                    "Name": "Blue Western Entry",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 0,
+                            "R": 5
+                        },
+                        {
+                            "Q": 0,
+                            "R": 6
+                        },
+                        {
+                            "Q": 0,
+                            "R": 7
+                        },
+                        {
+                            "Q": 0,
+                            "R": 8
+                        },
+                        {
+                            "Q": 0,
+                            "R": 9
+                        },
+                        {
+                            "Q": 0,
+                            "R": 10
+                        },
+                        {
+                            "Q": 0,
+                            "R": 11
+                        },
+                        {
+                            "Q": 0,
+                            "R": 12
+                        },
+                        {
+                            "Q": 0,
+                            "R": 13
+                        }
+                    ]
+                },
+                {
+                    "Id": "red-east",
+                    "Name": "Red Eastern Entry",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 23,
+                            "R": 5
+                        },
+                        {
+                            "Q": 23,
+                            "R": 6
+                        },
+                        {
+                            "Q": 23,
+                            "R": 7
+                        },
+                        {
+                            "Q": 23,
+                            "R": 8
+                        },
+                        {
+                            "Q": 23,
+                            "R": 9
+                        },
+                        {
+                            "Q": 23,
+                            "R": 10
+                        },
+                        {
+                            "Q": 23,
+                            "R": 11
+                        },
+                        {
+                            "Q": 23,
+                            "R": 12
+                        },
+                        {
+                            "Q": 23,
+                            "R": 13
+                        }
+                    ]
+                }
+            ],
+            "ReinforcementRegions": [
+                {
+                    "Id": "blue-west",
+                    "Name": "Blue Western Entry",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 0,
+                            "R": 5
+                        },
+                        {
+                            "Q": 0,
+                            "R": 6
+                        },
+                        {
+                            "Q": 0,
+                            "R": 7
+                        },
+                        {
+                            "Q": 0,
+                            "R": 8
+                        },
+                        {
+                            "Q": 0,
+                            "R": 9
+                        },
+                        {
+                            "Q": 0,
+                            "R": 10
+                        },
+                        {
+                            "Q": 0,
+                            "R": 11
+                        },
+                        {
+                            "Q": 0,
+                            "R": 12
+                        },
+                        {
+                            "Q": 0,
+                            "R": 13
+                        }
+                    ]
+                },
+                {
+                    "Id": "red-east",
+                    "Name": "Red Eastern Entry",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 23,
+                            "R": 5
+                        },
+                        {
+                            "Q": 23,
+                            "R": 6
+                        },
+                        {
+                            "Q": 23,
+                            "R": 7
+                        },
+                        {
+                            "Q": 23,
+                            "R": 8
+                        },
+                        {
+                            "Q": 23,
+                            "R": 9
+                        },
+                        {
+                            "Q": 23,
+                            "R": 10
+                        },
+                        {
+                            "Q": 23,
+                            "R": 11
+                        },
+                        {
+                            "Q": 23,
+                            "R": 12
+                        },
+                        {
+                            "Q": 23,
+                            "R": 13
+                        }
+                    ]
+                }
+            ],
+            "ExitRegions": [
+                {
+                    "Id": "blue-west",
+                    "Name": "Blue Western Entry",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 0,
+                            "R": 5
+                        },
+                        {
+                            "Q": 0,
+                            "R": 6
+                        },
+                        {
+                            "Q": 0,
+                            "R": 7
+                        },
+                        {
+                            "Q": 0,
+                            "R": 8
+                        },
+                        {
+                            "Q": 0,
+                            "R": 9
+                        },
+                        {
+                            "Q": 0,
+                            "R": 10
+                        },
+                        {
+                            "Q": 0,
+                            "R": 11
+                        },
+                        {
+                            "Q": 0,
+                            "R": 12
+                        },
+                        {
+                            "Q": 0,
+                            "R": 13
+                        }
+                    ]
+                },
+                {
+                    "Id": "red-east",
+                    "Name": "Red Eastern Entry",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 23,
+                            "R": 5
+                        },
+                        {
+                            "Q": 23,
+                            "R": 6
+                        },
+                        {
+                            "Q": 23,
+                            "R": 7
+                        },
+                        {
+                            "Q": 23,
+                            "R": 8
+                        },
+                        {
+                            "Q": 23,
+                            "R": 9
+                        },
+                        {
+                            "Q": 23,
+                            "R": 10
+                        },
+                        {
+                            "Q": 23,
+                            "R": 11
+                        },
+                        {
+                            "Q": 23,
+                            "R": 12
+                        },
+                        {
+                            "Q": 23,
+                            "R": 13
+                        }
+                    ]
+                }
+            ],
+            "LogisticsRegions": [
+                {
+                    "Id": "basco-logistics",
+                    "Name": "Basco Logistics Access",
+                    "SupportsBallisticReload": true,
+                    "SupportsInterceptorReload": true,
+                    "Hexes": [
+                        {
+                            "Q": 11,
+                            "R": 10
+                        }
+                    ]
+                }
+            ],
+            "ReplaceAreaRegions": true,
+            "AreaRegions": [
+                {
+                    "Id": "blue-west",
+                    "Name": "Blue Western Entry",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 0,
+                            "R": 5
+                        },
+                        {
+                            "Q": 0,
+                            "R": 6
+                        },
+                        {
+                            "Q": 0,
+                            "R": 7
+                        },
+                        {
+                            "Q": 0,
+                            "R": 8
+                        },
+                        {
+                            "Q": 0,
+                            "R": 9
+                        },
+                        {
+                            "Q": 0,
+                            "R": 10
+                        },
+                        {
+                            "Q": 0,
+                            "R": 11
+                        },
+                        {
+                            "Q": 0,
+                            "R": 12
+                        },
+                        {
+                            "Q": 0,
+                            "R": 13
+                        }
+                    ]
+                },
+                {
+                    "Id": "red-east",
+                    "Name": "Red Eastern Entry",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 23,
+                            "R": 5
+                        },
+                        {
+                            "Q": 23,
+                            "R": 6
+                        },
+                        {
+                            "Q": 23,
+                            "R": 7
+                        },
+                        {
+                            "Q": 23,
+                            "R": 8
+                        },
+                        {
+                            "Q": 23,
+                            "R": 9
+                        },
+                        {
+                            "Q": 23,
+                            "R": 10
+                        },
+                        {
+                            "Q": 23,
+                            "R": 11
+                        },
+                        {
+                            "Q": 23,
+                            "R": 12
+                        },
+                        {
+                            "Q": 23,
+                            "R": 13
+                        }
+                    ]
+                },
+                {
+                    "Id": "objective-zone",
+                    "Name": "Luzon Strait Objective Zone",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 11,
+                            "R": 9
+                        }
+                    ]
+                }
+            ],
+            "ReplaceRestrictedAreas": true,
+            "RestrictedAreas": [
+                {
+                    "Id": "prototype-safety-zone",
+                    "Name": "Prototype Safety Exclusion",
+                    "SupportsBallisticReload": false,
+                    "SupportsInterceptorReload": false,
+                    "Hexes": [
+                        {
+                            "Q": 6,
+                            "R": 6
+                        },
+                        {
+                            "Q": 6,
+                            "R": 7
+                        }
+                    ]
+                }
+            ],
+            "OverrideObjective": true,
+            "Objective": {
+                "Q": 11,
+                "R": 9
+            },
+            "OverridePresentation": true,
+            "Presentation": {
+                "CameraPitch": 58.0,
+                "CameraYaw": 0.0,
+                "CameraZoomMultiplier": 1.649999976158142,
+                "LightingProfile": "MaritimeHaze",
+                "WaterProfile": "PhilippineSea",
+                "TerrainAssetSet": "LuzonMvp",
+                "TimeOfDay": 16.0,
+                "Visibility": 0.7200000286102295,
+                "Palette": 0,
+                "MinimumZoom": 9.0,
+                "MaximumZoomMultiplier": 2.5,
+                "PanPadding": 1.0,
+                "SeaState": 0.41999998688697817,
+                "CloudCover": 0.2800000011920929,
+                "HazeDensity": 0.3799999952316284,
+                "WeatherPreset": "Haze",
+                "Precipitation": 0.0,
+                "ElevationResource": "Geography/luzon-strait-etopo-2022",
+                "ElevationExaggeration": 4.0
+            },
+            "ReplaceSensorRanges": true,
+            "SensorRanges": [
+                {
+                    "Kind": 0,
+                    "Passive": 8,
+                    "Active": 10,
+                    "Focused": 12
+                },
+                {
+                    "Kind": 1,
+                    "Passive": 7,
+                    "Active": 9,
+                    "Focused": 11
+                },
+                {
+                    "Kind": 2,
+                    "Passive": 6,
+                    "Active": 8,
+                    "Focused": 10
+                },
+                {
+                    "Kind": 3,
+                    "Passive": 10,
+                    "Active": 12,
+                    "Focused": 14
+                },
+                {
+                    "Kind": 4,
+                    "Passive": 4,
+                    "Active": 6,
+                    "Focused": 8
+                },
+                {
+                    "Kind": 5,
+                    "Passive": 2,
+                    "Active": 3,
+                    "Focused": 4
+                }
+            ],
+            "ReplaceWeaponRanges": true,
+            "WeaponRanges": [
+                {
+                    "Kind": 0,
+                    "Light": 4,
+                    "Standard": 8,
+                    "Heavy": 12
+                },
+                {
+                    "Kind": 1,
+                    "Light": 3,
+                    "Standard": 6,
+                    "Heavy": 9
+                },
+                {
+                    "Kind": 2,
+                    "Light": 3,
+                    "Standard": 5,
+                    "Heavy": 7
+                },
+                {
+                    "Kind": 3,
+                    "Light": 6,
+                    "Standard": 10,
+                    "Heavy": 14
+                },
+                {
+                    "Kind": 4,
+                    "Light": 1,
+                    "Standard": 1,
+                    "Heavy": 1
+                },
+                {
+                    "Kind": 5,
+                    "Light": 0,
+                    "Standard": 0,
+                    "Heavy": 0
+                }
+            ],
+            "ReplaceMissileDefenseProfiles": true,
+            "MissileDefenseProfiles": [
+                {
+                    "Kind": 0,
+                    "OuterLayer": 1,
+                    "AreaLayer": 1,
+                    "PointLayer": 1
+                },
+                {
+                    "Kind": 1,
+                    "OuterLayer": 1,
+                    "AreaLayer": 1,
+                    "PointLayer": 1
+                },
+                {
+                    "Kind": 2,
+                    "OuterLayer": 0,
+                    "AreaLayer": 0,
+                    "PointLayer": 0
+                },
+                {
+                    "Kind": 3,
+                    "OuterLayer": 0,
+                    "AreaLayer": 1,
+                    "PointLayer": 1
+                },
+                {
+                    "Kind": 4,
+                    "OuterLayer": 0,
+                    "AreaLayer": 0,
+                    "PointLayer": 1
+                },
+                {
+                    "Kind": 5,
+                    "OuterLayer": 0,
+                    "AreaLayer": 0,
+                    "PointLayer": 0
+                }
+            ]
+        }
+    ]
 }

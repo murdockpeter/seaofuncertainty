@@ -8,7 +8,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class AuthoredScenarioCatalog
     {
-        public int Version = 2;
+        public int Version = 4;
         public List<AuthoredScenarioDefinition> Scenarios = new List<AuthoredScenarioDefinition>();
     }
 
@@ -53,7 +53,7 @@ namespace SeaOfUncertainty.Core
     public static class ScenarioAuthoringCatalog
     {
         public const string ResourcePath = "Data/scenario-catalog";
-        public const int CurrentVersion = 2;
+        public const int CurrentVersion = 4;
         public static readonly string[] TheaterTemplateIds = { "meridian-veil-archipelago", "luzon-strait-northern-approaches" };
 
         public static IReadOnlyList<ScenarioDefinition> Apply(IEnumerable<ScenarioDefinition> builtIns)
@@ -68,7 +68,7 @@ namespace SeaOfUncertainty.Core
         {
             List<ScenarioDefinition> scenarios = builtIns.Select(Clone).ToList();
             if (authored == null || authored.Scenarios == null) throw new ArgumentException("Scenario catalog and Scenarios list are required.");
-            if (authored.Version != 1 && authored.Version != CurrentVersion) throw new ArgumentException("Unsupported scenario catalog version: " + authored.Version);
+            if (authored.Version < 1 || authored.Version > CurrentVersion) throw new ArgumentException("Unsupported scenario catalog version: " + authored.Version);
             var errors = new List<string>();
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (AuthoredScenarioDefinition entry in authored.Scenarios)
@@ -83,7 +83,7 @@ namespace SeaOfUncertainty.Core
                 {
                     if (authored.Version == 1)
                     {
-                        if (scenario == null) throw new ArgumentException("Version 1 only overrides known scenario IDs. Upgrade to version 2 and select a TheaterTemplateId for new operations.");
+                        if (scenario == null) throw new ArgumentException("Version 1 only overrides known scenario IDs. Upgrade to version 4 and select a TheaterTemplateId for new operations.");
                         ApplyLegacy(scenario, entry);
                     }
                     else
@@ -92,6 +92,17 @@ namespace SeaOfUncertainty.Core
                         if (scenario == null) scenarios.Add(resolved);
                         else scenarios[scenarios.IndexOf(scenario)] = resolved;
                         scenario = resolved;
+                    }
+                    if (authored.Version < 3)
+                    {
+                        foreach (FormationDefinition formation in (scenario.Formations ?? new List<FormationDefinition>()).Where(item => item != null).Concat((scenario.ScheduledEvents ?? new List<ScheduledScenarioEventDefinition>()).Where(item => item != null && item.Reinforcement != null).Select(item => item.Reinforcement))) formation.BallisticWeapons = new BallisticWeaponProfile();
+                        foreach (OperationalRegionDefinition region in (scenario.LogisticsRegions ?? new List<OperationalRegionDefinition>()).Where(item => item != null)) region.SupportsBallisticReload = false;
+                        OperationalDataMigration.AddBatteryProfiles(scenario);
+                    }
+                    if (authored.Version < 4)
+                    {
+                        foreach (FormationDefinition formation in (scenario.Formations ?? new List<FormationDefinition>()).Where(item => item != null).Concat((scenario.ScheduledEvents ?? new List<ScheduledScenarioEventDefinition>()).Where(item => item != null && item.Reinforcement != null).Select(item => item.Reinforcement))) formation.BallisticDefense = new BallisticDefenseProfile();
+                        foreach (OperationalRegionDefinition region in (scenario.LogisticsRegions ?? new List<OperationalRegionDefinition>()).Where(item => item != null)) region.SupportsInterceptorReload = false;
                     }
                     errors.AddRange(OperationalDataValidator.Validate(scenario).Select(error => entry.Id + ": " + error));
                 }

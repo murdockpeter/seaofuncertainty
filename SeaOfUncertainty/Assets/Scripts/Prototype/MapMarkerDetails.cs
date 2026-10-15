@@ -11,6 +11,23 @@ namespace SeaOfUncertainty.Prototype
         public string Metadata;
         public string Description;
 
+        public static string BallisticDefense(PrototypeGame game, Side viewer, FormationState formation)
+        {
+            if (formation == null || formation.Side != viewer || !game.Formations.Contains(formation)) return string.Empty;
+            string equipment = formation.BallisticDefense?.Capacity > 0
+                ? formation.BallisticDefense.Summary + "\n" + game.FriendlyBallisticDefenseStatus(viewer, formation) + "\n"
+                    + (formation.BallisticDefense.SelfDefenseOnly ? "SELF-DEFENSE ONLY" : "DOMAINS: " + string.Join(", ", formation.BallisticDefense.ProtectedDomains)) + "\n" : string.Empty;
+            var coverage = game.FriendlyBallisticCoverage(viewer, formation);
+            if (coverage.Count > 0) return equipment + "AUTOMATIC PROTECTION: " + string.Join(", ", coverage.Select(item => item.Name))
+                + "\nFirst eligible provider spends one package; no ordinary Reaction cost.";
+            var candidates = game.Formations.Where(item => item.Side == viewer && !item.IsDestroyed && item.BallisticDefense?.Capacity > 0)
+                .OrderBy(item => HexCoord.Distance(item.Position, formation.Position)).ThenBy(item => item.Id, System.StringComparer.Ordinal).Take(2);
+            return equipment + "NO ELIGIBLE BALLISTIC PROTECTION\n" + string.Join("\n", candidates.Select(item => item.Name + ": " + game.FriendlyBallisticDefenseStatus(viewer, item, formation)));
+        }
+
+        public static string LatestFriendlyInterception(PrototypeGame game, Side viewer)
+            => game.LogEntries.FirstOrDefault(entry => entry.IsPrivate && entry.Audience == viewer && entry.Text.Contains("; ballistic interception +"))?.Text;
+
         public static MapMarkerDetails Objective(PrototypeGame game)
         {
             if (game?.Active == null) return null;
@@ -36,7 +53,7 @@ namespace SeaOfUncertainty.Prototype
                 Category = formation == game.Active ? "ACTIVE FORMATION" : "FRIENDLY FORMATION",
                 Title = formation.Name,
                 Metadata = $"{formation.Kind} · HEX {formation.Position} · READY T{formation.ReadyTime:00}",
-                Description = $"{formation.Cohesion} · {formation.Endurance} endurance\nMAGAZINES {formation.Weapons?.Summary ?? "LEGACY LOADOUT"}\n{(formation == game.Active ? "Right-click for orders · I for the full inspector" : "T opens the friendly Ready queue and inspector")}"
+                Description = $"{formation.Cohesion} · {formation.Endurance} endurance\nMAGAZINES {formation.Weapons?.Summary ?? "LEGACY LOADOUT"}{(formation.BallisticWeapons?.Capacity > 0 ? "\n" + formation.BallisticWeapons.Summary : string.Empty)}\n{BallisticDefense(game, game.Active.Side, formation)}\n{(formation == game.Active ? "Right-click for orders · I for the full inspector" : "T opens the friendly Ready queue and inspector")}"
             };
         }
 

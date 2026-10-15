@@ -60,6 +60,7 @@ namespace SeaOfUncertainty.Editor
                     "The operation has compact command status without permanent sidebars or duplicate action controls");
                 TestMapCommands(ui, backend);
                 TestMarkerCards(ui, backend);
+                TestBallisticOrders(ui, backend);
                 ui.EditorShowFormationOrders();
                 bool continuation = ui.EditorRoot.Q<VisualElement>("dialog-activeformationorders") != null;
                 Assert(continuation && ui.EditorRoot.Q<ScrollView>(className: "context-scroll") != null && ui.EditorRoot.Q<Button>(className: "context-close") != null, "The active Formation opens a bounded, scrollable contextual order palette over the 3D map");
@@ -107,6 +108,89 @@ namespace SeaOfUncertainty.Editor
 
         private static string VisibleText(SeaUIToolkitController ui)
             => string.Join("\n", ui.EditorRoot.Query<Label>().ToList().Select(label => label.text).Concat(ui.EditorRoot.Query<Button>().ToList().Select(button => button.text)));
+
+        private static void TestBallisticOrders(SeaUIToolkitController ui, SeaPrototypeController backend)
+        {
+            backend.ToolkitNewScenario("meridian-veil");
+            FormationState actor = backend.Game.Active;
+            actor.BallisticWeapons = new BallisticWeaponProfile { Range = 5, AttackModifier = 1, Capacity = 2, Ammunition = 2, TargetDomains = new System.Collections.Generic.List<ContactDomain> { ContactDomain.Surface } };
+            FormationState target = backend.Game.Formations.First(item => item.Side != actor.Side && item.Kind == FormationKind.SurfaceGroup);
+            target.Position = new HexCoord(actor.Position.Q + 1, actor.Position.R);
+            target.HasReacted = true;
+            ContactDomain ownedDomain = actor.Kind == FormationKind.Submarine ? ContactDomain.Subsurface : actor.Kind == FormationKind.AirGroup ? ContactDomain.Air : ContactDomain.Surface;
+            actor.BallisticDefense = new BallisticDefenseProfile { InterceptionRating = 3, Interceptors = 1, Capacity = 1, CoverageRadius = 1,
+                ProtectedDomains = new System.Collections.Generic.List<ContactDomain> { ownedDomain }, AllowDeepSubmarines = ownedDomain == ContactDomain.Subsurface,
+                AllowShallowSubmarines = ownedDomain == ContactDomain.Subsurface, CanInterceptWhileDeep = ownedDomain == ContactDomain.Subsurface };
+            target.BallisticDefense = new BallisticDefenseProfile { InterceptionRating = 5, Interceptors = 2, Capacity = 2, CoverageRadius = 1, ProtectedDomains = new System.Collections.Generic.List<ContactDomain> { ContactDomain.Surface } };
+            ContactState report = backend.Game.ContactFor(actor.Side, target.Id);
+            report.LastKnownPosition = target.Position; report.Location = LocationQuality.High; report.Identity = IdentityQuality.General; report.Domain = ContactDomain.Surface; report.Age = 0;
+            ui.EditorShowGame();
+            ui.EditorShowInspector();
+            Assert(VisibleText(ui).Contains(actor.BallisticDefense.Summary) && VisibleText(ui).Contains("AUTOMATIC PROTECTION: " + actor.Name)
+                && !VisibleText(ui).Contains(target.BallisticDefense.Summary), "Owned inspector shows interceptor stocks and friendly coverage without enemy defense details");
+            Assert(ui.EditorInvokeButton("SHOW DEFENSE COVERAGE") && !ui.EditorOverlayOpen
+                && VisibleText(ui).Contains("BALLISTIC COVERAGE: " + actor.Name), "Inspector offers a keyboard-accessible pinned friendly coverage overlay");
+            ui.EditorShowInspector();
+            Assert(ui.EditorInvokeButton("HIDE DEFENSE COVERAGE") && !VisibleText(ui).Contains("BALLISTIC COVERAGE: " + actor.Name), "Pinned coverage can be dismissed without issuing an order");
+            Assert(MapMarkerDetails.Formation(backend.Game, actor).Description.Contains(actor.BallisticDefense.Summary)
+                && !MapMarkerDetails.Contact(backend.Game, report, report.LastKnownPosition).Description.Contains("Ballistic defense"), "Hover details expose defense capability only for owned formations");
+            ui.EditorShowFormationOrders();
+            Button orders = ui.EditorRoot.Query<Button>().ToList().First(item => item.text.Contains("STRIKE ORDERS"));
+            Assert(ui.EditorInvokeButton(orders.text), "Strike palette opens for an equipped formation");
+            Button ballistic = ui.EditorRoot.Query<Button>().ToList().First(item => item.text.StartsWith("BALLISTIC STANDARD", StringComparison.Ordinal));
+            Assert(ui.EditorInvokeButton(ballistic.text) && ui.EditorActionMode == "Strike", "Ballistic order selects weapon delivery separately from salvo commitment");
+            Assert(backend.ToolkitFriendlyLaunchCue(actor.Side) == null && ui.EditorRoot.Q<TacticalMapElement>().EditorEffectCount == 0, "Selecting a strike order does not fabricate a committed launch cue");
+            int conventional = actor.Weapons.Standard;
+            ui.EditorShowStrikeAim(report);
+            Button aim = ui.EditorRoot.Query<Button>().ToList().First(item => item.text.StartsWith("HEX ", StringComparison.Ordinal));
+            Assert(ui.EditorInvokeButton(aim.text) && actor.BallisticWeapons.Ammunition == 1 && actor.Weapons.Standard == conventional, "Production aim callback commits a ballistic package and preserves conventional ammunition");
+            Assert(target.BallisticDefense.Interceptors == 1 && actor.BallisticDefense.Interceptors == 1, "Production ballistic attack spends one eligible enemy interception package and leaves friendly defense unchanged");
+            Assert(backend.ToolkitFriendlyInterceptionCue(actor.Side) == null && backend.ToolkitFriendlyInterceptionCue(target.Side)?.FormationId == target.Id
+                && MapMarkerDetails.LatestFriendlyInterception(backend.Game, actor.Side) == null
+                && MapMarkerDetails.LatestFriendlyInterception(backend.Game, target.Side).Contains(target.Name), "Interception cue and receipt belong only to the defender's side");
+            Assert(backend.ToolkitFriendlyLaunchCue(actor.Side)?.FormationId == actor.Id && backend.ToolkitFriendlyLaunchCue(target.Side) == null, "Committed launch produces a cue only for its owner's side");
+            actor.Kind = FormationKind.BallisticMissileBattery;
+            actor.Position = backend.Game.Area.Terrain.First(item => item.Terrain == OperationalTerrain.Land).Hex;
+            PrototypeGame.SaveData renderState = backend.Game.CaptureState();
+            renderState.ActiveFormationId = actor.Id;
+            backend.Game.RestoreState(renderState);
+            actor = backend.Game.Find(actor.Id);
+            target = backend.Game.Find(target.Id);
+            TacticalMapElement tactical = ui.EditorRoot.Q<TacticalMapElement>();
+            // The attack may have opened a handoff, so create its next owner-scoped map first.
+            if (tactical == null) { ui.EditorShowGame(); tactical = ui.EditorRoot.Q<TacticalMapElement>(); }
+            tactical.SetState(backend.Game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
+            tactical.ShowFriendlyBallisticCue(backend.ToolkitFriendlyInterceptionCue(target.Side));
+            Assert(tactical.EditorEffectCount == 0, "Actual enemy interception event cannot render on the attacker's map");
+            tactical.ShowFriendlyBallisticCue(new SeaPrototypeController.FriendlyBallisticCue { Side = actor.Side, FormationId = target.Id, Position = target.Position, Kind = OperationalEffectKind.Interception });
+            Assert(tactical.EditorEffectCount == 0, "A mismatched cue audience cannot bypass provider ownership checks");
+            tactical.ShowFriendlyBallisticCue(backend.ToolkitFriendlyLaunchCue(actor.Side));
+            Assert(tactical.EditorEffectCount == 1, "Owned committed launch event reaches the 3D effect renderer");
+            using (var presentation = new OperationalMap3D(backend.Game.Area, 320, 180))
+            {
+                presentation.SetState(backend.Game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
+                presentation.SetBallisticCoverage(actor);
+                Assert(presentation.BallisticCoverageProviderId == actor.Id && presentation.BallisticCoverageHexCount == backend.Game.FriendlyBallisticCoverageHexes(actor.Side, actor).Count,
+                    "3D coverage footprint uses the authoritative hex-distance boundary");
+                actor.BallisticDefense.Interceptors = 0;
+                presentation.SetState(backend.Game, ToolkitActionMode.None, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
+                presentation.SetBallisticCoverage(actor);
+                Assert(presentation.BallisticCoverageHexCount > 0 && presentation.BallisticProtectedFormationCount == 0
+                    && MapMarkerDetails.BallisticDefense(backend.Game, actor.Side, actor).Contains("depleted"), "Depleted defense retains a nominal range outline with no protected target rings and explains its status");
+                presentation.SetBallisticCoverage(target);
+                Assert(presentation.BallisticCoverageProviderId == null && presentation.BallisticCoverageHexCount == 0, "Enemy formation input cannot render enemy defense coverage");
+                Assert(backend.Game.Active.Id == actor.Id && backend.Game.Active.Kind == FormationKind.BallisticMissileBattery, "Battery render fixture retains the selected owned battery");
+                Assert(presentation.ContainsRenderedName("Mobile Ballistic Launcher Chassis"), "Owned battery renders its land launcher chassis");
+                Assert(presentation.ContainsRenderedName("Ballistic Launch Canister"), "Owned battery renders its launch canister");
+                Assert(presentation.ContainsRenderedName("BallisticMissileBattery Distant Operational Symbol"), "Owned battery renders its distant symbol");
+            }
+            ui.EditorShowGame();
+            ui.EditorShowGame();
+            Assert(ui.EditorRoot.Q<TacticalMapElement>().EditorEffectCount == 0, "Reopening the same command map does not replay an already presented ballistic cue");
+            backend.ToolkitNewScenario("meridian-veil");
+            Assert(backend.ToolkitFriendlyLaunchCue(actor.Side) == null && backend.ToolkitFriendlyInterceptionCue(target.Side) == null, "Restarting an operation clears previous launch and interception cues");
+            ui.EditorShowGame();
+        }
 
         private static void TestMarkerCards(SeaUIToolkitController ui, SeaPrototypeController backend)
         {

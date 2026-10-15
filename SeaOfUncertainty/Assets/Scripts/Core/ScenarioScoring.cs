@@ -163,7 +163,7 @@ namespace SeaOfUncertainty.Core
             => formation != null && !formation.IsDestroyed && formation.Damage < DamageState.Crippled;
 
         private static bool IsOperationalCombatant(FormationState formation)
-            => formation != null && formation.Kind != FormationKind.AirGroup && formation.Kind != FormationKind.LogisticsGroup;
+            => formation != null && formation.Kind != FormationKind.AirGroup && formation.Kind != FormationKind.LogisticsGroup && formation.Kind != FormationKind.BallisticMissileBattery;
 
         private static OperationalRegionDefinition FindRegion(ScenarioDefinition scenario, string id)
         {

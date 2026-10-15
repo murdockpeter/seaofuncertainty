@@ -10,11 +10,28 @@ namespace SeaOfUncertainty.Prototype
 {
     public sealed class SeaPrototypeController : MonoBehaviour
     {
+        public sealed class FriendlyBallisticCue
+        {
+            public Side Side;
+            public int Time;
+            public OperationalEffectKind Kind;
+            public string FormationId;
+            public HexCoord Position;
+            public string Receipt;
+        }
+
+        private readonly Dictionary<Side, FriendlyBallisticCue> interceptionCues = new Dictionary<Side, FriendlyBallisticCue>();
+        private readonly Dictionary<Side, FriendlyBallisticCue> launchCues = new Dictionary<Side, FriendlyBallisticCue>();
+        public FriendlyBallisticCue ToolkitFriendlyLaunchCue(Side viewer)
+            => launchCues.TryGetValue(viewer, out FriendlyBallisticCue cue) ? cue : null;
+        public FriendlyBallisticCue ToolkitFriendlyInterceptionCue(Side viewer)
+            => interceptionCues.TryGetValue(viewer, out FriendlyBallisticCue cue) ? cue : null;
         public PrototypeGame Game => game;
         public PlaytestRecorder Telemetry => telemetry;
         public PlaytestFeedback Feedback => feedback;
         public string LastMessage => toast;
-        public bool HasSave => File.Exists(SavePath);
+        public bool HasSave => SaveStore.HasSave;
+        public bool HasRecoverableBackup => SaveStore.HasValidBackup();
         public bool IsComplete => game != null && game.Time >= game.Scenario.Horizon;
         public int BlueFinalScore => blueFinalScore;
         public int RedFinalScore => redFinalScore;
@@ -48,17 +65,6 @@ namespace SeaOfUncertainty.Prototype
             if (game == null) Awake();
         }
 #endif
-
-        [Serializable]
-        private sealed class OperationSave
-        {
-            public int Version = 4;
-            public OperationMode OperationMode;
-            public Side HumanSide = Side.Blue;
-            public PrototypeGame.SaveData Game;
-            public PlaytestSession Playtest;
-            public PlaytestFeedback Feedback;
-        }
 
         private struct CombatPreview
         {
@@ -100,7 +106,20 @@ namespace SeaOfUncertainty.Prototype
         private PlaytestFeedback feedback = new PlaytestFeedback();
         private float decisionStartedAt;
         private string toast = "Select the Ready formation's action. Every choice previews its cost.";
-        private string SavePath => Path.Combine(Application.persistentDataPath, "meridian-veil-save.json");
+#if UNITY_EDITOR
+        public string EditorSavePathOverride;
+#endif
+        private string SavePath
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (!string.IsNullOrEmpty(EditorSavePathOverride)) return EditorSavePathOverride;
+#endif
+                return Path.Combine(Application.persistentDataPath, "meridian-veil-save.json");
+            }
+        }
+        private OperationSaveStore SaveStore => new OperationSaveStore(SavePath);
 
         private void Awake()
         {
@@ -152,8 +171,8 @@ namespace SeaOfUncertainty.Prototype
             // Feedback from the previous commander must not survive a secure handoff.
             toast = game?.Active == null ? string.Empty : game.VisibleLog(game.Active.Side).FirstOrDefault() ?? string.Empty;
         }
-        public void ToolkitSave() => SaveOperation();
-        public void ToolkitLoad() => LoadOperation();
+        public bool ToolkitSave() => SaveOperation();
+        public bool ToolkitLoad(bool backup = false) => LoadOperation(backup);
         public void ToolkitExport() => ExportPlaytest();
         public string ToolkitActivationReason() => CurrentActivationExplanation();
         public string ToolkitLegalAlternatives() => LegalAlternatives();
@@ -221,19 +240,19 @@ namespace SeaOfUncertainty.Prototype
             Toast(message);
             return message;
         }
-        public string ToolkitDeclareSynchronizedStrike(IEnumerable<FormationState> participants, ContactState contact, HexCoord aim, Salvo salvo, bool priorPlanning, string deconflictedFormationId)
+        public string ToolkitDeclareSynchronizedStrike(IEnumerable<FormationState> participants, ContactState contact, HexCoord aim, Salvo salvo, bool priorPlanning, string deconflictedFormationId, WeaponDelivery delivery = WeaponDelivery.Conventional)
         {
             lastActionSucceeded = false;
             FormationState actor = game.Active;
             string alternatives = LegalAlternatives();
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
-            lastActionSucceeded = game.DeclareSynchronizedStrike(actor, participants, contact, aim, salvo, priorPlanning, deconflictedFormationId, out SynchronizedStrikeState strike, out string message);
+            lastActionSucceeded = game.DeclareSynchronizedStrike(actor, participants, contact, aim, salvo, priorPlanning, deconflictedFormationId, out SynchronizedStrikeState strike, out string message, delivery);
             if (lastActionSucceeded)
             {
-                telemetry.RecordAction(game, before, actor, "Synchronized Strike Declared", salvo.ToString(), contact?.TargetId ?? aim.ToString(), alternatives, DecisionSeconds(), $"Strike Time T{strike.StrikeTime:00}; {strike.Participants.Count} reserved; C-02 {priorPlanning}; C-10 {deconflictedFormationId}", message);
+                telemetry.RecordAction(game, before, actor, "Synchronized Strike Declared", delivery + " " + salvo, contact?.TargetId ?? aim.ToString(), alternatives, DecisionSeconds(), $"Strike Time T{strike.StrikeTime:00}; {strike.Participants.Count} reserved; C-02 {priorPlanning}; C-10 {deconflictedFormationId}", message);
                 inspected = game.Active;
             }
-            else telemetry.RecordRejected(game, actor, "Synchronized Strike Declared", salvo.ToString(), aim.ToString(), message, DecisionSeconds());
+            else telemetry.RecordRejected(game, actor, "Synchronized Strike Declared", delivery + " " + salvo, aim.ToString(), message, DecisionSeconds());
             Toast(message);
             return message;
         }
@@ -329,7 +348,7 @@ namespace SeaOfUncertainty.Prototype
             return toast;
         }
 
-        public string ToolkitStrikeContact(ContactState contact, HexCoord aim, Salvo salvo, Reaction reaction = Reaction.None, HexCoord? evadeDestination = null)
+        public string ToolkitStrikeContact(ContactState contact, HexCoord aim, Salvo salvo, Reaction reaction = Reaction.None, HexCoord? evadeDestination = null, WeaponDelivery delivery = WeaponDelivery.Conventional)
         {
             lastActionSucceeded = false;
             pending = salvo == Salvo.Light ? PendingAction.StrikeLight : salvo == Salvo.Standard ? PendingAction.StrikeStandard : PendingAction.StrikeHeavy;
@@ -337,16 +356,16 @@ namespace SeaOfUncertainty.Prototype
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
             string alternatives = LegalAlternatives();
             int range = HexCoord.Distance(actor.Position, aim);
-            int attack = actor.EffectiveStrike + Rules.SalvoModifier(salvo) + game.PendingSupportBonus(actor, SupportKind.Strike) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
-            string calculation = $"Contact-area aim {aim}; range {range}/{game.StrikeRangeFor(actor, salvo)}; Attack {attack}; hidden occupancy and defense resolved after commitment; reaction {reaction}";
-            lastActionSucceeded = game.StrikeContact(actor, contact, aim, salvo, reaction, evadeDestination, out CombatResult result, out string message);
+            int attack = actor.EffectiveStrike + (delivery == WeaponDelivery.Ballistic ? actor.BallisticWeapons.AttackModifier : 0) + Rules.SalvoModifier(salvo) + game.PendingSupportBonus(actor, SupportKind.Strike) + Rules.TargetingModifier(contact, game.AgeTwoTargetingPenalty);
+            string calculation = $"Contact-area aim {aim}; range {range}/{game.StrikeRangeFor(actor, salvo, delivery)}; Attack {attack}; hidden occupancy and defense resolved after commitment; reaction {reaction}";
+            lastActionSucceeded = game.StrikeContact(actor, contact, aim, salvo, reaction, evadeDestination, out CombatResult result, out string message, delivery);
             if (lastActionSucceeded)
             {
                 string outcome = message + $" Roll {result.Roll}; result {result.Damage}; cumulative damage {result.ResultingDamage}.";
-                telemetry.RecordAction(game, before, actor, "Contact-area Strike", salvo.ToString(), aim.ToString(), alternatives, DecisionSeconds(), calculation, outcome);
+                telemetry.RecordAction(game, before, actor, "Contact-area Strike", delivery + " " + salvo, aim.ToString(), alternatives, DecisionSeconds(), calculation, outcome);
                 pending = PendingAction.None; inspected = game.Active; AfterSuccessfulAction(actor.Side);
             }
-            else telemetry.RecordRejected(game, actor, "Contact-area Strike", salvo.ToString(), aim.ToString(), message, DecisionSeconds());
+            else telemetry.RecordRejected(game, actor, "Contact-area Strike", delivery + " " + salvo, aim.ToString(), message, DecisionSeconds());
             Toast(message);
             return message;
         }
@@ -453,51 +472,52 @@ namespace SeaOfUncertainty.Prototype
             toast = "Select the Ready formation's action. Every choice previews its cost.";
         }
 
-        private void SaveOperation()
+        private bool SaveOperation()
         {
             try
             {
                 var save = new OperationSave { Game = game.CaptureState(), Playtest = telemetry.Session, Feedback = feedback, OperationMode = operationMode, HumanSide = humanSide };
-                string json = JsonUtility.ToJson(save, true);
-                File.WriteAllText(SavePath, json);
+                SaveStore.Save(save);
                 Toast($"Operation saved at T{game.Time:00}.");
+                return true;
             }
             catch (Exception exception)
             {
                 Toast("Save failed: " + exception.Message);
-                Debug.LogException(exception);
+                return false;
             }
         }
 
-        private void LoadOperation()
+        private bool LoadOperation(bool backup = false)
         {
             try
             {
-                if (!File.Exists(SavePath)) { Toast("No saved operation was found."); return; }
-                string json = File.ReadAllText(SavePath);
-                OperationSave operation = JsonUtility.FromJson<OperationSave>(json);
-                PrototypeGame.SaveData data = operation?.Game;
-                if (data == null) data = JsonUtility.FromJson<PrototypeGame.SaveData>(json);
-                ScenarioDefinition scenario = ScenarioCatalog.Find(string.IsNullOrEmpty(data.ScenarioId) ? "meridian-veil" : data.ScenarioId);
-                var restored = new PrototypeGame(1978, scenario);
-                restored.RestoreState(data);
-                game = restored;
+                RestoredOperation loaded = SaveStore.Load(backup);
+                OperationSave operation = loaded.Save;
+                var restoredTelemetry = new PlaytestRecorder();
+                if (operation.Playtest != null) restoredTelemetry.Restore(operation.Playtest); else restoredTelemetry.StartNew(loaded.Game);
+                ScenarioOutcome restoredOutcome = loaded.Game.Time >= loaded.Game.Scenario.Horizon ? ScenarioScoring.Evaluate(loaded.Game) : null;
+                // Commit only after decoding, migration, telemetry, and scoring succeed.
+                game = loaded.Game;
                 AttachMissionAudio(game);
-                if (telemetry == null) telemetry = new PlaytestRecorder();
-                if (operation?.Playtest != null) telemetry.Restore(operation.Playtest); else telemetry.StartNew(game);
+                telemetry = restoredTelemetry;
                 feedback = operation?.Feedback ?? new PlaytestFeedback();
                 operationMode = operation != null && operation.Version >= 4 ? operation.OperationMode : OperationMode.LocalHotseat;
                 humanSide = operation != null && operation.Version >= 4 ? operation.HumanSide : Side.Blue;
                 ageTwoTargetingPenalty = game.AgeTwoTargetingPenalty;
                 inspected = game.Active;
                 pending = PendingAction.None;
-                if (game.Time >= game.Scenario.Horizon) CompleteScenario();
-                Toast($"Saved operation loaded at T{game.Time:00}.");
+                finalOutcome = restoredOutcome;
+                blueFinalScore = restoredOutcome?.Blue.OperationalPoints ?? 0;
+                redFinalScore = restoredOutcome?.Red.OperationalPoints ?? 0;
+                resultSummary = restoredOutcome?.Summary;
+                Toast($"{(backup ? "Backup" : "Saved operation")} loaded at T{game.Time:00}.");
+                return true;
             }
             catch (Exception exception)
             {
-                Toast("Load failed: " + exception.Message);
-                Debug.LogException(exception);
+                Toast("Load failed. Your current operation and save files are unchanged. " + exception.Message);
+                return false;
             }
         }
 
@@ -520,12 +540,23 @@ namespace SeaOfUncertainty.Prototype
 
         private void AttachMissionAudio(PrototypeGame current)
         {
+            if (audioEventGame != current) { interceptionCues.Clear(); launchCues.Clear(); }
             if (audioEventGame != null) { audioEventGame.ActionCompleted -= OnMissionCompleted; audioEventGame.CommandEvent -= OnCommandEvent; }
             audioEventGame = current;
             if (audioEventGame != null) { audioEventGame.ActionCompleted += OnMissionCompleted; audioEventGame.CommandEvent += OnCommandEvent; }
         }
 
-        private void OnCommandEvent(FormationState formation, string category, string detail) => telemetry?.RecordCommandEvent(game, formation, category, detail);
+        private void OnCommandEvent(FormationState formation, string category, string detail)
+        {
+            telemetry?.RecordCommandEvent(game, formation, category, detail);
+            if (formation != null && (category == "BallisticInterception" || category == "BallisticLaunch"))
+            {
+                bool interception = category == "BallisticInterception";
+                var destination = interception ? interceptionCues : launchCues;
+                destination[formation.Side] = new FriendlyBallisticCue { Side = formation.Side, Time = game.Time, Kind = interception ? OperationalEffectKind.Interception : OperationalEffectKind.Launch,
+                    FormationId = formation.Id, Position = formation.Position, Receipt = detail };
+            }
+        }
 
         private void OnMissionCompleted(FormationState formation, ActionKind mission)
         {
