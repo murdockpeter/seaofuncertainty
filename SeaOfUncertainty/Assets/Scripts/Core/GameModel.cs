@@ -154,13 +154,13 @@ namespace SeaOfUncertainty.Core
         public string EnduranceProgress => $"{Math.Min(MajorActions, 2)}/3 Major Actions";
         public string Cohesion => EntropySources >= 3 ? "Disorganized" : EntropySources >= 2 ? "Disrupted" : "Cohesive";
         public bool IsDestroyed => Damage == DamageState.Destroyed;
-        public int EffectiveMove => Math.Max(1, Ratings.Move - (Endurance == Endurance.Critical ? 1 : 0) - (Damage == DamageState.Crippled ? 1 : 0) - (HasEffect("X-03") ? 1 : 0));
-        public int EffectiveStrike => Ratings.Strike - (Destruction && !IgnoreEntropyNextAction && !SuppressDestructionNextAction ? 1 : 0) - (HasEffect("X-01") && (Kind == FormationKind.CarrierGroup || Kind == FormationKind.AirGroup) ? 1 : 0);
-        public int EffectiveSearch => Ratings.Search - (Disruption && !IgnoreEntropyNextAction ? 1 : 0) - (HasEffect("X-02") ? 1 : 0);
-        public int EffectiveDefense => Math.Max(0, Ratings.Defense - (Damage == DamageState.Light ? 1 : 0) - (HasEffect("X-06") ? 1 : 0) - (HasEffect("X-07") ? 1 : 0) + ReactionDefenseBonus);
+        public int EffectiveMove => Math.Max(1, Ratings.Move - (Endurance == Endurance.Critical ? 1 : 0) - (Damage == DamageState.Crippled ? 1 : 0) - (HasEffect(EntropyCardIds.PropulsionDamage) ? 1 : 0));
+        public int EffectiveStrike => Ratings.Strike - (Destruction && !IgnoreEntropyNextAction && !SuppressDestructionNextAction ? 1 : 0) - (HasEffect(EntropyCardIds.FlightOpsDegraded) && (Kind == FormationKind.CarrierGroup || Kind == FormationKind.AirGroup) ? 1 : 0);
+        public int EffectiveSearch => Ratings.Search - (Disruption && !IgnoreEntropyNextAction ? 1 : 0) - (HasEffect(EntropyCardIds.SensorDamage) ? 1 : 0);
+        public int EffectiveDefense => Math.Max(0, Ratings.Defense - (Damage == DamageState.Light ? 1 : 0) - (HasEffect(EntropyCardIds.EscortLost) ? 1 : 0) - (HasEffect(EntropyCardIds.AirDefenseHit) ? 1 : 0) + ReactionDefenseBonus);
         public int EffectiveSignature => Ratings.Signature + (Loud ? 1 : 0) + SignatureBonus + MovementSignatureModifier - Math.Max(0, Ratings.ElectronicWarfare / 2) - (Kind == FormationKind.Submarine && SubmarineDepth == SubmarineDepthState.Deep ? 1 : 0);
-        public int EffectiveCommand => Math.Max(0, Ratings.Command + CommandBonus - (HasEffect("X-05") ? 1 : 0) - (HasEffect("X-12") ? 1 : 0));
-        public bool CanHeavySalvo => !WeaponExpended && (Weapons == null || Weapons.MaxHeavy == 0 || Weapons.Heavy > 0) && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect("X-04") && !HasEffect("X-11");
+        public int EffectiveCommand => Math.Max(0, Ratings.Command + CommandBonus - (HasEffect(EntropyCardIds.CommandSpacesHit) ? 1 : 0) - (HasEffect(EntropyCardIds.BridgeCasualties) ? 1 : 0));
+        public bool CanHeavySalvo => !WeaponExpended && (Weapons == null || Weapons.MaxHeavy == 0 || Weapons.Heavy > 0) && Endurance != Endurance.Critical && Damage != DamageState.Crippled && !HasEffect(EntropyCardIds.MagazineDamage) && !HasEffect(EntropyCardIds.LauncherDamage);
         public bool CanFire(Salvo salvo) => salvo == Salvo.Heavy ? CanHeavySalvo : Weapons == null || (salvo == Salvo.Light ? Weapons.MaxLight == 0 : Weapons.MaxStandard == 0) || Weapons.CanFire(salvo);
         public bool HasEffect(string id)
         {
@@ -260,7 +260,7 @@ namespace SeaOfUncertainty.Core
         {
             int allowance = formation.Kind == FormationKind.AirGroup ? MoveDistance(formation.Kind, mode) : Math.Min(MoveDistance(formation.Kind, mode), formation.EffectiveMove);
             allowance += formation.MoveBonus;
-            if (formation.HasEffect("F-07")) allowance--;
+            if (formation.HasEffect(EntropyCardIds.NavigationDrift)) allowance--;
             return Math.Max(1, allowance);
         }
         public static int SearchModifier(SearchMode mode) => mode == SearchMode.Passive ? 0 : mode == SearchMode.Active ? 1 : 2;

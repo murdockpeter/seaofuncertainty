@@ -96,8 +96,7 @@ namespace SeaOfUncertainty.Prototype
             if (FindAnyObjectByType<SeaUIToolkitController>() != null) return;
             var host = new GameObject("Sea of Uncertainty — UI Toolkit");
             DontDestroyOnLoad(host);
-            SeaPrototypeController session = host.AddComponent<SeaPrototypeController>();
-            session.LegacyUiEnabled = false;
+            host.AddComponent<SeaPrototypeController>();
             host.AddComponent<SeaUIToolkitController>();
         }
 
@@ -863,7 +862,7 @@ namespace SeaOfUncertainty.Prototype
                 if (selected == SupportKind.Synchronization)
                 {
                     choice.SetEnabled(backend.Game.CanParticipateInSynchronization(backend.Game.Active) && backend.Game.CanParticipateInSynchronization(recipient));
-                    if (backend.Game.Active.HasEffect("F-05") || recipient.HasEffect("F-05")) choice.text += "  •  COORDINATION DRIFT";
+                    if (backend.Game.Active.HasEffect(EntropyCardIds.CoordinationDrift) || recipient.HasEffect(EntropyCardIds.CoordinationDrift)) choice.text += "  •  COORDINATION DRIFT";
                 }
                 modal.Add(choice);
             }
@@ -876,7 +875,7 @@ namespace SeaOfUncertainty.Prototype
             VisualElement modal = Modal("REPLENISHMENT • LOGISTICS");
             IReadOnlyList<OperationalLocationDefinition> facilities = backend.Game.LogisticsFacilitiesFor(active);
             bool access = backend.Game.HasLogisticsAccess(active);
-            modal.Add(Text($"{active.Name.ToUpperInvariant()} • HEX {active.Position}\n{(access ? "VALID LOGISTICS ACCESS" : "NO LOGISTICS ACCESS AT CURRENT HEX")}\n\n{backend.Game.ReplenishmentPreview(active)}\n\nBase Time 3{(active.HasEffect("X-10") ? " +1 Hull Breach" : string.Empty)}. The Formation cannot React while servicing and becomes available again when its Ready Time arrives.", "body-copy", access ? "amber" : null));
+            modal.Add(Text($"{active.Name.ToUpperInvariant()} • HEX {active.Position}\n{(access ? "VALID LOGISTICS ACCESS" : "NO LOGISTICS ACCESS AT CURRENT HEX")}\n\n{backend.Game.ReplenishmentPreview(active)}\n\nBase Time 3{(active.HasEffect(EntropyCardIds.HullBreach) ? " +1 Hull Breach" : string.Empty)}. The Formation cannot React while servicing and becomes available again when its Ready Time arrives.", "body-copy", access ? "amber" : null));
             if (!access)
             {
                 foreach (OperationalLocationDefinition facility in facilities)
@@ -1011,8 +1010,8 @@ namespace SeaOfUncertainty.Prototype
             List<FormationState> eligible = backend.Game.EligibleSynchronizedStrikeParticipants(leader.Side, contact, aim, salvo).ToList();
             VisualElement modal = Modal("SYNCHRONIZED STRIKE • PARTICIPANTS");
             modal.Add(Text($"Leader {leader.Name}. Choose a package; all participants are reserved with no intervening actions. {salvo} is used by every participant.", "body-copy"));
-            bool hasC02 = backend.ToolkitResponseHand(leader.Side).Any(card => card.Id == "C-02");
-            bool hasC10 = backend.ToolkitResponseHand(leader.Side).Any(card => card.Id == "C-10");
+            bool hasC02 = backend.ToolkitResponseHand(leader.Side).Any(card => card.Id == CommandResponseIds.PriorPlanning);
+            bool hasC10 = backend.ToolkitResponseHand(leader.Side).Any(card => card.Id == CommandResponseIds.DeconflictionCell);
             foreach (List<FormationState> package in SynchronizedPackages(leader, eligible))
             {
                 List<FormationState> selected = package;
@@ -1347,10 +1346,10 @@ namespace SeaOfUncertainty.Prototype
             card.Add(Text($"Attacker: {attackerLabel}\nDefender Reaction is available and does not change Ready Time. The choice is consumed until this Formation completes its own Action.", "body-copy"));
             IReadOnlyList<Reaction> legal = backend.Game.AvailableReactions(attacker, defender);
             IReadOnlyList<CommandResponseDefinition> responseHand = backend.ToolkitResponseHand(defender.Side);
-            if (responseHand.Any(response => response.Id == "C-16") && defender.ReactionDefenseBonus == 0)
-                card.Add(ActionButton("PLAY C-16 COVERING FIRES  •  +1 DEFENSE", () => { backend.ToolkitPlayResponseForSide(defender.Side, "C-16", defender); ShowReactionChoice(); }, "warning"));
-            if (responseHand.Any(response => response.Id == "C-18") && !defender.OrderlyWithdrawalReady)
-                card.Add(ActionButton("PLAY C-18 ORDERLY WITHDRAWAL  •  EVADE 2", () => { backend.ToolkitPlayResponseForSide(defender.Side, "C-18", defender); ShowReactionChoice(); }, "warning"));
+            if (responseHand.Any(response => response.Id == CommandResponseIds.CoveringFires) && defender.ReactionDefenseBonus == 0)
+                card.Add(ActionButton("PLAY C-16 COVERING FIRES  •  +1 DEFENSE", () => { backend.ToolkitPlayResponseForSide(defender.Side, CommandResponseIds.CoveringFires, defender); ShowReactionChoice(); }, "warning"));
+            if (responseHand.Any(response => response.Id == CommandResponseIds.OrderlyWithdrawal) && !defender.OrderlyWithdrawalReady)
+                card.Add(ActionButton("PLAY C-18 ORDERLY WITHDRAWAL  •  EVADE 2", () => { backend.ToolkitPlayResponseForSide(defender.Side, CommandResponseIds.OrderlyWithdrawal, defender); ShowReactionChoice(); }, "warning"));
             if (legal.Contains(Reaction.Defend)) card.Add(ActionButton("DEFEND  •  +1 DEFENSE", () => ResolvePendingStrike(Reaction.Defend, null), "primary"));
             if (legal.Contains(Reaction.Evade)) card.Add(ActionButton($"EVADE  •  +1 DEFENSE  •  MOVE {(defender.OrderlyWithdrawalReady ? 2 : 1)} AFTER", ShowEvadeDestinations));
             if (legal.Contains(Reaction.Counterattack)) card.Add(ActionButton("COUNTERATTACK  •  LIGHT STRIKE AFTER  •  NO DEFENSE BONUS", () => ResolvePendingStrike(Reaction.Counterattack, null), "warning"));
@@ -1449,7 +1448,7 @@ namespace SeaOfUncertainty.Prototype
         private string ActionPreview()
         {
             if (actionMode == ToolkitActionMode.None) return "SELECT AN ACTION • Keyboard shortcuts: 1–8.";
-            if (actionMode == ToolkitActionMode.Replenish) return $"REPLENISH AT A COMPATIBLE LOGISTICS FACILITY\nTIME 3{(backend.Game.Active.HasEffect("X-10") ? " +1 HULL BREACH" : string.Empty)} • {backend.Game.ReplenishmentPreview(backend.Game.Active)}";
+            if (actionMode == ToolkitActionMode.Replenish) return $"REPLENISH AT A COMPATIBLE LOGISTICS FACILITY\nTIME 3{(backend.Game.Active.HasEffect(EntropyCardIds.HullBreach) ? " +1 HULL BREACH" : string.Empty)} • {backend.Game.ReplenishmentPreview(backend.Game.Active)}";
             if (actionMode == ToolkitActionMode.None) return "SELECT AN ACTION  •  Keyboard shortcuts: 1–5.";
             FormationState active = backend.Game.Active;
             int friction = active.Friction || actionMode == ToolkitActionMode.Move && moveMode == MoveMode.HighTempo ? 1 : 0;
@@ -1647,7 +1646,7 @@ namespace SeaOfUncertainty.Prototype
                     FormationState selected = formation;
                     modal.Add(ActionButton($"{selected.Name.ToUpperInvariant()}  •  MISSION {selected.Mission.ToString().ToUpperInvariant()}  •  READY T{selected.ReadyTime:00}", () =>
                     {
-                        if (card.Id == "C-04" || card.Id == "C-17") ShowMissionChoices(card, selected);
+                        if (card.Id == CommandResponseIds.RapidReplan || card.Id == CommandResponseIds.FlashOrder) ShowMissionChoices(card, selected);
                         else PlayResponse(card, selected, null, null);
                     }));
                 }
@@ -1664,7 +1663,7 @@ namespace SeaOfUncertainty.Prototype
         private void ShowMissionChoices(CommandResponseDefinition card, FormationState formation)
         {
             VisualElement modal = Modal(card.Id + "  •  SELECT NEW MISSION");
-            modal.Add(Text($"{formation.Name.ToUpperInvariant()} currently has Mission {formation.Mission}. {(card.Id == "C-17" ? "Flash Order penetrates Broken Link immediately and marks 1 Command Strain." : "Rapid Replan changes its task without occupying Command; its next Ready scheduling receives +1 Time.")}", "body-copy"));
+            modal.Add(Text($"{formation.Name.ToUpperInvariant()} currently has Mission {formation.Mission}. {(card.Id == CommandResponseIds.FlashOrder ? "Flash Order penetrates Broken Link immediately and marks 1 Command Strain." : "Rapid Replan changes its task without occupying Command; its next Ready scheduling receives +1 Time.")}", "body-copy"));
             ActionKind[] playableMissions = { ActionKind.Move, ActionKind.Search, ActionKind.Strike, ActionKind.Patrol, ActionKind.Support, ActionKind.Recover, ActionKind.Replenish, ActionKind.Hold };
             foreach (ActionKind mission in playableMissions)
             {

@@ -69,7 +69,7 @@ namespace SeaOfUncertainty.Editor
                 Assert(ui.EditorActionMode == "Move" && !ui.EditorOverlayOpen, "A contextual order returns directly to 3D destination selection");
                 Side activeSide = backend.Game.Active.Side;
                 CommandResponseDeckState deck = backend.Game.CommandResponseDecks.First(item => item.Side == activeSide);
-                deck.Hand.Clear(); deck.DrawPile.Remove("C-12"); deck.DiscardPile.Remove("C-12"); deck.Hand.Add("C-12");
+                deck.Hand.Clear(); deck.DrawPile.Remove(CommandResponseIds.UpdateThePlot); deck.DiscardPile.Remove(CommandResponseIds.UpdateThePlot); deck.Hand.Add(CommandResponseIds.UpdateThePlot);
                 ContactState contact = backend.Game.Contacts.First(item => item.Owner == activeSide && !item.IsLost);
                 contact.Age = 2;
                 ui.EditorShowResponseHand();
@@ -79,7 +79,7 @@ namespace SeaOfUncertainty.Editor
                 Button contactChoice = ui.EditorRoot.Query<Button>().ToList().First(button => button.text.Contains(contact.LastKnownPosition.ToString()));
                 Assert(contactChoice.userData is Action, "Contact target choice retains its production callback");
                 ((Action)contactChoice.userData)();
-                Assert(contact.Age == 0 && !deck.Hand.Contains("C-12") && deck.DiscardPile.Contains("C-12") && !ui.EditorOverlayOpen, "Targeted response resolves through the UI and returns to play");
+                Assert(contact.Age == 0 && !deck.Hand.Contains(CommandResponseIds.UpdateThePlot) && deck.DiscardPile.Contains(CommandResponseIds.UpdateThePlot) && !ui.EditorOverlayOpen, "Targeted response resolves through the UI and returns to play");
 
                 contact.Age = 0;
                 contact.Location = LocationQuality.High;
@@ -93,6 +93,7 @@ namespace SeaOfUncertainty.Editor
                 Assert(ui.EditorView == "Handoff" && backend.Game.Formations.Where(item => item.Side != backend.Game.Active.Side).All(item => !visibleText.Contains(item.Name)), "Hotseat handoff conceals the non-active side's formation identities");
                 Assert(ui.EditorInvokeButton("ASSUME COMMAND") && ui.EditorView == "Game", "Handoff assumption returns to the game screen");
 
+                TestChecks.ThrowIfAny("UI interaction");
                 Debug.Log("Sea of Uncertainty UI interaction tests passed: immersive HUD toggle, card targeting, handoff privacy, settings, fullscreen policy, and modal navigation.");
             }
             finally
@@ -105,7 +106,7 @@ namespace SeaOfUncertainty.Editor
 
         private static void Assert(bool condition, string message)
         {
-            if (!condition) throw new InvalidOperationException("UI interaction test failed: " + message);
+            TestChecks.Check(condition, "UI interaction: " + message);
         }
     }
 }

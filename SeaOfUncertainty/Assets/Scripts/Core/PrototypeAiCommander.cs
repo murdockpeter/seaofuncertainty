@@ -87,8 +87,8 @@ namespace SeaOfUncertainty.Core
                     return new AiDecision
                     {
                         Action = ActionKind.Strike, DeclareSynchronizedStrike = true, TargetId = strikeContact.TargetId, Hex = strikeContact.LastKnownPosition, Salvo = Salvo.Standard,
-                        ParticipantIds = synchronized.Select(item => item.Id).ToList(), UsePriorPlanning = hand.Any(card => card.Id == "C-02"),
-                        DeconflictedFormationId = hand.Any(card => card.Id == "C-10") ? synchronized.Last().Id : null,
+                        ParticipantIds = synchronized.Select(item => item.Id).ToList(), UsePriorPlanning = hand.Any(card => card.Id == CommandResponseIds.PriorPlanning),
+                        DeconflictedFormationId = hand.Any(card => card.Id == CommandResponseIds.DeconflictionCell) ? synchronized.Last().Id : null,
                         Rationale = "Reserve nearby available formations against a high-location identified Contact using only owned Contact information."
                     };
                 }
@@ -107,7 +107,7 @@ namespace SeaOfUncertainty.Core
 
             FormationState supportRecipient = game.Formations.Where(candidate => candidate.Side == actor.Side && candidate != actor && !candidate.IsDestroyed && HexCoord.Distance(actor.Position, candidate.Position) <= Rules.SupportRange)
                 .OrderByDescending(candidate => candidate.EffectiveStrike).ThenBy(candidate => candidate.Id, StringComparer.Ordinal).FirstOrDefault();
-            if (!actor.SupportActive && !actor.SupportBlockedUntilRecover && supportRecipient != null && actor.Kind == FormationKind.AirGroup && !actor.HasEffect("X-08"))
+            if (!actor.SupportActive && !actor.SupportBlockedUntilRecover && supportRecipient != null && actor.Kind == FormationKind.AirGroup && !actor.HasEffect(EntropyCardIds.HangarDamage))
                 return new AiDecision { Action = ActionKind.Support, TargetId = supportRecipient.Id, SupportKind = SupportKind.Strike, Rationale = "Assign available air Support to the strongest nearby friendly striking formation." };
 
             ContactState searchContact = contacts.FirstOrDefault(contact => HexCoord.Distance(actor.Position, contact.LastKnownPosition) <= game.SearchRangeFor(actor, actor.Kind == FormationKind.Submarine ? SearchMode.Passive : SearchMode.Active));
@@ -201,15 +201,15 @@ namespace SeaOfUncertainty.Core
             FormationState actor = game.Active;
             HashSet<string> hand = new HashSet<string>(game.ResponseHand(actor.Side).Select(card => card.Id));
             ContactState contact = game.Contacts.Where(item => item.Owner == actor.Side && !item.IsLost).OrderByDescending(item => item.Age).ThenBy(item => item.Location).ThenBy(item => item.TargetId).FirstOrDefault();
-            if (hand.Contains("C-01") && actor.Friction) return game.PlayCommandResponse(actor.Side, "C-01", actor, null, null, out message);
-            if (hand.Contains("C-19") && actor.Endurance != Endurance.Ready) return game.PlayCommandResponse(actor.Side, "C-19", actor, null, null, out message);
-            if (hand.Contains("C-06") && actor.Destruction) return game.PlayCommandResponse(actor.Side, "C-06", actor, null, null, out message);
-            if (hand.Contains("C-12") && contact != null && contact.Age > 0) return game.PlayCommandResponse(actor.Side, "C-12", null, contact, null, out message);
-            if (hand.Contains("C-23") && contact != null && contact.Location < LocationQuality.High) return game.PlayCommandResponse(actor.Side, "C-23", null, contact, null, out message);
-            if (hand.Contains("C-05") && actor.EffectiveSearch >= actor.EffectiveStrike) return game.PlayCommandResponse(actor.Side, "C-05", actor, null, null, out message);
-            if (hand.Contains("C-16") && actor.Damage >= DamageState.Heavy) return game.PlayCommandResponse(actor.Side, "C-16", actor, null, null, out message);
-            if (hand.Contains("C-18") && actor.Damage >= DamageState.Heavy && !actor.OrderlyWithdrawalReady) return game.PlayCommandResponse(actor.Side, "C-18", actor, null, null, out message);
-            if (hand.Contains("C-14") && HexCoord.Distance(actor.Position, game.Area.Objective) > 1) return game.PlayCommandResponse(actor.Side, "C-14", actor, null, null, out message);
+            if (hand.Contains(CommandResponseIds.CommandersPresence) && actor.Friction) return game.PlayCommandResponse(actor.Side, CommandResponseIds.CommandersPresence, actor, null, null, out message);
+            if (hand.Contains(CommandResponseIds.PriorityRefuel) && actor.Endurance != Endurance.Ready) return game.PlayCommandResponse(actor.Side, CommandResponseIds.PriorityRefuel, actor, null, null, out message);
+            if (hand.Contains(CommandResponseIds.DamageControlPriority) && actor.Destruction) return game.PlayCommandResponse(actor.Side, CommandResponseIds.DamageControlPriority, actor, null, null, out message);
+            if (hand.Contains(CommandResponseIds.UpdateThePlot) && contact != null && contact.Age > 0) return game.PlayCommandResponse(actor.Side, CommandResponseIds.UpdateThePlot, null, contact, null, out message);
+            if (hand.Contains(CommandResponseIds.TrailRecovery) && contact != null && contact.Location < LocationQuality.High) return game.PlayCommandResponse(actor.Side, CommandResponseIds.TrailRecovery, null, contact, null, out message);
+            if (hand.Contains(CommandResponseIds.DirectedTelescope) && actor.EffectiveSearch >= actor.EffectiveStrike) return game.PlayCommandResponse(actor.Side, CommandResponseIds.DirectedTelescope, actor, null, null, out message);
+            if (hand.Contains(CommandResponseIds.CoveringFires) && actor.Damage >= DamageState.Heavy) return game.PlayCommandResponse(actor.Side, CommandResponseIds.CoveringFires, actor, null, null, out message);
+            if (hand.Contains(CommandResponseIds.OrderlyWithdrawal) && actor.Damage >= DamageState.Heavy && !actor.OrderlyWithdrawalReady) return game.PlayCommandResponse(actor.Side, CommandResponseIds.OrderlyWithdrawal, actor, null, null, out message);
+            if (hand.Contains(CommandResponseIds.PreparedAxis) && HexCoord.Distance(actor.Position, game.Area.Objective) > 1) return game.PlayCommandResponse(actor.Side, CommandResponseIds.PreparedAxis, actor, null, null, out message);
             return false;
         }
 
@@ -218,10 +218,10 @@ namespace SeaOfUncertainty.Core
             message = string.Empty;
             if (game == null || defender == null) return false;
             HashSet<string> hand = new HashSet<string>(game.ResponseHand(defender.Side).Select(card => card.Id));
-            if (hand.Contains("C-16") && defender.ReactionDefenseBonus == 0)
-                return game.PlayCommandResponse(defender.Side, "C-16", defender, null, null, out message);
-            if (hand.Contains("C-18") && defender.Damage >= DamageState.Heavy && !defender.OrderlyWithdrawalReady)
-                return game.PlayCommandResponse(defender.Side, "C-18", defender, null, null, out message);
+            if (hand.Contains(CommandResponseIds.CoveringFires) && defender.ReactionDefenseBonus == 0)
+                return game.PlayCommandResponse(defender.Side, CommandResponseIds.CoveringFires, defender, null, null, out message);
+            if (hand.Contains(CommandResponseIds.OrderlyWithdrawal) && defender.Damage >= DamageState.Heavy && !defender.OrderlyWithdrawalReady)
+                return game.PlayCommandResponse(defender.Side, CommandResponseIds.OrderlyWithdrawal, defender, null, null, out message);
             return false;
         }
 

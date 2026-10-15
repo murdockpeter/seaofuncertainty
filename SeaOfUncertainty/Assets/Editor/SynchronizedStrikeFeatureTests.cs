@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SeaOfUncertainty.Core;
 using UnityEditor;
+using SeaOfUncertainty.Editor;
 using UnityEngine;
 
 namespace SeaOfUncertainty.EditorTools
@@ -15,6 +16,7 @@ namespace SeaOfUncertainty.EditorTools
             TestDeclarationSaveResolutionAndDraw();
             TestLostContactAbort();
             TestAiResponseUsesOwnedState();
+            TestChecks.ThrowIfAny("command response / synchronized strike");
             Debug.Log("COMMAND RESPONSE / SYNCHRONIZED STRIKE TESTS PASSED");
         }
 
@@ -43,14 +45,14 @@ namespace SeaOfUncertainty.EditorTools
             synchronizationSupporter.SupportRecipientId = participants[1].Id;
             ContactState contact = EnsureContact(game, leader.Side, target, LocationQuality.High, IdentityQuality.Identified);
             CommandResponseDeckState deck = game.CommandResponseDecks.First(item => item.Side == leader.Side);
-            PutInHand(deck, "C-02"); PutInHand(deck, "C-10");
+            PutInHand(deck, CommandResponseIds.PriorPlanning); PutInHand(deck, CommandResponseIds.DeconflictionCell);
             deck.MajorActionsTowardDraw = 0;
             int handBefore = deck.Hand.Count;
             Assert(game.DeclareSynchronizedStrike(leader, participants, contact, target.Position, Salvo.Standard, true, participants.Last().Id, out SynchronizedStrikeState strike, out string declaration), declaration);
             Assert(strike.StrikeTime >= strike.DeclaredTime + 1, "Strike Time must be in the future.");
             Assert(game.Sides[leader.Side].CommandSlots == 2, "Declaration must hold one Command Slot.");
             Assert(participants.All(item => item.SynchronizedStrikeId == strike.Id), "All participants must be reserved.");
-            Assert(!deck.Hand.Contains("C-02") && !deck.Hand.Contains("C-10"), "C-02 and C-10 must discard atomically at declaration.");
+            Assert(!deck.Hand.Contains(CommandResponseIds.PriorPlanning) && !deck.Hand.Contains(CommandResponseIds.DeconflictionCell), "C-02 and C-10 must discard atomically at declaration.");
             Assert(strike.CoordinationSupportedFormationIds.Contains(participants[1].Id) && !synchronizationSupporter.SupportActive, "Stored Synchronization Support must be consumed into the event.");
 
             PrototypeGame.SaveData saved = game.CaptureState();
@@ -98,11 +100,11 @@ namespace SeaOfUncertainty.EditorTools
             actor.Endurance = Endurance.Extended;
             CommandResponseDeckState deck = game.CommandResponseDecks.First(item => item.Side == actor.Side);
             deck.Hand.Clear();
-            foreach (string id in new[] { "C-19", "C-02", "C-04", "C-07", "C-14" }) { deck.DrawPile.Remove(id); deck.DiscardPile.Remove(id); deck.Hand.Add(id); }
+            foreach (string id in new[] { CommandResponseIds.PriorityRefuel, CommandResponseIds.PriorPlanning, CommandResponseIds.RapidReplan, CommandResponseIds.DelegateAuthority, CommandResponseIds.PreparedAxis }) { deck.DrawPile.Remove(id); deck.DiscardPile.Remove(id); deck.Hand.Add(id); }
             deck.MajorActionsTowardDraw = 3;
-            Assert(!game.PlayCommandResponse(actor.Side, "C-02", null, null, null, out string window) && window.Contains("declaring"), "C-02 must reject play outside synchronized declaration.");
+            Assert(!game.PlayCommandResponse(actor.Side, CommandResponseIds.PriorPlanning, null, null, null, out string window) && window.Contains("declaring"), "C-02 must reject play outside synchronized declaration.");
             Assert(PrototypeAiCommander.TryPlayUsefulResponse(game, out string message), message);
-            Assert(actor.Endurance == Endurance.Ready && deck.DiscardPile.Contains("C-19"), "AI must play a useful owned Response through the normal public API.");
+            Assert(actor.Endurance == Endurance.Ready && deck.DiscardPile.Contains(CommandResponseIds.PriorityRefuel), "AI must play a useful owned Response through the normal public API.");
             Assert(deck.Hand.Count == 5 && deck.MajorActionsTowardDraw == 0, "A full hand must defer an earned draw until a successful play opens a slot.");
         }
 
@@ -136,7 +138,7 @@ namespace SeaOfUncertainty.EditorTools
 
         private static void Assert(bool condition, string message)
         {
-            if (!condition) throw new InvalidOperationException(message);
+            TestChecks.Check(condition, message);
         }
     }
 }

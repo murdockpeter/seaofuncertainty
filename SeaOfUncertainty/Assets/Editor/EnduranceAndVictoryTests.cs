@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using SeaOfUncertainty.Core;
 using UnityEditor;
+using SeaOfUncertainty.Editor;
 using UnityEngine;
 
 namespace SeaOfUncertainty.EditorTools
@@ -20,6 +21,7 @@ namespace SeaOfUncertainty.EditorTools
             SeaOfUncertainty.Editor.PrototypeSceneBuilder.RunReactionTests();
             SynchronizedStrikeFeatureTests.Run();
             Run();
+            TestChecks.ThrowIfAny("all regression suites");
             Debug.Log("ALL REGRESSION SUITES PASSED");
         }
 
@@ -29,6 +31,7 @@ namespace SeaOfUncertainty.EditorTools
             TestEnduranceStatesAndProgress();
             TestEveryObjectiveType();
             TestContestedControlTieEliminationAndPriority();
+            TestChecks.ThrowIfAny("endurance / scenario victory");
             Debug.Log("ENDURANCE / SCENARIO VICTORY TESTS PASSED");
         }
 
@@ -145,7 +148,7 @@ namespace SeaOfUncertainty.EditorTools
 
         private static void Assert(bool condition, string message)
         {
-            if (!condition) throw new InvalidOperationException(message);
+            TestChecks.Check(condition, message);
         }
     }
 }

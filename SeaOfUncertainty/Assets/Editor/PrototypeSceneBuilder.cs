@@ -75,6 +75,7 @@ namespace SeaOfUncertainty.Editor
             var restored = new PrototypeGame(1978);
             restored.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(saveJson));
             Assert(restored.PendingEntropyEffectFor(player.Side)?.Id == playerCard.Id, "The pending player reveal survives save and load");
+            TestChecks.ThrowIfAny("Entropy reveal regression");
             Debug.Log("Entropy reveal regression tests passed.");
         }
 
@@ -105,11 +106,11 @@ namespace SeaOfUncertainty.Editor
             Assert(stackGame.Recover(stackFormation, out string stackedRecovery) && stackFormation.Friction && stackFormation.ActiveEffectCardIds.Count == 1, "Recover discards one stacked card while the remaining card keeps its source marked: " + stackedRecovery);
 
             FormationState actor = game.Active;
-            actor.ActiveEffectCardIds.Add("F-07");
+            actor.ActiveEffectCardIds.Add(EntropyCardIds.NavigationDrift);
             Assert(Rules.MoveAllowance(actor, MoveMode.Normal) == 1, "Navigation Drift reduces the first normal Move by one hex");
-            actor.ActiveEffectCardIds.Add("D-08");
+            actor.ActiveEffectCardIds.Add(EntropyCardIds.JammedCircuits);
             Assert(!game.SearchArea(actor, actor.Position, SearchMode.Focused, out string jammedMessage) && jammedMessage.Contains("Jammed Circuits"), "Jammed Circuits blocks Focused Search");
-            actor.ActiveEffectCardIds.Add("X-11");
+            actor.ActiveEffectCardIds.Add(EntropyCardIds.LauncherDamage);
             Assert(!actor.CanHeavySalvo, "Launcher Damage blocks Heavy Salvo");
 
             var contradictionGame = new PrototypeGame(1978);
@@ -117,8 +118,8 @@ namespace SeaOfUncertainty.Editor
             ContactState contradictionContact = contradictionGame.Contacts.First(contact => contact.Owner == contradictionActor.Side && !contact.IsLost && !contact.IsFalse);
             int originalPossibleHexes = contradictionGame.ContactPossibleHexes(contradictionContact).Count;
             EntropyDeckState disruptionDeck = contradictionGame.EntropyDecks.First(deck => deck.Source == EntropySource.Disruption);
-            disruptionDeck.DrawPile.Remove("D-03"); disruptionDeck.DrawPile.Insert(0, "D-03");
-            Assert(contradictionGame.MarkEntropy(contradictionActor, EntropySource.Disruption)?.Id == "D-03" && contradictionContact.HasContradictoryPosition && HexCoord.Distance(contradictionContact.LastKnownPosition, contradictionContact.ContradictoryPosition) == 1, "D-03 places a second adjacent possible-position marker");
+            disruptionDeck.DrawPile.Remove(EntropyCardIds.ContradictoryReports); disruptionDeck.DrawPile.Insert(0, EntropyCardIds.ContradictoryReports);
+            Assert(contradictionGame.MarkEntropy(contradictionActor, EntropySource.Disruption)?.Id == EntropyCardIds.ContradictoryReports && contradictionContact.HasContradictoryPosition && HexCoord.Distance(contradictionContact.LastKnownPosition, contradictionContact.ContradictoryPosition) == 1, "D-03 places a second adjacent possible-position marker");
             Assert(contradictionGame.ContactPossibleHexes(contradictionContact).Count > originalPossibleHexes, "D-03 expands authoritative Contact uncertainty geometry");
 
             var synchronizationGame = new PrototypeGame(1978);
@@ -127,7 +128,7 @@ namespace SeaOfUncertainty.Editor
             synchronizationRecipient.Position = synchronizationActor.Position;
             synchronizationActor.Mission = ActionKind.Support;
             synchronizationActor.Friction = true;
-            synchronizationActor.ActiveEffectCardIds.Add("F-05");
+            synchronizationActor.ActiveEffectCardIds.Add(EntropyCardIds.CoordinationDrift);
             int synchronizationStart = synchronizationGame.Time;
             Assert(synchronizationGame.Support(synchronizationActor, synchronizationRecipient, SupportKind.Synchronization, out string driftMessage) && synchronizationActor.ReadyTime == synchronizationStart + 3, "F-05 adds +1 Time to Synchronization Support while stacking with the universal Friction +1: " + driftMessage);
 
@@ -136,54 +137,54 @@ namespace SeaOfUncertainty.Editor
             FormationState blockedSynchronizationRecipient = blockedSynchronizationGame.Formations.First(formation => formation.Side == blockedSynchronizationActor.Side && formation != blockedSynchronizationActor);
             blockedSynchronizationRecipient.Position = blockedSynchronizationActor.Position;
             blockedSynchronizationActor.Friction = true;
-            blockedSynchronizationActor.ActiveEffectCardIds.Add("F-02");
+            blockedSynchronizationActor.ActiveEffectCardIds.Add(EntropyCardIds.StaffOverload);
             Assert(!blockedSynchronizationGame.Support(blockedSynchronizationActor, blockedSynchronizationRecipient, SupportKind.Synchronization, out string overloadMessage) && overloadMessage.Contains("Staff Overload"), "F-02 blocks Synchronization Support before its expiry or response");
-            blockedSynchronizationActor.ActiveEffectCardIds.Remove("F-02");
+            blockedSynchronizationActor.ActiveEffectCardIds.Remove(EntropyCardIds.StaffOverload);
             blockedSynchronizationActor.Disruption = true;
-            blockedSynchronizationActor.ActiveEffectCardIds.Add("D-12");
+            blockedSynchronizationActor.ActiveEffectCardIds.Add(EntropyCardIds.CompromisedPlot);
             Assert(!blockedSynchronizationGame.Support(blockedSynchronizationActor, blockedSynchronizationRecipient, SupportKind.Synchronization, out string plotMessage) && plotMessage.Contains("Compromised Plot"), "D-12 blocks Synchronization Support until Recover");
-            Assert(blockedSynchronizationGame.Recover(blockedSynchronizationActor, EntropySource.Disruption, "D-12", out string plotRecovery) && !blockedSynchronizationActor.HasEffect("D-12") && blockedSynchronizationGame.CanParticipateInSynchronization(blockedSynchronizationActor), "Recover removes D-12 and restores Synchronization eligibility: " + plotRecovery);
+            Assert(blockedSynchronizationGame.Recover(blockedSynchronizationActor, EntropySource.Disruption, EntropyCardIds.CompromisedPlot, out string plotRecovery) && !blockedSynchronizationActor.HasEffect(EntropyCardIds.CompromisedPlot) && blockedSynchronizationGame.CanParticipateInSynchronization(blockedSynchronizationActor), "Recover removes D-12 and restores Synchronization eligibility: " + plotRecovery);
 
             var overloadExpiryGame = new PrototypeGame(1978);
             FormationState overloadActor = overloadExpiryGame.Active;
             EntropyDeckState overloadDeck = overloadExpiryGame.EntropyDecks.First(deck => deck.Source == EntropySource.Friction);
-            overloadDeck.DrawPile.Remove("F-02"); overloadDeck.DrawPile.Insert(0, "F-02");
-            Assert(overloadExpiryGame.MarkEntropy(overloadActor, EntropySource.Friction)?.Id == "F-02" && !overloadExpiryGame.CanParticipateInSynchronization(overloadActor), "F-02 immediately blocks Synchronization");
+            overloadDeck.DrawPile.Remove(EntropyCardIds.StaffOverload); overloadDeck.DrawPile.Insert(0, EntropyCardIds.StaffOverload);
+            Assert(overloadExpiryGame.MarkEntropy(overloadActor, EntropySource.Friction)?.Id == EntropyCardIds.StaffOverload && !overloadExpiryGame.CanParticipateInSynchronization(overloadActor), "F-02 immediately blocks Synchronization");
             Assert(overloadExpiryGame.Hold(overloadActor, out _), "Advance the F-02 duration through its drawing Action");
             int overloadGuard = 0;
             while (overloadExpiryGame.Active != overloadActor && overloadGuard++ < 40) Assert(overloadExpiryGame.Hold(overloadExpiryGame.Active, out _), "Advance to the overloaded Formation's next Action");
-            Assert(overloadExpiryGame.Active == overloadActor && overloadActor.HasEffect("F-02") && overloadExpiryGame.Hold(overloadActor, out _) && !overloadActor.HasEffect("F-02") && overloadExpiryGame.CanParticipateInSynchronization(overloadActor), "F-02 clears after the Formation completes another own Action");
+            Assert(overloadExpiryGame.Active == overloadActor && overloadActor.HasEffect(EntropyCardIds.StaffOverload) && overloadExpiryGame.Hold(overloadActor, out _) && !overloadActor.HasEffect(EntropyCardIds.StaffOverload) && overloadExpiryGame.CanParticipateInSynchronization(overloadActor), "F-02 clears after the Formation completes another own Action");
 
             var entropyResponseGame = new PrototypeGame(1978);
             FormationState responseActor = entropyResponseGame.Active;
             EntropyDeckState responseFrictionDeck = entropyResponseGame.EntropyDecks.First(deck => deck.Source == EntropySource.Friction);
-            responseFrictionDeck.DrawPile.Remove("F-01"); responseFrictionDeck.DrawPile.Insert(0, "F-01");
-            Assert(entropyResponseGame.MarkEntropy(responseActor, EntropySource.Friction)?.Id == "F-01" && entropyResponseGame.CanRespondToEntropy(responseActor, "F-01"), "A printed Entropy response opens when its card is revealed");
+            responseFrictionDeck.DrawPile.Remove(EntropyCardIds.DelayedExecution); responseFrictionDeck.DrawPile.Insert(0, EntropyCardIds.DelayedExecution);
+            Assert(entropyResponseGame.MarkEntropy(responseActor, EntropySource.Friction)?.Id == EntropyCardIds.DelayedExecution && entropyResponseGame.CanRespondToEntropy(responseActor, EntropyCardIds.DelayedExecution), "A printed Entropy response opens when its card is revealed");
             string responseSave = JsonUtility.ToJson(entropyResponseGame.CaptureState());
             var restoredResponseGame = new PrototypeGame(1978);
             restoredResponseGame.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(responseSave));
             FormationState restoredResponseActor = restoredResponseGame.Find(responseActor.Id);
             int freeCommandBeforeResponse = restoredResponseGame.Sides[restoredResponseActor.Side].CommandSlots;
-            Assert(restoredResponseGame.CanRespondToEntropy(restoredResponseActor, "F-01"), "Entropy response windows survive save/load");
-            Assert(restoredResponseGame.RespondToEntropy(restoredResponseActor, "F-01", out string entropyResponseMessage), "A restored Entropy response may be exercised: " + entropyResponseMessage);
-            Assert(restoredResponseGame.Sides[restoredResponseActor.Side].CommandSlots == freeCommandBeforeResponse - 1 && !restoredResponseActor.HasEffect("F-01"), "The printed response occupies exactly one Command Slot and cancels the effect");
+            Assert(restoredResponseGame.CanRespondToEntropy(restoredResponseActor, EntropyCardIds.DelayedExecution), "Entropy response windows survive save/load");
+            Assert(restoredResponseGame.RespondToEntropy(restoredResponseActor, EntropyCardIds.DelayedExecution, out string entropyResponseMessage), "A restored Entropy response may be exercised: " + entropyResponseMessage);
+            Assert(restoredResponseGame.Sides[restoredResponseActor.Side].CommandSlots == freeCommandBeforeResponse - 1 && !restoredResponseActor.HasEffect(EntropyCardIds.DelayedExecution), "The printed response occupies exactly one Command Slot and cancels the effect");
             Assert(restoredResponseGame.Hold(restoredResponseActor, out _) && restoredResponseGame.Sides[restoredResponseActor.Side].CommandSlots == freeCommandBeforeResponse, "The Entropy-response Command Slot releases after the affected Formation completes its next own Action");
 
             CommandResponseDeckState hand = game.CommandResponseDecks.First(deck => deck.Side == actor.Side);
-            hand.DrawPile.Remove("C-22");
-            if (!hand.Hand.Contains("C-22")) hand.Hand.Add("C-22");
+            hand.DrawPile.Remove(CommandResponseIds.LocalInitiative);
+            if (!hand.Hand.Contains(CommandResponseIds.LocalInitiative)) hand.Hand.Add(CommandResponseIds.LocalInitiative);
             int command = actor.EffectiveCommand;
-            Assert(game.PlayCommandResponse(actor.Side, "C-22", actor, null, null, out string responseMessage) && actor.EffectiveCommand == command + 1, "Local Initiative applies +1 Command: " + responseMessage);
-            Assert(hand.DiscardPile.Contains("C-22") && !hand.Hand.Contains("C-22"), "A played Response moves to discard");
+            Assert(game.PlayCommandResponse(actor.Side, CommandResponseIds.LocalInitiative, actor, null, null, out string responseMessage) && actor.EffectiveCommand == command + 1, "Local Initiative applies +1 Command: " + responseMessage);
+            Assert(hand.DiscardPile.Contains(CommandResponseIds.LocalInitiative) && !hand.Hand.Contains(CommandResponseIds.LocalInitiative), "A played Response moves to discard");
 
             var replanGame = new PrototypeGame(1978);
             FormationState replanned = replanGame.Active;
             CommandResponseDeckState replanHand = replanGame.CommandResponseDecks.First(deck => deck.Side == replanned.Side);
-            replanHand.DrawPile.Remove("C-04");
-            if (!replanHand.Hand.Contains("C-04")) replanHand.Hand.Add("C-04");
+            replanHand.DrawPile.Remove(CommandResponseIds.RapidReplan);
+            if (!replanHand.Hand.Contains(CommandResponseIds.RapidReplan)) replanHand.Hand.Add(CommandResponseIds.RapidReplan);
             ActionKind newMission = replanned.Mission == ActionKind.Strike ? ActionKind.Search : ActionKind.Strike;
             int commandBeforeReplan = replanGame.Sides[replanned.Side].CommandSlots;
-            Assert(replanGame.PlayCommandResponse(replanned.Side, "C-04", replanned, null, null, newMission, out string replanMessage), "Rapid Replan resolves: " + replanMessage);
+            Assert(replanGame.PlayCommandResponse(replanned.Side, CommandResponseIds.RapidReplan, replanned, null, null, newMission, out string replanMessage), "Rapid Replan resolves: " + replanMessage);
             Assert(replanned.Mission == newMission && replanned.NextReadyTimeBonus == 1 && replanGame.Sides[replanned.Side].CommandSlots == commandBeforeReplan, "Rapid Replan changes Mission, adds next-Ready cost, and occupies no Command Slot");
 
             var withdrawalGame = new PrototypeGame(1978);
@@ -209,9 +210,9 @@ namespace SeaOfUncertainty.Editor
             withdrawalThreatContact.LastKnownPosition = withdrawalAttacker.Position;
             withdrawalThreatContact.Location = LocationQuality.High;
             CommandResponseDeckState withdrawalHand = withdrawalGame.CommandResponseDecks.First(deck => deck.Side == withdrawalTarget.Side);
-            withdrawalHand.DrawPile.Remove("C-18");
-            if (!withdrawalHand.Hand.Contains("C-18")) withdrawalHand.Hand.Add("C-18");
-            Assert(withdrawalGame.PlayCommandResponse(withdrawalTarget.Side, "C-18", withdrawalTarget, null, null, out string withdrawalMessage) && withdrawalTarget.OrderlyWithdrawalReady, "Orderly Withdrawal can be prepared: " + withdrawalMessage);
+            withdrawalHand.DrawPile.Remove(CommandResponseIds.OrderlyWithdrawal);
+            if (!withdrawalHand.Hand.Contains(CommandResponseIds.OrderlyWithdrawal)) withdrawalHand.Hand.Add(CommandResponseIds.OrderlyWithdrawal);
+            Assert(withdrawalGame.PlayCommandResponse(withdrawalTarget.Side, CommandResponseIds.OrderlyWithdrawal, withdrawalTarget, null, null, out string withdrawalMessage) && withdrawalTarget.OrderlyWithdrawalReady, "Orderly Withdrawal can be prepared: " + withdrawalMessage);
             HexCoord withdrawalStart = withdrawalTarget.Position;
             int rangeBeforeWithdrawal = HexCoord.Distance(withdrawalAttacker.Position, withdrawalStart);
             HexCoord withdrawalDestination = withdrawalGame.LegalEvadeDestinations(withdrawalAttacker, withdrawalTarget, 2).First();
@@ -222,7 +223,8 @@ namespace SeaOfUncertainty.Editor
             var restored = new PrototypeGame(1978);
             restored.RestoreState(JsonUtility.FromJson<PrototypeGame.SaveData>(json));
             Assert(restored.CommandResponseDecks.SelectMany(deck => deck.Hand).SequenceEqual(game.CommandResponseDecks.SelectMany(deck => deck.Hand)), "Response hands survive save and load");
-            Assert(restored.Find(actor.Id).ActiveEffectCardIds.Contains("X-11"), "Expanded Entropy attachments survive save and load");
+            Assert(restored.Find(actor.Id).ActiveEffectCardIds.Contains(EntropyCardIds.LauncherDamage), "Expanded Entropy attachments survive save and load");
+            TestChecks.ThrowIfAny("Card expansion");
             Debug.Log("Card expansion tests passed: 36 Entropy cards, 24 Command Responses, decks, supported mechanics, and save/load.");
         }
 
@@ -250,21 +252,21 @@ namespace SeaOfUncertainty.Editor
 
             var priorityGame = new PrototypeGame(1978);
             FormationState priority = priorityGame.Active;
-            priority.Friction = true; priority.ActiveEffectCardIds.Add("F-03"); priority.ActiveEffectCardIds.Add("F-12");
+            priority.Friction = true; priority.ActiveEffectCardIds.Add(EntropyCardIds.ConfusedPriorities); priority.ActiveEffectCardIds.Add(EntropyCardIds.HastyRetasking);
             Assert(priorityGame.AssignStandingMission(priority, ActionKind.Hold, MissionObjectiveKind.CurrentArea, null, priority.Position, MissionPosture.Balanced, MissionTrigger.OnReady, out _), "F-03 still permits a Mission change when two Slots are free");
             Assert(priorityGame.Sides[priority.Side].CommandSlots == 1 && priority.NextReadyTimeBonus == 1, "F-03 occupies one additional Slot and F-12 adds +1 Time to the next Ready schedule");
 
             var delegatedGame = new PrototypeGame(1978);
             FormationState delegated = delegatedGame.Active;
             CommandResponseDeckState delegatedHand = delegatedGame.CommandResponseDecks.First(deck => deck.Side == delegated.Side);
-            delegatedHand.DrawPile.Remove("C-07"); if (!delegatedHand.Hand.Contains("C-07")) delegatedHand.Hand.Add("C-07");
-            Assert(delegatedGame.PlayCommandResponse(delegated.Side, "C-07", delegated, null, null, out string delegateMessage) && delegated.MissionChangeLockedUntilAction, "C-07 grants delegated authority and locks Mission changes: " + delegateMessage);
+            delegatedHand.DrawPile.Remove(CommandResponseIds.DelegateAuthority); if (!delegatedHand.Hand.Contains(CommandResponseIds.DelegateAuthority)) delegatedHand.Hand.Add(CommandResponseIds.DelegateAuthority);
+            Assert(delegatedGame.PlayCommandResponse(delegated.Side, CommandResponseIds.DelegateAuthority, delegated, null, null, out string delegateMessage) && delegated.MissionChangeLockedUntilAction, "C-07 grants delegated authority and locks Mission changes: " + delegateMessage);
             Assert(!delegatedGame.AssignStandingMission(delegated, ActionKind.Hold, MissionObjectiveKind.CurrentArea, null, delegated.Position, MissionPosture.Balanced, MissionTrigger.OnReady, out string lockedMessage) && lockedMessage.Contains("Delegated Authority"), "Delegated Authority rejects Mission editing until the Formation acts");
 
             var latencyGame = new PrototypeGame(1978);
             FormationState delayed = latencyGame.Active;
             ActionKind originalTask = delayed.Mission;
-            delayed.Disruption = true; delayed.ActiveEffectCardIds.Add("D-02");
+            delayed.Disruption = true; delayed.ActiveEffectCardIds.Add(EntropyCardIds.CommunicationsLatency);
             Assert(latencyGame.AssignStandingMission(delayed, ActionKind.Move, MissionObjectiveKind.OperationalObjective, null, latencyGame.Area.Objective, MissionPosture.Balanced, MissionTrigger.ObjectiveReached, out string delayMessage), "D-02 accepts a delayed order: " + delayMessage);
             Assert(delayed.PendingMissionChange && delayed.Mission == originalTask && delayed.MissionDeliveryTime == latencyGame.Time + 1, "Communications Latency keeps the existing Mission in force for one Time");
             string delayedJson = JsonUtility.ToJson(latencyGame.CaptureState());
@@ -277,22 +279,22 @@ namespace SeaOfUncertainty.Editor
 
             var brokenGame = new PrototypeGame(1978);
             FormationState broken = brokenGame.Active;
-            broken.Disruption = true; broken.ActiveEffectCardIds.Add("D-04");
+            broken.Disruption = true; broken.ActiveEffectCardIds.Add(EntropyCardIds.BrokenLink);
             broken.MissionTrigger = MissionTrigger.EntropyMarked;
-            broken.Friction = true; broken.ActiveEffectCardIds.Add("F-01");
+            broken.Friction = true; broken.ActiveEffectCardIds.Add(EntropyCardIds.DelayedExecution);
             Assert(!brokenGame.AssignStandingMission(broken, ActionKind.Hold, MissionObjectiveKind.CurrentArea, null, broken.Position, MissionPosture.Balanced, MissionTrigger.OnReady, out string brokenMessage) && brokenMessage.Contains("Broken Link"), "D-04 rejects direct new orders");
-            Assert(!brokenGame.Recover(broken, EntropySource.Friction, "F-01", out string blockedTrigger) && blockedTrigger.Contains("Mission Command"), "Broken Link also blocks an otherwise valid trigger retask until C-03 authorizes it");
+            Assert(!brokenGame.Recover(broken, EntropySource.Friction, EntropyCardIds.DelayedExecution, out string blockedTrigger) && blockedTrigger.Contains("Mission Command"), "Broken Link also blocks an otherwise valid trigger retask until C-03 authorizes it");
             CommandResponseDeckState brokenHand = brokenGame.CommandResponseDecks.First(deck => deck.Side == broken.Side);
-            brokenHand.DrawPile.Remove("C-03"); if (!brokenHand.Hand.Contains("C-03")) brokenHand.Hand.Add("C-03");
-            Assert(brokenGame.PlayCommandResponse(broken.Side, "C-03", broken, null, null, out string missionCommandMessage) && broken.TriggerMissionCommandReady, "C-03 prepares one Broken Link Trigger: " + missionCommandMessage);
-            Assert(brokenGame.Recover(broken, EntropySource.Friction, "F-01", out string triggeredRecover) && broken.Mission == ActionKind.Recover && !broken.TriggerMissionCommandReady, "Authorized Entropy Trigger automatically retasks and executes without Command Attention: " + triggeredRecover);
+            brokenHand.DrawPile.Remove(CommandResponseIds.MissionCommand); if (!brokenHand.Hand.Contains(CommandResponseIds.MissionCommand)) brokenHand.Hand.Add(CommandResponseIds.MissionCommand);
+            Assert(brokenGame.PlayCommandResponse(broken.Side, CommandResponseIds.MissionCommand, broken, null, null, out string missionCommandMessage) && broken.TriggerMissionCommandReady, "C-03 prepares one Broken Link Trigger: " + missionCommandMessage);
+            Assert(brokenGame.Recover(broken, EntropySource.Friction, EntropyCardIds.DelayedExecution, out string triggeredRecover) && broken.Mission == ActionKind.Recover && !broken.TriggerMissionCommandReady, "Authorized Entropy Trigger automatically retasks and executes without Command Attention: " + triggeredRecover);
 
             var flashGame = new PrototypeGame(1978);
             FormationState flash = flashGame.Active;
-            flash.Disruption = true; flash.ActiveEffectCardIds.Add("D-04");
+            flash.Disruption = true; flash.ActiveEffectCardIds.Add(EntropyCardIds.BrokenLink);
             CommandResponseDeckState flashHand = flashGame.CommandResponseDecks.First(deck => deck.Side == flash.Side);
-            flashHand.DrawPile.Remove("C-17"); if (!flashHand.Hand.Contains("C-17")) flashHand.Hand.Add("C-17");
-            Assert(flashGame.PlayCommandResponse(flash.Side, "C-17", flash, null, null, ActionKind.Hold, out string flashMessage) && flash.Mission == ActionKind.Hold && flashGame.Sides[flash.Side].CommandStrain == 1, "C-17 penetrates Broken Link immediately and marks Command Strain: " + flashMessage);
+            flashHand.DrawPile.Remove(CommandResponseIds.FlashOrder); if (!flashHand.Hand.Contains(CommandResponseIds.FlashOrder)) flashHand.Hand.Add(CommandResponseIds.FlashOrder);
+            Assert(flashGame.PlayCommandResponse(flash.Side, CommandResponseIds.FlashOrder, flash, null, null, ActionKind.Hold, out string flashMessage) && flash.Mission == ActionKind.Hold && flashGame.Sides[flash.Side].CommandStrain == 1, "C-17 penetrates Broken Link immediately and marks Command Strain: " + flashMessage);
             flash.Friction = true; flash.Destruction = true;
             Assert(flashGame.PushThrough(flash, out string pushMessage) && flashGame.Sides[flash.Side].CommandStrain == 2 && flashGame.CommandSlotsFor(flash.Side).Count(slot => slot.Status == CommandSlotStatus.Strained) == 1, "Push Through reaches the two-Strain threshold and removes one Slot: " + pushMessage);
 
@@ -316,6 +318,7 @@ namespace SeaOfUncertainty.Editor
             foreach (CommandSlotState slot in aiMissionGame.CommandSlotsFor(aiMissionActor.Side)) { slot.Status = CommandSlotStatus.Strained; slot.Purpose = "Test Strain"; }
             aiMissionGame.Sides[aiMissionActor.Side].CommandSlots = 0;
             Assert(PrototypeAiCommander.Choose(aiMissionGame).Action == aiMissionActor.Mission, "AI continues its Standing Mission when no Command Attention is free");
+            TestChecks.ThrowIfAny("Command Attention and Standing Mission");
             Debug.Log("Command Attention and Standing Mission tests passed: vocabulary, slot lifecycle, editor state, triggers, delayed orders, cards, strain, Push Through, HQ Recovery, AI-safe authorization, and save/load.");
         }
 
@@ -348,12 +351,12 @@ namespace SeaOfUncertainty.Editor
             formation.Damage = DamageState.Crippled;
             formation.MajorActions = 2;
             formation.Destruction = true;
-            formation.ActiveEffectCardIds.Add("X-10");
+            formation.ActiveEffectCardIds.Add(EntropyCardIds.HullBreach);
             int actionTime = game.Time;
             Assert(game.ReplenishmentPreview(formation).Contains("Heavy Salvo") && game.ReplenishmentPreview(formation).Contains("X") == false, "Replenishment preview exposes restoration without leaking unrelated state");
-            Assert(game.Replenish(formation, "X-10", out string replenishMessage), "Eligible Formation replenishes: " + replenishMessage);
+            Assert(game.Replenish(formation, EntropyCardIds.HullBreach, out string replenishMessage), "Eligible Formation replenishes: " + replenishMessage);
             Assert(formation.Endurance == Endurance.Extended && !formation.WeaponExpended && formation.Damage == DamageState.Heavy && formation.MajorActions == 0, "One service package improves Endurance and damage one step, reloads Heavy Salvo, and resets the action track");
-            Assert(!formation.ActiveEffectCardIds.Contains("X-10") && !formation.Destruction && formation.ReadyTime == actionTime + 4, "Selected Destruction card is repaired and X-10 adds one Time to its own Replenishment");
+            Assert(!formation.ActiveEffectCardIds.Contains(EntropyCardIds.HullBreach) && !formation.Destruction && formation.ReadyTime == actionTime + 4, "Selected Destruction card is repaired and X-10 adds one Time to its own Replenishment");
             Assert(formation.Replenishing && game.AvailableReactions(game.Active, formation).SequenceEqual(new[] { Reaction.None }), "A servicing Formation cannot React before its Ready Time arrives");
 
             string json = JsonUtility.ToJson(game.CaptureState());
@@ -370,6 +373,7 @@ namespace SeaOfUncertainty.Editor
             Assert(!emptyGame.Replenish(empty, null, out string emptyMessage) && emptyMessage.Contains("no Endurance"), "Replenishment rejects a Formation with nothing to restore");
             empty.Endurance = Endurance.Extended;
             Assert(PrototypeAiCommander.Choose(emptyGame).Action == ActionKind.Replenish, "AI chooses legal Replenishment when useful at a compatible facility");
+            TestChecks.ThrowIfAny("Replenishment and logistics");
             Debug.Log("Replenishment and logistics tests passed: typed access, Port movement, restoration, X-10 timing, reaction lockout, AI, and save/load.");
         }
 
@@ -424,10 +428,11 @@ namespace SeaOfUncertainty.Editor
 
             var blockedGame = new PrototypeGame(1978);
             FormationState blocked = blockedGame.Active;
-            blocked.ActiveEffectCardIds.Add("F-08"); blocked.Friction = true;
+            blocked.ActiveEffectCardIds.Add(EntropyCardIds.FuelPriorityConflict); blocked.Friction = true;
             HexCoord highTempoDestination = Enumerable.Range(0, blockedGame.Area.Width).SelectMany(q => Enumerable.Range(0, blockedGame.Area.Height).Select(r => new HexCoord(q, r)))
                 .First(hex => blockedGame.Area.Contains(hex) && blockedGame.Area.TerrainAt(hex) != OperationalTerrain.Land && HexCoord.Distance(blocked.Position, hex) == 1);
             Assert(blockedGame.Move(blocked, highTempoDestination, MoveMode.HighTempo, out _) && blocked.SupportBlockedUntilRecover, "F-08 blocks later Support after High Tempo until Recover");
+            TestChecks.ThrowIfAny("Patrol / Screen and Support");
             Debug.Log("Patrol / Screen and Support tests passed: timing, geometry, persistence, interception, modifiers, cards, and save/load.");
         }
 
@@ -513,6 +518,7 @@ namespace SeaOfUncertainty.Editor
             blindReactionGame.Contacts.RemoveAll(contact => contact.Owner == blindTarget.Side && contact.TargetId == blindAttacker.Id);
             Assert(!blindReactionGame.AvailableReactions(blindAttacker, blindTarget).Contains(Reaction.Counterattack), "A defender cannot infer or Counterattack an attacker for which it has no usable Contact");
             Assert(blindReactionGame.LegalEvadeDestinations(blindAttacker, blindTarget, 1).Count > 0, "A defender without attacker location data can still Evade without receiving a hidden exact-position clue");
+            TestChecks.ThrowIfAny("Player-selected reaction and damage");
             Debug.Log("Player-selected reaction and damage tests passed: timing, refresh, Defend, Evade, Counterattack, Hold, Crippled limits, Light impairment, repeated damage, uncertain-area misses, save/load, and AI choice.");
         }
 
@@ -553,6 +559,7 @@ namespace SeaOfUncertainty.Editor
             RunUnitTestSuite();
             RunIntegrationTestSuite();
             RunPresentationTestSuite();
+            TestChecks.ThrowIfAny("composed core smoke");
             Debug.Log("Sea of Uncertainty composed core smoke suites passed.");
         }
 
@@ -587,12 +594,12 @@ namespace SeaOfUncertainty.Editor
             var responseGame = new PrototypeGame(1978);
             Assert(responseGame.CommandResponseDecks.Count == 2 && responseGame.CommandResponseDecks.All(deck => deck.Hand.Count == 3 && deck.DrawPile.Count == 21), "Each side begins with a deterministic three-card Response hand");
             CommandResponseDeckState blueResponses = responseGame.CommandResponseDecks.First(deck => deck.Side == Side.Blue);
-            blueResponses.DrawPile.Remove("C-22");
-            if (!blueResponses.Hand.Contains("C-22")) blueResponses.Hand.Add("C-22");
+            blueResponses.DrawPile.Remove(CommandResponseIds.LocalInitiative);
+            if (!blueResponses.Hand.Contains(CommandResponseIds.LocalInitiative)) blueResponses.Hand.Add(CommandResponseIds.LocalInitiative);
             FormationState responseFormation = responseGame.Active.Side == Side.Blue ? responseGame.Active : responseGame.Formations.First(formation => formation.Side == Side.Blue);
             int baseCommand = responseFormation.EffectiveCommand;
-            Assert(responseGame.PlayCommandResponse(Side.Blue, "C-22", responseFormation, null, null, out string responseMessage) && responseFormation.EffectiveCommand == baseCommand + 1, "A supported Command Response resolves and discards: " + responseMessage);
-            Assert(!blueResponses.Hand.Contains("C-22") && blueResponses.DiscardPile.Contains("C-22"), "Played Command Response leaves the hand for the discard pile");
+            Assert(responseGame.PlayCommandResponse(Side.Blue, CommandResponseIds.LocalInitiative, responseFormation, null, null, out string responseMessage) && responseFormation.EffectiveCommand == baseCommand + 1, "A supported Command Response resolves and discards: " + responseMessage);
+            Assert(!blueResponses.Hand.Contains(CommandResponseIds.LocalInitiative) && blueResponses.DiscardPile.Contains(CommandResponseIds.LocalInitiative), "Played Command Response leaves the hand for the discard pile");
 
             var cardGame = new PrototypeGame(1978);
             FormationState cardFormation = cardGame.Active;
@@ -614,7 +621,7 @@ namespace SeaOfUncertainty.Editor
             Assert(restoredCardGame.PendingEntropyEffectFor(cardFormation.Side)?.Id == frictionCard.Id, "Pending card reveals survive save and load");
             cardGame.ConsumePendingEntropyEffect(cardFormation.Side);
             Assert(cardGame.Recover(cardFormation, out string cardRecoveryMessage) && cardFormation.Friction && cardFormation.ActiveEffectCardIds.Count == 1, "Recover discards one stacked card and retains the marked source while another remains: " + cardRecoveryMessage);
-            var modifierProbe = new FormationState { Kind = FormationKind.CarrierGroup, Ratings = new Ratings { Move = 3, Search = 3, Strike = 3, Defense = 3, Command = 3 }, ActiveEffectCardIds = new List<string> { "X-01", "X-02", "X-03", "X-04", "X-05", "X-06" } };
+            var modifierProbe = new FormationState { Kind = FormationKind.CarrierGroup, Ratings = new Ratings { Move = 3, Search = 3, Strike = 3, Defense = 3, Command = 3 }, ActiveEffectCardIds = new List<string> { EntropyCardIds.FlightOpsDegraded, EntropyCardIds.SensorDamage, EntropyCardIds.PropulsionDamage, EntropyCardIds.MagazineDamage, EntropyCardIds.CommandSpacesHit, EntropyCardIds.EscortLost } };
             Assert(modifierProbe.EffectiveMove == 2 && modifierProbe.EffectiveSearch == 2 && modifierProbe.EffectiveStrike == 2 && modifierProbe.EffectiveDefense == 2 && modifierProbe.EffectiveCommand == 2 && !modifierProbe.CanHeavySalvo, "Supported Destruction cards modify formation capabilities");
 
             var exactTie = new List<FormationState>
@@ -624,6 +631,7 @@ namespace SeaOfUncertainty.Editor
             };
             Assert(Rules.NextReady(exactTie).Side == Side.Blue, "Unseeded exact tie uses formation quality and stable ID");
             Assert(Rules.NextReady(exactTie, Side.Blue).Side == Side.Red, "Cross-side exact tie passes priority away from the most recent acting side");
+            TestChecks.ThrowIfAny("unit");
             Debug.Log("Sea of Uncertainty unit suite passed.");
         }
 
@@ -1075,6 +1083,7 @@ namespace SeaOfUncertainty.Editor
             tacticalMap.SetState(restored, ToolkitActionMode.Move, MoveMode.Normal, SearchMode.Passive, Salvo.Standard);
             Assert(tacticalMap.focusable, "UI Toolkit tactical map keyboard focus");
             MultiplayerFoundationTests.Run();
+            TestChecks.ThrowIfAny("integration");
             Debug.Log("Sea of Uncertainty integration suite passed.");
         }
 
@@ -1083,6 +1092,7 @@ namespace SeaOfUncertainty.Editor
         {
             RunUiAccessibilityTests();
             UiInteractionTests.Run();
+            TestChecks.ThrowIfAny("presentation");
             Debug.Log("Sea of Uncertainty presentation suite passed.");
         }
 
@@ -1095,6 +1105,7 @@ namespace SeaOfUncertainty.Editor
             Assert(File.Exists(executable), "Windows build emits the player executable");
             Assert(Directory.Exists(dataDirectory) && File.Exists(Path.Combine(dataDirectory, "globalgamemanagers")), "Windows build emits its player data and global managers");
             Assert(EditorBuildSettings.scenes.Any(scene => scene.enabled && scene.path == "Assets/Scenes/Prototype.unity"), "Build validation uses the authoritative prototype scene");
+            TestChecks.ThrowIfAny("build-validation");
             Debug.Log("Sea of Uncertainty build-validation suite passed.");
         }
 
@@ -1120,6 +1131,7 @@ namespace SeaOfUncertainty.Editor
             Assert(controller.Contains("controllerAxisReleased") && controller.Contains("ControllerDeadZone"), "Controller navigation requires stick recentering and honors the configured dead zone");
             Assert(controller.Contains("focusBeforeOverlay") && controller.Contains("CollectFocusables"), "Dialogs restore focus and all interactive UI can participate in focus traversal");
             Assert(controller.Contains("AccessibleId") && controller.Contains("audio-description-status"), "Runtime interface exposes stable semantic element names");
+            TestChecks.ThrowIfAny("UI/accessibility");
             Debug.Log("Sea of Uncertainty UI/accessibility tests passed.");
         }
 
@@ -1167,8 +1179,8 @@ namespace SeaOfUncertainty.Editor
             var cardGame = new PrototypeGame(3106);
             FormationState cardActor = cardGame.Active;
             CommandResponseDeckState cardDeck = cardGame.CommandResponseDecks.First(deck => deck.Side == cardActor.Side);
-            cardDeck.DrawPile.Remove("C-01");
-            if (!cardDeck.Hand.Contains("C-01")) cardDeck.Hand.Add("C-01");
+            cardDeck.DrawPile.Remove(CommandResponseIds.CommandersPresence);
+            if (!cardDeck.Hand.Contains(CommandResponseIds.CommandersPresence)) cardDeck.Hand.Add(CommandResponseIds.CommandersPresence);
             EntropyEffectDefinition attachedFriction = cardGame.MarkEntropy(cardActor, EntropySource.Friction);
             bool cardFixturePassed = attachedFriction != null && PrototypeAiCommander.TryPlayUsefulResponse(cardGame, out _);
             Assert(cardFixturePassed, "AI response-card fixture plays a useful deterministic Friction response");
@@ -1180,6 +1192,7 @@ namespace SeaOfUncertainty.Editor
             string directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Builds/AI"));
             Directory.CreateDirectory(directory);
             File.WriteAllText(Path.Combine(directory, "baseline-vs-adaptive.csv"), "Profile,Decisions,Illegal,Holds,DistinctActions,DistinctModes,DistinctProfiles,Utility\n" + baseline.Csv("Baseline") + "\n" + candidate.Csv("Adaptive") + "\n");
+            TestChecks.ThrowIfAny("AI evaluation");
             Debug.Log($"Sea of Uncertainty AI evaluation passed. Baseline utility {baseline.Utility}; adaptive utility {candidate.Utility}; report {directory}");
         }
 
@@ -1221,6 +1234,7 @@ namespace SeaOfUncertainty.Editor
             string foundation = File.ReadAllText(Path.Combine(Application.dataPath, "../../design/CONTENT_SIMULATION_FOUNDATION.md"));
             Assert(foundation.Contains("A separate submarine Contact/combat procedure is not yet earned"), "Submarine procedure remains an explicit evidence gate");
             Assert(foundation.Contains("transfer record") && foundation.Contains("Reinforcement region") && foundation.Contains("stable axial order"), "Connected-theater movement has a deterministic gameplay contract");
+            TestChecks.ThrowIfAny("content/simulation foundation");
             Debug.Log("Sea of Uncertainty content/simulation foundation tests passed.");
         }
 
@@ -1288,6 +1302,7 @@ namespace SeaOfUncertainty.Editor
 
             string editorSource = File.ReadAllText(Path.Combine(Application.dataPath, "Editor/ScenarioCatalogEditorWindow.cs"));
             Assert(editorSource.Contains("Scenario Catalog Editor") && editorSource.Contains("Save JSON") && editorSource.Contains("ValidateCatalog"), "Scenario editor supports catalog selection, validation, formation editing, and JSON save");
+            TestChecks.ThrowIfAny("advanced content/simulation");
             Debug.Log("Sea of Uncertainty advanced content/simulation tests passed.");
         }
 
@@ -1408,7 +1423,7 @@ namespace SeaOfUncertainty.Editor
 
         private static void Assert(bool condition, string label)
         {
-            if (!condition) throw new System.Exception("Core smoke test failed: " + label);
+            TestChecks.Check(condition, label);
         }
     }
 }
