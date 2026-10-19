@@ -2,9 +2,10 @@
     "Version": 1,
     "ScenarioIds": [
         "meridian-veil",
-        "northern-gateway"
+        "northern-gateway",
+        "narrows-shield"
     ],
-    "FormationCardCount": 22,
+    "FormationCardCount": 28,
     "EntropyCardCount": 36,
     "ResponseCardCount": 24,
     "Files": [

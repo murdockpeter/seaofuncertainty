@@ -122,7 +122,7 @@ namespace SeaOfUncertainty.Prototype
                 Time = game.Time,
                 Ready = actor?.ReadyTime ?? -1,
                 Command = actor == null ? -1 : game.Sides[actor.Side].CommandSlots,
-                Contacts = game.Contacts.ToDictionary(ContactKey, ContactValue),
+                Contacts = ContactSnapshot(game),
                 Entropy = game.Formations.ToDictionary(f => f.Id, EntropyValue)
             };
         }
@@ -150,7 +150,7 @@ namespace SeaOfUncertainty.Prototype
 
         public void RecordAction(PrototypeGame game, Observation before, FormationState actor, string action, string mode, string targetId, string legalAlternatives, float decisionSeconds, string calculation, string outcome)
         {
-            string contactChanges = DescribeChanges(before.Contacts, game.Contacts.ToDictionary(ContactKey, ContactValue));
+            string contactChanges = DescribeChanges(before.Contacts, ContactSnapshot(game));
             Dictionary<string, string> afterEntropy = game.Formations.ToDictionary(f => f.Id, EntropyValue);
             string entropyChanges = DescribeEntropyChanges(before.Entropy, afterEntropy, game.Time);
             int readyAfter = actor?.ReadyTime ?? -1;
@@ -282,6 +282,12 @@ namespace SeaOfUncertainty.Prototype
         }
 
         private static string Csv(string value) => "\"" + (value ?? string.Empty).Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ") + "\"";
+        private static Dictionary<string, string> ContactSnapshot(PrototypeGame game)
+            // Older saves may already contain lost and live reports for one target.
+            // Preserve their distinct observations without letting telemetry abort play.
+            => game.Contacts.GroupBy(ContactKey).ToDictionary(group => group.Key,
+                group => string.Join("; ", group.Select(ContactValue).Distinct().OrderBy(value => value, StringComparer.Ordinal)));
+
         private static string ContactKey(ContactState contact) => contact.Owner + ":" + contact.TargetId;
         private static string ContactValue(ContactState contact) => contact.IsLost ? "Lost" : $"{contact.Location}/{contact.Identity}/Age{contact.Age}@{contact.LastKnownPosition}";
         private static string EntropyValue(FormationState formation)

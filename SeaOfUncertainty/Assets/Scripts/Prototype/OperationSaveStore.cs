@@ -10,12 +10,54 @@ namespace SeaOfUncertainty.Prototype
     [Serializable]
     public sealed class OperationSave
     {
-        public int Version = 4;
+        public int Version = 5;
         public OperationMode OperationMode;
         public Side HumanSide = Side.Blue;
         public PrototypeGame.SaveData Game;
         public PlaytestSession Playtest;
         public PlaytestFeedback Feedback;
+        public bool HasPendingReaction;
+        public PendingReactionSave PendingReaction;
+    }
+
+    [Serializable]
+    public sealed class PendingReactionSave
+    {
+        public string ActorId;
+        public string TargetId;
+        public string ContactTargetId;
+        public HexCoord Aim;
+        public Salvo Salvo;
+        public WeaponDelivery Delivery;
+        public string SynchronizedStrikeId;
+        public bool ContinueBlind;
+        public bool HasAiDecision;
+        public AiDecision AiDecision;
+
+        public void Validate(PrototypeGame game)
+        {
+            FormationState target = game.Find(TargetId);
+            if (game.Active == null || game.Active.Id != ActorId || target == null || target.Id != ContactTargetId || target.Side == game.Active.Side || target.IsDestroyed
+                || !Enum.IsDefined(typeof(Salvo), Salvo) || !Enum.IsDefined(typeof(WeaponDelivery), Delivery))
+                throw new InvalidDataException("Invalid pending reaction context.");
+            if (!string.IsNullOrEmpty(SynchronizedStrikeId))
+            {
+                SynchronizedStrikeState strike = game.ReadySynchronizedStrikeFor(game.Active);
+                if (strike?.Id != SynchronizedStrikeId || !strike.Aim.Equals(target.Position))
+                    throw new InvalidDataException("Pending synchronized reaction is no longer resolvable.");
+            }
+            else
+            {
+                ContactState contact = game.Contacts.FirstOrDefault(item => item.Owner == game.Active.Side && item.TargetId == ContactTargetId && !item.IsLost);
+                if (contact == null || !Aim.Equals(target.Position) || !game.CanStrikeContact(game.Active, contact, Aim, Salvo, Delivery, out _))
+                    throw new InvalidDataException("Pending strike reaction is no longer resolvable.");
+            }
+            if (!HasAiDecision) AiDecision = null;
+            if (HasAiDecision && (AiDecision == null || AiDecision.DeclareSynchronizedStrike || AiDecision.Action != ActionKind.Strike || AiDecision.TargetId != ContactTargetId
+                || !AiDecision.Hex.Equals(Aim) || AiDecision.Salvo != Salvo || AiDecision.WeaponDelivery != Delivery
+                || (AiDecision.SynchronizedStrikeId ?? "") != (SynchronizedStrikeId ?? "")))
+                throw new InvalidDataException("Pending AI reaction does not match its declaration.");
+        }
     }
 
     public sealed class RestoredOperation
@@ -88,6 +130,7 @@ namespace SeaOfUncertainty.Prototype
 
         public void Save(OperationSave save)
         {
+            save.HasPendingReaction = save.PendingReaction != null;
             string json = JsonUtility.ToJson(save, true);
             Decode(json); // Reject bad state before creating any file.
             string temporary = PrimaryPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -130,15 +173,15 @@ namespace SeaOfUncertainty.Prototype
             // envelopes then fail the raw required-state checks below.
             if (header.Game != null && header.Game.Version != 0)
             {
-                if (header.Version > 4) throw new InvalidDataException("This operation save requires a newer game version.");
-                if (header.Game.Version < 1 || header.Game.Version > 13) throw new InvalidDataException("Unsupported game save version; a newer game may be required.");
+                if (header.Version > 5) throw new InvalidDataException("This operation save requires a newer game version.");
+                if (header.Game.Version < 1 || header.Game.Version > 14) throw new InvalidDataException("Unsupported game save version; a newer game may be required.");
                 operation = JsonUtility.FromJson<OperationSave>(json);
                 data = operation.Game;
             }
             else
             {
-                // Documented compatibility path: pre-envelope raw SaveData v1-v13.
-                if (header.Version > 13) throw new InvalidDataException("This save requires a newer game version.");
+                // Documented compatibility path: pre-envelope raw SaveData v1-v14.
+                if (header.Version > 14) throw new InvalidDataException("This save requires a newer game version.");
                 data = JsonUtility.FromJson<PrototypeGame.SaveData>(json);
                 operation = new OperationSave { Version = 1, Game = data };
             }
@@ -171,6 +214,12 @@ namespace SeaOfUncertainty.Prototype
             restored.RestoreState(data);
             if (restored.Active == null && restored.Time < scenario.Horizon)
                 throw new InvalidDataException("The save has no playable Ready formation.");
+            if (operation.Version >= 5 && operation.HasPendingReaction)
+            {
+                if (operation.PendingReaction == null) throw new InvalidDataException("Missing pending reaction context.");
+                operation.PendingReaction.Validate(restored);
+            }
+            else operation.PendingReaction = null;
             return new RestoredOperation { Game = restored, Save = operation };
         }
     }

@@ -92,7 +92,7 @@ namespace SeaOfUncertainty.Editor
 
                 ui.EditorShowHandoff();
                 string visibleText = string.Join("\n", ui.EditorRoot.Query<Label>().ToList().Select(label => label.text));
-                Assert(ui.EditorView == "Handoff" && backend.Game.Formations.Where(item => item.Side != backend.Game.Active.Side).All(item => !visibleText.Contains(item.Name)), "Hotseat handoff conceals the non-active side's formation identities");
+                Assert(ui.EditorView == "Handoff" && backend.Game.Formations.All(item => !visibleText.Contains(item.Name)), "Hotseat handoff conceals the non-active side's formation identities");
                 Assert(ui.EditorInvokeButton("ASSUME COMMAND") && ui.EditorView == "Game", "Handoff assumption returns to the game screen");
 
                 TestChecks.ThrowIfAny("UI interaction");

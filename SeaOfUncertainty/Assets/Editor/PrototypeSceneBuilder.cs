@@ -643,6 +643,7 @@ namespace SeaOfUncertainty.Editor
         public static void RunIntegrationTestSuite()
         {
             SaveRecoveryTests.Run();
+            ContinuationTests.Run();
             BallisticLaunchTests.RunIntegration();
             BallisticDefenseTests.RunIntegration();
             var game = new PrototypeGame();
@@ -661,7 +662,7 @@ namespace SeaOfUncertainty.Editor
             Assert(game.Area.NauticalMiles(new HexCoord(0, 0), new HexCoord(0, 3)) == 60, "Hex range converts to nautical miles");
             Assert(game.Area.ReadyTimeHours == 2f, "Ready-Time point converts to two hours");
             Assert(OperationalDataValidator.Validate(game.Scenario).Count == 0, "Operational-area and scenario validation");
-            Assert(ScenarioCatalog.All().Count == 2, "Scenario catalog exposes both MVP theaters");
+            Assert(ScenarioCatalog.All().Select(item => item.Id).Contains("meridian-veil") && ScenarioCatalog.All().Select(item => item.Id).Contains("northern-gateway") && ScenarioCatalog.All().Select(item => item.Id).Contains("narrows-shield"), "Scenario catalog exposes both original operations and Narrows Shield");
             ScenarioDefinition luzon = ScenarioCatalog.LuzonStrait();
             ScenarioDefinition migrationSample = JsonUtility.FromJson<ScenarioDefinition>(JsonUtility.ToJson(luzon));
             migrationSample.SchemaVersion = 1; migrationSample.Area.SchemaVersion = 1; migrationSample.Area.RestrictedAreas = null;
@@ -962,7 +963,7 @@ namespace SeaOfUncertainty.Editor
             Assert(restored.Active != null && restored.Active.Id == game.Active.Id, "Save restores active formation");
             Assert(restored.Formations.Count == game.Formations.Count, "Save restores formations");
             Assert(restored.Contacts.Count == game.Contacts.Count, "Save restores Contacts");
-            Assert(saveData.Version == 13 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 13 save preserves stable IDs, Entropy decks, response windows, Response hands, synchronized strikes and scenario events, Command architectures, magazines, Standing Missions, weather, uncertainty, damage duration, and private logs");
+            Assert(saveData.Version == 14 && saveData.ScenarioId == "meridian-veil" && saveData.OperationalAreaId == "meridian-veil-archipelago", "Version 14 save preserves combat randomness, stable IDs, Entropy decks, response windows, Response hands, synchronized strikes and scenario events, Command architectures, magazines, Standing Missions, weather, uncertainty, damage duration, and private logs");
             Assert(restored.LogEntries.Count == game.LogEntries.Count, "Save restores side-scoped operational log visibility");
             Assert(restored.EntropyDecks.Count == 3 && restored.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count) == game.EntropyDecks.Sum(deck => deck.DrawPile.Count + deck.DiscardPile.Count), "Save restores Entropy deck state");
             Assert(restored.CommandResponseDecks.Count == 2 && restored.CommandResponseDecks.All(deck => deck.Hand.Count == 3), "Save restores both private Command Response hands");
@@ -1102,6 +1103,7 @@ namespace SeaOfUncertainty.Editor
         {
             RunUiAccessibilityTests();
             UiInteractionTests.Run();
+            OperationalAudioTests.Run();
             TestChecks.ThrowIfAny("presentation");
             Debug.Log("Sea of Uncertainty presentation suite passed.");
         }

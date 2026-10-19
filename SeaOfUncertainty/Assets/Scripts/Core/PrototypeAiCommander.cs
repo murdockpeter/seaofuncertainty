@@ -6,6 +6,7 @@ namespace SeaOfUncertainty.Core
 {
     public enum AiStrategyProfile { Baseline, Aggressive, Cautious, Adaptive }
 
+    [Serializable]
     public sealed class AiDecision
     {
         public ActionKind Action;

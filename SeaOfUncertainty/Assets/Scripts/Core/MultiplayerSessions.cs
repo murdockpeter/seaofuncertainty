@@ -253,7 +253,7 @@ namespace SeaOfUncertainty.Core
             if (checkpoint == null || checkpoint.Version != 1 || string.IsNullOrEmpty(signingKey) || string.IsNullOrEmpty(checkpoint.Payload) ||
                 !FixedEquals(checkpoint.Signature, Sign(checkpoint.Payload, signingKey))) return null;
             MultiplayerRecoveryPayload payload = JsonUtility.FromJson<MultiplayerRecoveryPayload>(checkpoint.Payload);
-            if (payload?.Lobby == null || payload.Replay == null || payload.Lobby.Version != 1 || payload.Replay.Version != 1) return null;
+            if (payload?.Lobby == null || payload.Replay == null || payload.Lobby.Version != 1 || (payload.Replay.Version < 1 || payload.Replay.Version > 2)) return null;
             var restored = new MultiplayerMatchLifecycle(secretSource) { lobby = payload.Lobby };
             restored.authority = new AuthoritativeMatchServer(payload.Lobby.SessionId, payload.Replay);
             restored.lobby.Phase = MultiplayerSessionPhase.Suspended;

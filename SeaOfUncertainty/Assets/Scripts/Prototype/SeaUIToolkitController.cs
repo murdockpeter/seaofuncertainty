@@ -8,9 +8,9 @@ using UnityEngine.UIElements;
 
 namespace SeaOfUncertainty.Prototype
 {
-    public sealed class SeaUIToolkitController : MonoBehaviour
+    public sealed partial class SeaUIToolkitController : MonoBehaviour
     {
-        private enum View { Main, Mode, Online, Scenario, Briefing, Setup, Handoff, AiPlanning, Game, Results }
+        private enum View { Main, Mode, Online, Scenario, Briefing, Setup, Handoff, AiPlanning, Game, Reaction, Results }
         private enum FormationCommand { Move, Search, Strike, Recover, Hold, Screen, Support, Replenish, SynchronizedStrike, Mission, PushThrough, HeadquartersRecovery }
 
         private SeaPrototypeController backend;
@@ -30,6 +30,7 @@ namespace SeaOfUncertainty.Prototype
         private WeaponDelivery pendingWeaponDelivery;
         private Side previousSide;
         private bool aiRunning;
+        private bool guidePending;
         private bool edgeScrollEnabled;
         private bool entropyRevealBlocking;
         private FormationState pendingReactionTarget;
@@ -59,6 +60,13 @@ namespace SeaOfUncertainty.Prototype
             if (root == null) Awake();
         }
 
+        public void EditorContinueOperation() => ContinueOperation();
+        public void EditorBeginReaction(ContactState contact, WeaponDelivery delivery, AiDecision decision = null)
+        {
+            pendingStrikeContact = contact; pendingStrikeAim = contact.LastKnownPosition;
+            weaponDelivery = delivery;
+            BeginStrikeReaction(backend.Game.Find(contact.TargetId), Salvo.Standard, decision);
+        }
         public void EditorShowGame() { backend.ToolkitBeginDecision(); ShowGame(); }
         public void EditorShowHandoff() => ShowHandoff();
         public void EditorShowSettings() => ShowSettings();
@@ -158,6 +166,9 @@ namespace SeaOfUncertainty.Prototype
             }
             else if (Environment.GetCommandLineArgs().Contains("-captureModeSelect")) ShowMode();
             else ShowMain();
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if (Environment.GetCommandLineArgs().Contains("-captureAcceptance")) StartCoroutine(RunAcceptanceCapture());
+#endif
         }
 
         private void Update()
@@ -383,13 +394,22 @@ namespace SeaOfUncertainty.Prototype
             view = View.Briefing;
             BeginScreen("OPERATION ORDER  •  " + backend.Game.Scenario.DisplayName.ToUpperInvariant());
             VisualElement page = El("front-page");
-            VisualElement card = Panel("hero-card");
+            VisualElement card = Panel("hero-card", "briefing-card");
             card.Add(Text("OPERATION OBJECTIVES", "heading"));
-            card.Add(Text("MISSION", "eyebrow"));
-            card.Add(Text(backend.Game.Scenario.Summary + $" Resolve at Time {backend.Game.Scenario.Horizon}.", "body-copy"));
-            card.Add(Text("OPERATIONAL SCORING", "eyebrow"));
-            card.Add(Text(string.Join("\n", backend.Game.Scenario.Objectives.Select(objective => $"{objective.Points} VP — {objective.Title}: {ScenarioScoring.DescribeObjective(backend.Game.Scenario, objective)}")) + "\nTIES — combat-capable formations, lower damage burden, then closest surviving naval formation", "body-copy"));
-            card.Add(Text($"ASSUMPTIONS\n{backend.Game.Area.NauticalMilesPerHex} nm hexes • {backend.Game.Area.ReadyTimeHours:0.##} hours / Ready Time • Formation-specific Strike ranges • Age-2 penalty {(backend.AgeTwoPenalty ? "ON" : "OFF")} • Automatic Defend • MODE {(backend.SelectedMode == OperationMode.SoloVsAi ? "SOLO VS AI" : "LOCAL HOTSEAT")}", "muted"));
+            ScrollView body = new ScrollView();
+            body.AddToClassList("manual-scroll");
+            card.Add(body);
+            body.Add(Text("MISSION", "eyebrow"));
+            body.Add(Text(backend.Game.Scenario.Summary + $" Resolve at Time {backend.Game.Scenario.Horizon}.", "body-copy"));
+            body.Add(Text("OPERATIONAL SCORING", "eyebrow"));
+            body.Add(Text(string.Join("\n", backend.Game.Scenario.Objectives.Select(objective => $"{objective.Points} VP — {objective.Title}: {ScenarioScoring.DescribeObjective(backend.Game.Scenario, objective)}")) + "\nTIES — combat-capable formations, lower damage burden, then closest surviving naval formation", "body-copy"));
+            body.Add(Text($"ASSUMPTIONS\n{backend.Game.Area.NauticalMilesPerHex} nm hexes • {backend.Game.Area.ReadyTimeHours:0.##} hours / Ready Time • Formation-specific Strike ranges • Age-2 penalty {(backend.AgeTwoPenalty ? "ON" : "OFF")} • Defender chooses Reaction • MODE {(backend.SelectedMode == OperationMode.SoloVsAi ? "SOLO VS AI" : "LOCAL HOTSEAT")}", "muted"));
+            if (!string.IsNullOrEmpty(backend.Game.Scenario.SpecialRules))
+            {
+                body.Add(Text("OPERATION RULES", "eyebrow"));
+                body.Add(Text(backend.Game.Scenario.SpecialRules, "body-copy"));
+            }
+            body.Add(Text(backend.Game.Scenario.VictoryConditions, "body-copy"));
             VisualElement row = El("row");
             row.Add(ActionButton("REVIEW SETUP", ShowSetup, "primary"));
             row.Add(ActionButton("BACK", ShowScenario));
@@ -439,7 +459,7 @@ namespace SeaOfUncertainty.Prototype
             VisualElement card = Panel("hero-card", "center");
             card.Add(Text(backend.Game.Active.Side.ToString().ToUpperInvariant() + " COMMAND", "front-title"));
             card.Add(Text("Pass control to the indicated player. Hidden formations and Contacts remain concealed until they assume command.", "body-copy"));
-            card.Add(Text($"NEXT READY  •  {backend.Game.Active.Name.ToUpperInvariant()}  •  T{backend.Game.Time:00}", "subheading", "amber"));
+            card.Add(Text($"NEXT READY TIME T{backend.Game.Time:00}", "subheading", "amber"));
             card.Add(ActionButton("ASSUME COMMAND", () => { backend.ToolkitBeginDecision(); ShowGame(); }, "primary"));
             page.Add(card);
             app.Add(page);
@@ -447,6 +467,8 @@ namespace SeaOfUncertainty.Prototype
 
         private void BeginSelectedOperation()
         {
+            actionMode = ToolkitActionMode.None;
+            guidePending = PlayerPrefs.GetInt("MapGuideSeenV1", 0) == 0;
             previousSide = backend.Game.Active.Side;
             ContinueOperation();
         }
@@ -470,12 +492,32 @@ namespace SeaOfUncertainty.Prototype
                 modal.Add(ActionButton("CANCEL", CloseOverlay));
                 return;
             }
+            actionMode = ToolkitActionMode.None;
             OperationalMap3D.ResetPresentationMemory();
             ContinueOperation();
         }
 
         private void ContinueOperation()
         {
+            if (backend.PendingReaction != null)
+            {
+                PendingReactionSave saved = backend.PendingReaction;
+                pendingReactionTarget = backend.Game.Find(saved.TargetId);
+                pendingReactionSalvo = saved.Salvo;
+                pendingWeaponDelivery = weaponDelivery = saved.Delivery;
+                pendingStrikeContact = backend.Game.Contacts.FirstOrDefault(item => item.Owner == backend.Game.Active.Side && item.TargetId == saved.ContactTargetId);
+                pendingStrikeAim = saved.Aim;
+                pendingSynchronizedStrike = backend.Game.SynchronizedStrikes.FirstOrDefault(item => item.Id == saved.SynchronizedStrikeId);
+                pendingSynchronizedBlind = saved.ContinueBlind;
+                pendingAiStrike = saved.AiDecision;
+                if (backend.SelectedMode == OperationMode.LocalHotseat) ShowReactionHandoff();
+                else ShowReactionChoice();
+                return;
+            }
+            pendingReactionTarget = null;
+            pendingAiStrike = null;
+            pendingStrikeContact = null;
+            pendingSynchronizedStrike = null;
             if (backend.IsComplete) { ShowResults(); return; }
             if (backend.SelectedMode == OperationMode.SoloVsAi)
             {
@@ -599,6 +641,7 @@ namespace SeaOfUncertainty.Prototype
                 app.Add(audioDescription);
             }
             map.schedule.Execute(() => { map.Refresh(); map.Focus(); });
+            if (guidePending) { guidePending = false; ShowMapGuide(); }
             if (backend.ToolkitPendingEntropyEffect(active.Side) != null && backend.ToolkitPendingEntropyFormation(active.Side) != null)
             {
                 if (backend.SelectedMode == OperationMode.SoloVsAi && active.Side != backend.HumanSide)
@@ -702,8 +745,8 @@ namespace SeaOfUncertainty.Prototype
                     backend.ToolkitRespondToEntropy(formation, card.Id);
                     ShowGame();
                 }, "warning");
-                respond.SetEnabled(backend.ToolkitCanRespondToEntropy(formation, card.Id));
-                modal.Add(respond);
+                bool available = backend.Game.CanRespondToEntropy(formation, card.Id, out string reason);
+                AddOrderExplanation(modal, respond, available, reason);
             }
             if (formation == backend.Game.Active && card.Source != EntropySource.Destruction)
                 modal.Add(ActionButton("RECOVER & DISCARD THIS CARD • 2", () => { CloseOverlay(); ResolveAction(() => backend.ToolkitRecover(card.Source, card.Id)); }, "primary"));
@@ -744,17 +787,18 @@ namespace SeaOfUncertainty.Prototype
             stats.Add(Stat("MOVE", formation.EffectiveMove, "Maximum movement after damage and Endurance."));
             stats.Add(Stat("SEARCH", formation.EffectiveSearch, "Detection after Disruption."));
             stats.Add(Stat("STRIKE", formation.EffectiveStrike, "Offense after Destruction."));
-            if (formation.BallisticWeapons?.Capacity > 0) stats.Add(Text(formation.BallisticWeapons.Summary, "body-copy"));
-            if (formation.Side == backend.Game.Active.Side)
-            {
-                stats.Add(Text(MapMarkerDetails.BallisticDefense(backend.Game, formation.Side, formation), "body-copy"));
-            }
             stats.Add(Stat("DEFENSE", formation.EffectiveDefense, "Survivability before Reaction and attached effects."));
             stats.Add(Stat("SIGNATURE", formation.EffectiveSignature, "Higher is easier to detect."));
             stats.Add(Stat("COMMAND", formation.EffectiveCommand, "Same-Time initiative and autonomy after attached effects."));
             stats.Add(Stat("EW", formation.Ratings.ElectronicWarfare, "Reduces detectability and strengthens layered missile defense."));
             stats.Add(Stat("CYBER", formation.Ratings.Cyber, "Improves spectrum exploitation during Search resolution."));
             dossier.Add(stats);
+            if (formation.BallisticWeapons?.Capacity > 0) dossier.Add(Text(formation.BallisticWeapons.Summary, "body-copy"));
+            if (formation.Side == backend.Game.Active.Side)
+            {
+                dossier.Add(Text(MapMarkerDetails.BallisticDefense(backend.Game, formation.Side, formation), "body-copy"));
+            }
+
             string reactionStatus = formation.Replenishing ? "UNAVAILABLE" : formation.HasReacted ? "SPENT" : "AVAILABLE";
             string objective = string.IsNullOrEmpty(formation.MissionObjectiveId) ? formation.MissionObjectiveHex.ToString() : formation.MissionObjectiveId;
             dossier.Add(Text($"MISSION  {formation.Mission.ToString().ToUpperInvariant()}  •  {Words(formation.MissionObjective.ToString())} {objective}\n{formation.MissionPosture.ToString().ToUpperInvariant()}  •  TRIGGER {Words(formation.MissionTrigger.ToString())}\nLAST  {(formation.LastActionFollowedMission ? "FOLLOWED MISSION" : "IMMEDIATE RETASK")}{(formation.PendingMissionChange ? $"  •  DELIVERY T{formation.MissionDeliveryTime:00}" : string.Empty)}", "body-copy", "dossier-summary"));
@@ -810,8 +854,8 @@ namespace SeaOfUncertainty.Prototype
                     backend.ToolkitRespondToEntropy(formation, card.Id);
                     ShowEntropyPull(side, onComplete);
                 }, "warning");
-                respond.SetEnabled(backend.ToolkitCanRespondToEntropy(formation, card.Id));
-                modal.Add(respond);
+                bool available = backend.Game.CanRespondToEntropy(formation, card.Id, out string reason);
+                AddOrderExplanation(modal, respond, available, reason);
             }
             modal.Add(ActionButton("ACKNOWLEDGE CARD", () =>
             {
@@ -879,12 +923,8 @@ namespace SeaOfUncertainty.Prototype
             {
                 SupportKind selected = kind;
                 Button choice = ActionButton(selected.ToString().ToUpperInvariant(), () => { CloseOverlay(); ResolveAction(() => backend.ToolkitSupport(recipient, selected)); });
-                if (selected == SupportKind.Synchronization)
-                {
-                    choice.SetEnabled(backend.Game.CanParticipateInSynchronization(backend.Game.Active) && backend.Game.CanParticipateInSynchronization(recipient));
-                    if (backend.Game.Active.HasEffect(EntropyCardIds.CoordinationDrift) || recipient.HasEffect(EntropyCardIds.CoordinationDrift)) choice.text += "  •  COORDINATION DRIFT";
-                }
-                modal.Add(choice);
+                bool available = backend.Game.CanSupport(backend.Game.Active, recipient, selected, out string reason);
+                AddOrderExplanation(modal, choice, available, available ? backend.Game.OrderCost(backend.Game.Active, ActionKind.Support) : reason + " Choose another recipient/effect or Recover.");
             }
             modal.Add(ActionButton("BACK", ShowSupportSetup));
         }
@@ -987,17 +1027,20 @@ namespace SeaOfUncertainty.Prototype
             foreach (MissionTrigger trigger in Enum.GetValues(typeof(MissionTrigger)))
             {
                 MissionTrigger selected = trigger;
-                modal.Add(ActionButton(selected.ToString().ToUpperInvariant(), () =>
+                Button order = ActionButton(selected.ToString().ToUpperInvariant(), () =>
                 {
                     backend.ToolkitAssignStandingMission(formation, task, objective, objectiveId, objectiveHex, posture, selected);
                     if (backend.LastToolkitActionSucceeded) ShowGame(); else ShowMissionTriggers(formation, task, objective, objectiveId, objectiveHex, posture);
-                }, selected == MissionTrigger.OnReady ? "selected" : null));
+                }, selected == MissionTrigger.OnReady ? "selected" : null);
+                bool available = backend.Game.CanAssignStandingMission(formation, task, objective, objectiveId, objectiveHex, posture, selected, out string reason);
+                AddOrderExplanation(modal, order, available, reason);
             }
             modal.Add(ActionButton("BACK", () => ShowMissionPostures(formation, task, objective, objectiveId, objectiveHex)));
         }
 
         private void ShowSynchronizedStrikeContacts()
         {
+            if (!FormationCommandAvailable(FormationCommand.SynchronizedStrike, out string reason)) { ShowUnavailable(reason); return; }
             FormationState leader = backend.Game.Active;
             VisualElement modal = Modal("SYNCHRONIZED STRIKE • SELECT CONTACT");
             modal.Add(Text("Reserve two to four formations now. The event executes at the latest participant Ready Time, no earlier than T+1, and holds one Command Slot.", "body-copy"));
@@ -1012,14 +1055,18 @@ namespace SeaOfUncertainty.Prototype
         private void ShowSynchronizedStrikeAims(ContactState contact)
         {
             VisualElement modal = Modal("SYNCHRONIZED STRIKE • SELECT AIM");
-            modal.Add(Text("Every selected participant must be in range of this aim at declaration and resolution.", "body-copy"));
+            ScrollView body = new ScrollView();
+            body.AddToClassList("manual-scroll");
+            modal.Add(body);
+            body.Add(Text("Every selected participant must be in range of this aim at declaration and resolution.", "body-copy"));
             foreach (HexCoord aim in backend.Game.ContactPossibleHexes(contact).OrderBy(hex => HexCoord.Distance(hex, contact.LastKnownPosition)).ThenBy(hex => hex.Q).ThenBy(hex => hex.R))
             {
                 HexCoord selected = aim;
                 int eligible = backend.Game.EligibleSynchronizedStrikeParticipants(backend.Game.Active.Side, contact, selected, salvo, weaponDelivery).Count;
                 Button button = ActionButton($"HEX {selected}  •  {eligible} ELIGIBLE AT {salvo.ToString().ToUpperInvariant()}", () => ShowSynchronizedStrikeParticipants(contact, selected));
-                button.SetEnabled(eligible >= 2 && backend.Game.EligibleSynchronizedStrikeParticipants(backend.Game.Active.Side, contact, selected, salvo, weaponDelivery).Contains(backend.Game.Active));
-                modal.Add(button);
+                button.tooltip = "Inspect participant eligibility and legal alternatives for this aim.";
+                if (eligible < 2 || !backend.Game.EligibleSynchronizedStrikeParticipants(backend.Game.Active.Side, contact, selected, salvo, weaponDelivery).Contains(backend.Game.Active)) button.text += " [UNAVAILABLE - DETAILS]";
+                body.Add(button);
             }
             modal.Add(ActionButton("BACK", ShowSynchronizedStrikeContacts));
         }
@@ -1027,22 +1074,28 @@ namespace SeaOfUncertainty.Prototype
         private void ShowSynchronizedStrikeParticipants(ContactState contact, HexCoord aim)
         {
             FormationState leader = backend.Game.Active;
-            List<FormationState> eligible = backend.Game.EligibleSynchronizedStrikeParticipants(leader.Side, contact, aim, salvo, weaponDelivery).ToList();
+            List<FormationState> eligible = backend.Game.EligibleSynchronizedStrikeParticipants(leader.Side, contact, aim, salvo, weaponDelivery).Where(item => item.EntropySources < 3 || item.PushThroughReady).ToList();
+            if (!eligible.Contains(leader)) eligible.Clear();
             VisualElement modal = Modal("SYNCHRONIZED STRIKE • PARTICIPANTS");
-            modal.Add(Text($"Leader {leader.Name}. Choose a package; all participants are reserved with no intervening actions. {salvo} is used by every participant.", "body-copy"));
+            ScrollView body = new ScrollView();
+            body.AddToClassList("manual-scroll");
+            modal.Add(body);
+            body.Add(Text($"Leader {leader.Name}. Choose a package; all participants are reserved with no intervening actions. {salvo} is used by every participant.", "body-copy"));
+            foreach (FormationState owned in backend.Game.Formations.Where(item => item.Side == leader.Side && !item.IsDestroyed))
+                body.Add(Text(owned.Name + ": " + backend.Game.SynchronizedParticipantReason(owned, contact, aim, salvo, weaponDelivery), "muted"));
             bool hasC02 = backend.ToolkitResponseHand(leader.Side).Any(card => card.Id == CommandResponseIds.PriorPlanning);
             bool hasC10 = backend.ToolkitResponseHand(leader.Side).Any(card => card.Id == CommandResponseIds.DeconflictionCell);
             foreach (List<FormationState> package in SynchronizedPackages(leader, eligible))
             {
                 List<FormationState> selected = package;
                 string names = string.Join(" + ", selected.Select(item => item.Name.ToUpperInvariant()));
-                modal.Add(ActionButton(names, () => CommitSynchronizedStrike(selected, contact, aim, false, null), "primary"));
-                if (hasC02) modal.Add(ActionButton(names + "  •  C-02 PRIOR PLANNING", () => CommitSynchronizedStrike(selected, contact, aim, true, null)));
+                body.Add(ActionButton(names, () => CommitSynchronizedStrike(selected, contact, aim, false, null), "primary"));
+                if (hasC02) body.Add(ActionButton(names + "  •  C-02 PRIOR PLANNING", () => CommitSynchronizedStrike(selected, contact, aim, true, null)));
                 if (hasC10)
                 {
                     FormationState deconflicted = selected.Last();
-                    modal.Add(ActionButton(names + $"  •  C-10 FOR {deconflicted.Name.ToUpperInvariant()}", () => CommitSynchronizedStrike(selected, contact, aim, false, deconflicted.Id)));
-                    if (hasC02) modal.Add(ActionButton(names + $"  •  C-02 + C-10 FOR {deconflicted.Name.ToUpperInvariant()}", () => CommitSynchronizedStrike(selected, contact, aim, true, deconflicted.Id)));
+                    body.Add(ActionButton(names + $"  •  C-10 FOR {deconflicted.Name.ToUpperInvariant()}", () => CommitSynchronizedStrike(selected, contact, aim, false, deconflicted.Id)));
+                    if (hasC02) body.Add(ActionButton(names + $"  •  C-02 + C-10 FOR {deconflicted.Name.ToUpperInvariant()}", () => CommitSynchronizedStrike(selected, contact, aim, true, deconflicted.Id)));
                 }
             }
             modal.Add(ActionButton("BACK", () => ShowSynchronizedStrikeAims(contact)));
@@ -1108,11 +1161,59 @@ namespace SeaOfUncertainty.Prototype
         }
 
         private Button CommandButton(string label, FormationCommand command, Vector2 anchor)
-            => ActionButton(label, () => ExecuteFormationCommand(command, anchor));
+        {
+            bool available = FormationCommandAvailable(command, out string reason);
+            Button button = ActionButton(label, () => ExecuteFormationCommand(command, anchor));
+            button.tooltip = reason;
+            if (!available) button.AddToClassList("order-unavailable");
+            return button;
+        }
+
+        private bool FormationCommandAvailable(FormationCommand command, out string reason)
+        {
+            PrototypeGame game = backend.Game;
+            FormationState actor = game.Active;
+            reason = "Choose the task, objective, posture and trigger. Mission changes occupy 1 Command Slot (2 with Confused Priorities).";
+            if (command == FormationCommand.Mission) return true;
+            if (command == FormationCommand.PushThrough)
+            {
+                reason = "Push Through requires a Disorganized Ready formation and adds 1 Command Strain. Recover Friction/Disruption to reduce Entropy instead.";
+                return actor.EntropySources >= 3 && !actor.PushThroughReady;
+            }
+            if (command == FormationCommand.HeadquartersRecovery)
+            {
+                reason = "HQ Recovery requires the Ready carrier at compatible logistics and Command Strain to remove. Move to logistics, or choose another order. Base Time 2; removes up to 2 Strain.";
+                return actor.Kind == FormationKind.CarrierGroup && game.HasLogisticsAccess(actor) && game.Sides[actor.Side].CommandStrain > 0;
+            }
+            if (command == FormationCommand.SynchronizedStrike)
+            {
+                reason = "Reserve 2-4 eligible formations and 1 free Command Slot until resolution. Execution is at least T+1 and no earlier than the latest participant Ready Time. Resolve/abort an existing strike first; otherwise free Command or use an individual Strike.";
+                return game.Sides[actor.Side].CommandSlots > 0 && !game.SynchronizedStrikes.Any(item => item.Side == actor.Side);
+            }
+            ActionKind action = command == FormationCommand.Screen ? ActionKind.Patrol : (ActionKind)Enum.Parse(typeof(ActionKind), command.ToString());
+            return game.CanPlanAction(actor, action, out reason);
+        }
+
+        private void ShowUnavailable(string reason)
+        {
+            VisualElement modal = Modal("ORDER UNAVAILABLE");
+            modal.Add(Text(reason + "\n\nInspect the formation and attached cards for restrictions. Follow its current Mission or authorized Trigger when Command is occupied; choose another available order from the palette.", "body-copy"));
+            modal.Add(ActionButton("INSPECT FORMATION", () => ShowInspector()));
+            modal.Add(ActionButton("BACK TO ORDERS", () => ShowFormationOrders(OrderAnchor()), "primary"));
+        }
+
+        private void AddOrderExplanation(VisualElement container, Button button, bool available, string reason)
+        {
+            button.SetEnabled(available);
+            button.tooltip = reason;
+            container.Add(button);
+            container.Add(Text((available ? "COST: " : "UNAVAILABLE: ") + reason, "muted"));
+        }
 
         private void ExecuteFormationCommand(FormationCommand command, Vector2? anchor = null)
         {
             Vector2 position = anchor ?? OrderAnchor();
+            if (!FormationCommandAvailable(command, out string reason)) { ShowUnavailable(reason); return; }
             if (backend.Game.ReadySynchronizedStrikeFor(backend.Game.Active) != null) { ShowFormationOrders(position); return; }
             switch (command)
             {
@@ -1152,6 +1253,7 @@ namespace SeaOfUncertainty.Prototype
                 menu.Add(ActionButton("INSPECT FORMATION • I", () => ShowInspector()));
                 return;
             }
+            menu.Add(Text("Amber orders open reasons and alternatives.", "muted"));
             menu.Add(Text("PRIMARY ORDERS", "eyebrow", "context-section"));
             menu.Add(CommandButton("⇢  MOVE ORDERS  ›", FormationCommand.Move, mapPosition));
             menu.Add(CommandButton("◎  SEARCH ORDERS  ›", FormationCommand.Search, mapPosition));
@@ -1216,7 +1318,9 @@ namespace SeaOfUncertainty.Prototype
                     SearchMode selectedMode = modeOption;
                     SearchPriority selectedPriority = priorityOption;
                     int range = backend.Game.SearchRangeFor(active, selectedMode) * backend.Game.Area.NauticalMilesPerHex;
-                    menu.Add(ActionButton($"{selectedMode.ToString().ToUpperInvariant()}  •  {selectedPriority.ToString().ToUpperInvariant()}  •  {range} NM", () => BeginMapOrder(ToolkitActionMode.Search, moveMode, selectedMode, selectedPriority, salvo), selectedMode == searchMode && selectedPriority == searchPriority ? "selected" : null));
+                    Button order = ActionButton($"{selectedMode.ToString().ToUpperInvariant()}  •  {selectedPriority.ToString().ToUpperInvariant()}  •  {range} NM", () => BeginMapOrder(ToolkitActionMode.Search, moveMode, selectedMode, selectedPriority, salvo), selectedMode == searchMode && selectedPriority == searchPriority ? "selected" : null);
+                    bool available = backend.Game.CanSearchArea(active, active.Position, selectedMode, out string reason);
+                    AddOrderExplanation(menu, order, available, available ? backend.Game.OrderCost(active, ActionKind.Search) + (selectedMode == SearchMode.Focused && !active.FreeFocusedSearch ? " Focused Search also temporarily occupies 1 Command Slot." : "") : reason + " Choose Passive/Active Search or Recover the blocking effect.");
                 }
             }
             menu.Add(ActionButton("‹  BACK TO ORDERS", () => ShowFormationOrders(mapPosition)));
@@ -1233,8 +1337,8 @@ namespace SeaOfUncertainty.Prototype
                 int range = backend.Game.StrikeRangeFor(active, selected) * backend.Game.Area.NauticalMilesPerHex;
                 int remaining = active.Weapons?.Available(selected) ?? -1;
                 Button order = ActionButton($"{selected.ToString().ToUpperInvariant()}  •  {range} NM  •  {(remaining < 0 ? "AVAILABLE" : remaining + " LEFT")}", () => BeginMapOrder(ToolkitActionMode.Strike, moveMode, searchMode, searchPriority, selected), selected == salvo ? "selected" : null);
-                order.SetEnabled(active.CanFire(selected));
-                menu.Add(order);
+                bool available = backend.Game.CanPlanStrike(active, selected, WeaponDelivery.Conventional, out string reason);
+                AddOrderExplanation(menu, order, available, reason);
             }
             if (active.BallisticWeapons != null && active.BallisticWeapons.Capacity > 0)
             {
@@ -1245,8 +1349,8 @@ namespace SeaOfUncertainty.Prototype
                     Salvo selected = option;
                     Button launch = ActionButton($"BALLISTIC {selected.ToString().ToUpperInvariant()}  |  {active.BallisticWeapons.Range * backend.Game.Area.NauticalMilesPerHex} NM  |  {active.BallisticWeapons.Ammunition} LEFT",
                         () => BeginMapOrder(ToolkitActionMode.Strike, moveMode, searchMode, searchPriority, selected, WeaponDelivery.Ballistic));
-                    launch.SetEnabled(active.BallisticWeapons.CanLaunch(active) && (selected != Salvo.Heavy || active.Endurance != Endurance.Critical));
-                    menu.Add(launch);
+                    bool available = backend.Game.CanPlanStrike(active, selected, WeaponDelivery.Ballistic, out string reason);
+                    AddOrderExplanation(menu, launch, available, reason);
                 }
             }
             menu.Add(ActionButton("‹  BACK TO ORDERS", () => ShowFormationOrders(mapPosition)));
@@ -1341,6 +1445,11 @@ namespace SeaOfUncertainty.Prototype
                 HexCoord selected = hex;
                 choices.Add(ActionButton($"HEX {selected}  •  RANGE {HexCoord.Distance(backend.Game.Active.Position, selected)} / {range}", () => CommitStrikeAim(contact, selected)));
             }
+            if (aims.Count == 0)
+            {
+                backend.Game.CanStrikeContact(backend.Game.Active, contact, contact.LastKnownPosition, salvo, weaponDelivery, out string reason);
+                modal.Add(Text("No legal aim: " + reason + " Choose another report/weapon, move into range, or Search to improve the report.", "body-copy"));
+            }
             modal.Add(choices);
             modal.Add(ActionButton("CANCEL", CloseOverlay));
         }
@@ -1373,6 +1482,15 @@ namespace SeaOfUncertainty.Prototype
             pendingReactionSalvo = committedSalvo;
             pendingWeaponDelivery = aiDecision?.WeaponDelivery ?? weaponDelivery;
             pendingAiStrike = aiDecision;
+            backend.PendingReaction = new PendingReactionSave
+            {
+                ActorId = backend.Game.Active.Id, TargetId = target.Id,
+                ContactTargetId = pendingSynchronizedStrike?.ContactTargetId ?? aiDecision?.TargetId ?? pendingStrikeContact?.TargetId ?? target.Id,
+                Aim = pendingSynchronizedStrike?.Aim ?? aiDecision?.Hex ?? pendingStrikeAim,
+                Salvo = committedSalvo, Delivery = pendingWeaponDelivery,
+                SynchronizedStrikeId = pendingSynchronizedStrike?.Id,
+                ContinueBlind = pendingSynchronizedBlind, HasAiDecision = aiDecision != null, AiDecision = aiDecision
+            };
             IReadOnlyList<Reaction> legal = backend.Game.AvailableReactions(backend.Game.Active, target);
             if (legal.Count == 1 && legal[0] == Reaction.None)
             {
@@ -1396,6 +1514,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void ShowReactionHandoff()
         {
+            view = View.Reaction;
             BeginScreen("SECURE REACTION HANDOFF");
             VisualElement page = El("front-page");
             VisualElement card = Panel("hero-card", "center");
@@ -1408,6 +1527,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void ShowReactionChoice()
         {
+            view = View.Reaction;
             FormationState attacker = backend.Game.Active;
             FormationState defender = pendingReactionTarget;
             ContactState attackerContact = backend.Game.ContactFor(defender.Side, attacker.Id);
@@ -1429,12 +1549,19 @@ namespace SeaOfUncertainty.Prototype
             if (legal.Contains(Reaction.Evade)) card.Add(ActionButton($"EVADE  •  +1 DEFENSE  •  MOVE {(defender.OrderlyWithdrawalReady ? 2 : 1)} AFTER", ShowEvadeDestinations));
             if (legal.Contains(Reaction.Counterattack)) card.Add(ActionButton("COUNTERATTACK  •  LIGHT STRIKE AFTER  •  NO DEFENSE BONUS", () => ResolvePendingStrike(Reaction.Counterattack, null), "warning"));
             if (legal.Contains(Reaction.Hold)) card.Add(ActionButton("HOLD  •  PRESERVE POSITION  •  NO MODIFIER", () => ResolvePendingStrike(Reaction.Hold, null)));
+            card.Add(ActionButton("SAVE OPERATION", () =>
+            {
+                bool saved = backend.ToolkitSave();
+                ShowReactionChoice();
+                app.Add(Text(saved ? "Reaction saved. Continue here or reload this operation later." : "Save failed. Continue the reaction; previous files remain available.", "body-copy"));
+            }));
             page.Add(card);
             app.Add(page);
         }
 
         private void ShowEvadeDestinations()
         {
+            view = View.Reaction;
             FormationState attacker = backend.Game.Active;
             FormationState defender = pendingReactionTarget;
             ContactState attackerContact = backend.Game.ContactFor(defender.Side, attacker.Id);
@@ -1470,6 +1597,7 @@ namespace SeaOfUncertainty.Prototype
             bool continuedBlind = pendingSynchronizedBlind;
             ContactState contact = pendingStrikeContact;
             HexCoord aim = pendingStrikeAim;
+            backend.PendingReaction = null;
             pendingReactionTarget = null;
             pendingAiStrike = null;
             pendingStrikeContact = null;
@@ -1622,11 +1750,30 @@ namespace SeaOfUncertainty.Prototype
             modal.Add(settings);
         }
 
+        private void ShowMapGuide()
+        {
+            VisualElement modal = Modal("MAP QUICK START");
+            ScrollView body = new ScrollView();
+            body.AddToClassList("manual-scroll");
+            modal.Add(body);
+            body.Add(Text("1. FIND THE READY FORMATION\nThe earliest Ready Time acts. C centers it; Space opens its map order palette. Use 1-9 for Move, Search, Strike, Recover, Hold, Screen, Support, Replenish and Synchronized Strike. Orders show costs and unavailable reasons before commitment.\n\n2. READ THE MAP\nHover friendly formations, your Contact reports, and the gold objective marker. O opens objective details by keyboard. I opens the inspector; T opens the friendly Ready queue. Arrow keys move the map cursor; Enter/Space selects its hex. Contacts report last-known information, not current enemy positions.\n\n3. MOVE THE CAMERA\nWASD pans; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. Mouse wheel zooms, middle-drag pans, right-drag rotates. G toggles the grid.\n\n4. COMMIT AND REACT\nChoose a posture or weapon, then a highlighted destination, search area or Contact and aim. Heavy strikes require confirmation. H opens cards; L opens your event log. A committed strike may pause for a defender Reaction. Hotseat requires a secure handoff before either player sees private information.\n\n5. SAVE OR TAKE A BREAK\nEscape cancels targeting, closes a modal, or opens the operation menu. Menu > Save Operation preserves progress; Continue or Load resumes it. A Reaction screen also offers Save Operation. A failed primary load offers a validated previous backup when available; that backup may be older.\n\nReady Time advances after actions; it is not a real-time countdown. Reopen this guide from the Field Manual whenever needed.", "body-copy"));
+            modal.Add(ActionButton("START COMMANDING", () =>
+            {
+                PlayerPrefs.SetInt("MapGuideSeenV1", 1);
+                PlayerPrefs.Save();
+                CloseOverlay();
+            }, "primary"));
+        }
+
         private void ShowRules()
         {
             VisualElement modal = Modal("FIELD MANUAL");
-            modal.Add(Text("COMMAND MODES\nSolo vs AI assigns Blue to the player and Red to the deterministic OPFOR commander. Local Hotseat uses secure handoffs between two players. Both modes use identical rules and Ready-Time sequencing.\n\nSCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nMAP CAMERA\nWASD moves with smooth acceleration; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. C focuses the active formation, O focuses the objective, V toggles optional edge scrolling, and F9/F10 save/recall a command view. Middle-drag pans, right-drag freely orbits, and the wheel zooms.\n\nMAP GRID\nUse HEXES OFF / HEXES ON in the command bar, or press G, to toggle the persistent hex overlay. The preference is saved between sessions.\n\nREADY TIME\nThere are no player turns. The earliest formation acts. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable formation order. If only one side is Ready, it continues.\n\nSTANDING MISSIONS\nEach Formation tracks a current Mission task. Rapid Replan changes that task without occupying Command and adds +1 Time when the Formation next schedules Ready.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Cautious gives Signature -1; High Tempo makes the Formation Loud; either lasts until that Formation completes its next Action. Routes cannot cross Land or restricted areas, and a naval Formation entering a Strait must stop. Littoral anywhere on the route adds one Ready-Time. One friendly Formation may end in a hex; opposing Formations may coexist without revealing hidden positions.\n\nCONTROL\nA combat-capable non-air Formation controls an objective within one hex unless the opponent has a qualifying Formation there too. Control is adjudicated from actual positions only for final scoring; the live map does not reveal hidden enemy presence.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE AND REACTION\nAfter a Strike is committed and before the roll, an eligible defender chooses one Reaction. Defend adds +1 Defense. Evade adds +1 Defense and moves one valid hex away after combat. Counterattack makes one Light return Strike if the defender has a usable Contact and is capable. Hold preserves position with no modifier. A Reaction does not change Ready Time, is spent once used, and refreshes after that Formation completes its own Action. Disrupted and Crippled formations cannot Counterattack; replenishing formations cannot react. Local Hotseat uses a secure defender handoff. Solo pauses for a human defender and lets the AI choose for its own formation. Orderly Withdrawal extends one Evade to two hexes.\n\nBALLISTIC ATTACK AND DEFENSE\nEquipped formations select Ballistic separately from salvo commitment in Strike Orders. One launch package is spent after commitment, including an empty or stale aim; launch increases signature. Ballistic interception is automatic: one eligible provider protects a friendly target, spends one interceptor package, and keeps its ordinary Reaction. Conventional missile defense and EW do not grant ballistic interception. Hover a friendly marker or inspect its hex with the map cursor to see exact hex-distance coverage. Inspector > Show Defense Coverage pins it; Hide Defense Coverage clears it. Green indicates available defense with eligible friendly targets circled; amber is nominal range only while unavailable. Inspect stocks, damage, domain restrictions and logistics access. Surface escorts in the current test operations cover friendly surface formations within four hexes; carriers have self-defense only. Reloads require compatible authored services and ordinary logistics access. Private launch/interception cues and receipts describe only your own formations.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY AND CARD HAND\nEvery Entropy event draws a physical card, even if that source is already marked. Attached effects stack and appear with Command Responses in the active side's Card Hand at the bottom of the interface. Recover selects and discards one Friction or Disruption card; a source remains marked while another matching card remains. Destruction cards await repair or reorganization.", "body-copy"));
-            modal.Add(Text("SEARCH, STRIKE, AND DAMAGE UPDATE\nThe distances above are the carrier baseline; live commitment buttons show the active formation's scenario-defined sensor envelope. Declare Location or Identity priority before Search. At Age 0, High/Medium/Low Location covers radius 0/1/2; Age or tracked movement adds up to two rings. Search can privately disprove False Contacts. A Strike selects one aim hex in a Contact's possible area; hidden occupancy is tested only after commitment. Light damage gives −1 Defense through the formation's next completed own Action. Equal repeated damage escalates one step; higher replaces lower. Crippled formations may only Defend or Hold.", "body-copy", "amber"));
+            ScrollView body = new ScrollView();
+            body.AddToClassList("manual-scroll");
+            modal.Add(body);
+            modal.Add(ActionButton("MAP QUICK START", ShowMapGuide));
+            body.Add(Text("COMMAND MODES\nSolo vs AI assigns Blue to the player and Red to the deterministic OPFOR commander. Local Hotseat uses secure handoffs between two players. Both modes use identical rules and Ready-Time sequencing.\n\nSCALE\n20 nautical miles per hex. One Ready-Time is two hours.\n\nMAP CAMERA\nWASD moves with smooth acceleration; Q/E rotates; R/F tilts; Z/X zooms; Shift accelerates; Home resets. C focuses the active formation, O focuses the objective, V toggles optional edge scrolling, and F9/F10 save/recall a command view. Middle-drag pans, right-drag freely orbits, and the wheel zooms.\n\nMAP GRID\nUse SHOW HEX GRID / HIDE HEX GRID in the operation menu, or press G, to toggle the persistent hex overlay. The preference is saved between sessions.\n\nREADY TIME\nThere are no player turns. The earliest formation acts. On a cross-side tie, priority passes away from the side that acted most recently; within that side use lower Entropy, higher Command, then stable formation order. If only one side is Ready, it continues.\n\nSTANDING MISSIONS\nEach Formation tracks a current Mission task. Rapid Replan changes that task without occupying Command and adds +1 Time when the Formation next schedules Ready.\n\nMOVE\nSurface/carrier/sub: Cautious 20 / Normal 40 / High Tempo 60 nm. Air missions: 80 / 120 / 160 nm. Cautious gives Signature -1; High Tempo makes the Formation Loud; either lasts until that Formation completes its next Action. Routes cannot cross Land or restricted areas, and a naval Formation entering a Strait must stop. Littoral anywhere on the route adds one Ready-Time. One friendly Formation may end in a hex; opposing Formations may coexist without revealing hidden positions.\n\nCONTROL\nA combat-capable non-air Formation controls an objective within one hex unless the opponent has a qualifying Formation there too. Control is adjudicated from actual positions only for final scoring; the live map does not reveal hidden enemy presence.\n\nSEARCH\nSelect a highlighted hex. The selected hex and its six neighbors are searched. Passive reaches 160 nm; Active 200 nm and becomes Loud; Focused 240 nm and temporarily occupies Command. A Search with no detections still costs 2 Time and advances the Ready queue.\n\nSTRIKE AND REACTION\nAfter a Strike is committed and before the roll, an eligible defender chooses one Reaction. Defend adds +1 Defense. Evade adds +1 Defense and moves one valid hex away after combat. Counterattack makes one Light return Strike if the defender has a usable Contact and is capable. Hold preserves position with no modifier. A Reaction does not change Ready Time, is spent once used, and refreshes after that Formation completes its own Action. Disrupted and Crippled formations cannot Counterattack; replenishing formations cannot react. Local Hotseat uses a secure defender handoff. Solo pauses for a human defender and lets the AI choose for its own formation. Orderly Withdrawal extends one Evade to two hexes.\n\nBALLISTIC ATTACK AND DEFENSE\nEquipped formations select Ballistic separately from salvo commitment in Strike Orders. One launch package is spent after commitment, including an empty or stale aim; launch increases signature. Ballistic interception is automatic: one eligible provider protects a friendly target, spends one interceptor package, and keeps its ordinary Reaction. Conventional missile defense and EW do not grant ballistic interception. Hover a friendly marker or inspect its hex with the map cursor to see exact hex-distance coverage. Inspector > Show Defense Coverage pins it; Hide Defense Coverage clears it. Green indicates available defense with eligible friendly targets circled; amber is nominal range only while unavailable. Inspect stocks, damage, domain restrictions and logistics access. Surface escorts in the current test operations cover friendly surface formations within four hexes; carriers have self-defense only. Reloads require compatible authored services and ordinary logistics access. Private launch/interception cues and receipts describe only your own formations.\n\nCONTACTS\nLocation, Identity, and Age define what a side knows.\n\nENTROPY AND CARD HAND\nEvery Entropy event draws a physical card, even if that source is already marked. Attached effects stack. Press H or choose Open Card Table to inspect attached effects and Command Responses. Recover selects and discards one Friction or Disruption card; a source remains marked while another matching card remains. Destruction cards await repair or reorganization.", "body-copy"));
+            body.Add(Text("SEARCH, STRIKE, AND DAMAGE UPDATE\nThe distances above are the carrier baseline; live commitment buttons show the active formation's scenario-defined sensor envelope. Declare Location or Identity priority before Search. At Age 0, High/Medium/Low Location covers radius 0/1/2; Age or tracked movement adds up to two rings. Search can privately disprove False Contacts. A Strike selects one aim hex in a Contact's possible area; hidden occupancy is tested only after commitment. Light damage gives −1 Defense through the formation's next completed own Action. Equal repeated damage escalates one step; higher replaces lower. Crippled formations may only Defend or Hold.", "body-copy", "amber"));
             modal.Add(ActionButton("CLOSE", CloseOverlay, "primary"));
         }
 
@@ -1680,6 +1827,7 @@ namespace SeaOfUncertainty.Prototype
                 response.Add(Text("HELD IN COMMAND\nPLAY DURING A LEGAL WINDOW", "physical-card-owner"));
                 Button play = ActionButton(card.MechanicallySupported ? "SELECT TARGET & PLAY" : "SYSTEM NOT YET ACTIVE", () => ShowResponseTargets(card), card.MechanicallySupported ? "primary" : null);
                 play.SetEnabled(card.MechanicallySupported);
+                if (!card.MechanicallySupported) modal.Add(Text("Unavailable: this response needs a rule system that is not active. Choose another card or order.", "body-copy"));
                 play.AddToClassList("physical-card-action");
                 response.Add(play);
                 scroll.Add(response);

@@ -122,7 +122,9 @@
 .stat-grid { flex-direction: row; flex-wrap: wrap; }
 .stat {
     width: 84px;
-    height: 58px;
+    min-height: 72px;
+    height: auto;
+    flex-shrink: 0;
     margin: 3px;
     padding: 4px;
     background-color: rgb(9, 49, 59);
@@ -221,7 +223,9 @@
 .physical-card {
     width: 224px;
     min-width: 224px;
-    height: 314px;
+    min-height: 314px;
+    height: auto;
+    flex-shrink: 0;
     margin: 8px;
     padding: 16px;
     background-color: rgb(18, 29, 31);
@@ -347,3 +351,13 @@
 .extra-large-text .subheading { font-size: 23px; }
 .extra-large-text .heading { font-size: 39px; }
 .large-text .modal, .extra-large-text .modal { max-height: 94%; }
+
+.manual-scroll { flex-grow: 1; flex-shrink: 1; min-height: 0; }
+
+.button.order-unavailable { color: rgb(241, 174, 65); }
+.stat-name, .stat-value { margin: 0; padding: 0; }
+
+.briefing-card { max-height: 100%; flex-shrink: 1; min-height: 0; }
+.hero-card .heading, .hero-card .subheading { white-space: normal; }
+
+.physical-card .button { flex-shrink: 0; }

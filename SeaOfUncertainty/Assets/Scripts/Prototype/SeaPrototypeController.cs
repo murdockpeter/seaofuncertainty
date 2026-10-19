@@ -30,6 +30,7 @@ namespace SeaOfUncertainty.Prototype
         public PlaytestRecorder Telemetry => telemetry;
         public PlaytestFeedback Feedback => feedback;
         public string LastMessage => toast;
+        public PendingReactionSave PendingReaction { get; set; }
         public bool HasSave => SaveStore.HasSave;
         public bool HasRecoverableBackup => SaveStore.HasValidBackup();
         public bool IsComplete => game != null && game.Time >= game.Scenario.Horizon;
@@ -89,7 +90,7 @@ namespace SeaOfUncertainty.Prototype
         private float textScale = 1f;
         private bool controllerNavigation = true;
         private float controllerDeadZone = .55f;
-        private string lastAudioDescription = "Ambient audio: quiet open-sea wash.";
+        private string lastAudioDescription = "Ambient audio: soft maritime wind, swells and water wash.";
         private OperationalMissionAudio missionAudio;
         private PrototypeGame audioEventGame;
         private bool highContrast;
@@ -198,6 +199,14 @@ namespace SeaOfUncertainty.Prototype
         {
             lastActionSucceeded = false;
             if (!IsAiTurn) return "No AI-controlled formation is Ready.";
+            return ExecuteAutomatedDecision(preparedDecision, selectedReaction, evadeDestination);
+        }
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        public string ToolkitExecuteAutomatedPlaytestDecision(AiDecision decision) => ExecuteAutomatedDecision(decision, null, null);
+#endif
+        private string ExecuteAutomatedDecision(AiDecision preparedDecision, Reaction? selectedReaction, HexCoord? evadeDestination)
+        {
+            lastActionSucceeded = false;
             FormationState actor = game.Active;
             string alternatives = LegalAlternatives();
             PlaytestRecorder.Observation before = telemetry.Observe(game, actor);
@@ -460,6 +469,7 @@ namespace SeaOfUncertainty.Prototype
 
         private void ResetScenario(string scenarioId = null)
         {
+            PendingReaction = null;
             game = new PrototypeGame(1978, ScenarioCatalog.Require(string.IsNullOrEmpty(scenarioId) ? "meridian-veil" : scenarioId));
             AttachMissionAudio(game);
             game.AgeTwoTargetingPenalty = ageTwoTargetingPenalty;
@@ -476,7 +486,7 @@ namespace SeaOfUncertainty.Prototype
         {
             try
             {
-                var save = new OperationSave { Game = game.CaptureState(), Playtest = telemetry.Session, Feedback = feedback, OperationMode = operationMode, HumanSide = humanSide };
+                var save = new OperationSave { Game = game.CaptureState(), Playtest = telemetry.Session, Feedback = feedback, OperationMode = operationMode, HumanSide = humanSide, PendingReaction = PendingReaction };
                 SaveStore.Save(save);
                 Toast($"Operation saved at T{game.Time:00}.");
                 return true;
@@ -499,6 +509,7 @@ namespace SeaOfUncertainty.Prototype
                 ScenarioOutcome restoredOutcome = loaded.Game.Time >= loaded.Game.Scenario.Horizon ? ScenarioScoring.Evaluate(loaded.Game) : null;
                 // Commit only after decoding, migration, telemetry, and scoring succeed.
                 game = loaded.Game;
+                PendingReaction = operation.Version >= 5 ? operation.PendingReaction : null;
                 AttachMissionAudio(game);
                 telemetry = restoredTelemetry;
                 feedback = operation?.Feedback ?? new PlaytestFeedback();
@@ -562,9 +573,9 @@ namespace SeaOfUncertainty.Prototype
         {
             if (formation == null) return;
             if (operationMode == OperationMode.SoloVsAi && formation.Side != humanSide) return;
-            lastAudioDescription = OperationalMissionAudio.Description(mission);
+            lastAudioDescription = OperationalMissionAudio.Description(mission, formation.Kind);
             if (!audioEnabled) return;
-            missionAudio?.Play(mission);
+            missionAudio?.Play(mission, formation.Kind);
         }
 
         private void ApplyAudioSettings()

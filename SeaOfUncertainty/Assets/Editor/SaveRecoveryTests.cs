@@ -54,9 +54,9 @@ namespace SeaOfUncertainty.Editor
                 Reject(() => OperationSaveStore.Decode("{}"), "Empty objects are not playable saves");
                 Reject(() => OperationSaveStore.Decode(firstJson.Substring(0, firstJson.Length / 2)), "Truncated saves fail validation");
                 Reject(() => OperationSaveStore.Decode("{bad json}"), "Malformed JSON fails validation");
-                first.Version = 5;
+                first.Version = 6;
                 Reject(() => OperationSaveStore.Decode(JsonUtility.ToJson(first)), "Newer operation envelope is rejected");
-                first.Version = 4; first.Game.Version = 14;
+                first.Version = 4; first.Game.Version = 15;
                 Reject(() => OperationSaveStore.Decode(JsonUtility.ToJson(first)), "Newer nested game format is rejected");
                 first.Game.Version = 11; first.Game.ScenarioId = "missing-authored-operation";
                 Reject(() => OperationSaveStore.Decode(JsonUtility.ToJson(first)), "Unknown authored scenario never silently loads Meridian Veil");

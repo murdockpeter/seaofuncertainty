@@ -9,7 +9,7 @@ namespace SeaOfUncertainty.Core
         [Serializable]
         public sealed class SaveData
         {
-            public int Version = 13;
+            public int Version = 14;
             public string ScenarioId;
             public string OperationalAreaId;
             public int Time;
@@ -30,9 +30,12 @@ namespace SeaOfUncertainty.Core
             public string RuntimeWeather;
             public int RuntimeWeatherSeverity;
             public List<string> ResolvedScheduledEventIds = new List<string>();
+            public int RandomSeed;
+            public int RandomDrawCount;
         }
 
-        private readonly Random random;
+        private Random random;
+        private int randomDrawCount;
         public readonly List<FormationState> Formations = new List<FormationState>();
         public readonly List<ContactState> Contacts = new List<ContactState>();
         public readonly Dictionary<Side, SideState> Sides = new Dictionary<Side, SideState>();
@@ -56,7 +59,7 @@ namespace SeaOfUncertainty.Core
         public string RuntimeWeather { get; private set; }
         public int RuntimeWeatherSeverity { get; private set; }
         private Side? lastActingSide;
-        private readonly int seed;
+        private int seed;
         private string resolvingSynchronizedStrikeId;
 
         public PrototypeGame(int seed = 1978, ScenarioDefinition scenario = null)
@@ -131,13 +134,7 @@ namespace SeaOfUncertainty.Core
 
         public bool Support(FormationState supporter, FormationState recipient, SupportKind kind, out string message)
         {
-            if (supporter != Active) { message = "Only the highlighted Ready formation may act."; return false; }
-            if (recipient == null || recipient.IsDestroyed || recipient.Side != supporter.Side || recipient == supporter) { message = "Choose another friendly Formation to receive Support."; return false; }
-            if (HexCoord.Distance(supporter.Position, recipient.Position) > Rules.SupportRange) { message = $"Support range is {Rules.SupportRange} hexes."; return false; }
-            if (supporter.SupportBlockedUntilRecover) { message = "Fuel Priority Conflict prevents Support until this Formation Recovers."; return false; }
-            if ((supporter.Kind == FormationKind.AirGroup || supporter.Kind == FormationKind.CarrierGroup) && supporter.HasEffect(EntropyCardIds.HangarDamage)) { message = "Hangar Damage makes this Formation's air Support unavailable."; return false; }
-            FormationState blockedParticipant = kind != SupportKind.Synchronization ? null : !CanParticipateInSynchronization(supporter) ? supporter : !CanParticipateInSynchronization(recipient) ? recipient : null;
-            if (blockedParticipant != null) { message = blockedParticipant.HasEffect(EntropyCardIds.CompromisedPlot) ? $"Compromised Plot prevents {blockedParticipant.Name} from Synchronization until Recover." : $"Staff Overload prevents {blockedParticipant.Name} from Synchronization until it completes another Action or spends its printed response."; return false; }
+            if (!CanSupport(supporter, recipient, kind, out message)) return false;
             if (!AuthorizeAction(supporter, ActionKind.Support, out message)) return false;
             bool lost = supporter.HasEffect(EntropyCardIds.MisroutedOrders);
             int coordinationDelay = kind == SupportKind.Synchronization && supporter.HasEffect(EntropyCardIds.CoordinationDrift) ? 1 : 0;
@@ -156,6 +153,19 @@ namespace SeaOfUncertainty.Core
                 : $"{supporter.Name} assigned {kind} Support (+1) to {recipient.Name} within range {Rules.SupportRange}.{(coordinationDelay > 0 ? " Supporter Coordination Drift added +1 Time." : string.Empty)}{(kind == SupportKind.Synchronization && recipient.HasEffect(EntropyCardIds.CoordinationDrift) ? " Recipient Coordination Drift shifts its next Action +1 Time." : string.Empty)}", coordinationDelay);
             message = Log[0];
             return true;
+        }
+
+        public bool CanSupport(FormationState supporter, FormationState recipient, SupportKind kind, out string message)
+        {
+            if (supporter == null) { message = "Choose a friendly Ready formation."; return false; }
+            if (supporter != Active) { message = "Only the highlighted Ready formation may act."; return false; }
+            if (recipient == null || recipient.IsDestroyed || recipient.Side != supporter.Side || recipient == supporter) { message = "Choose another friendly Formation to receive Support."; return false; }
+            if (HexCoord.Distance(supporter.Position, recipient.Position) > Rules.SupportRange) { message = $"Support range is {Rules.SupportRange} hexes."; return false; }
+            if (supporter.SupportBlockedUntilRecover) { message = "Fuel Priority Conflict prevents Support until this Formation Recovers."; return false; }
+            if ((supporter.Kind == FormationKind.AirGroup || supporter.Kind == FormationKind.CarrierGroup) && supporter.HasEffect(EntropyCardIds.HangarDamage)) { message = "Hangar Damage makes this Formation's air Support unavailable."; return false; }
+            FormationState blockedParticipant = kind != SupportKind.Synchronization ? null : !CanParticipateInSynchronization(supporter) ? supporter : !CanParticipateInSynchronization(recipient) ? recipient : null;
+            if (blockedParticipant != null) { message = blockedParticipant.HasEffect(EntropyCardIds.CompromisedPlot) ? $"Compromised Plot prevents {blockedParticipant.Name} from Synchronization until Recover." : $"Staff Overload prevents {blockedParticipant.Name} from Synchronization until it completes another Action or spends its printed response."; return false; }
+            return CanAuthorizeAction(supporter, ActionKind.Support, out message);
         }
 
         public int PendingSupportBonus(FormationState recipient, SupportKind kind)
@@ -194,13 +204,7 @@ namespace SeaOfUncertainty.Core
 
         public bool AssignStandingMission(FormationState formation, ActionKind task, MissionObjectiveKind objective, string objectiveId, HexCoord objectiveHex, MissionPosture posture, MissionTrigger trigger, out string message)
         {
-            if (formation == null || Active == null || formation.Side != Active.Side) { message = "Choose a friendly Formation under the active side's control."; return false; }
-            if (formation.IsDestroyed) { message = "Destroyed formations cannot receive a Standing Mission."; return false; }
-            if (formation.PendingMissionChange || CommandSlotsFor(formation.Side).Any(slot => slot.Status == CommandSlotStatus.Occupied && slot.FormationId == formation.Id && slot.Purpose == "Standing Mission Change")) { message = "Command Attention is already committed to this Formation's Mission change."; return false; }
-            if (formation.MissionChangeLockedUntilAction) { message = "Delegated Authority prevents this Formation from changing Mission until its next Action."; return false; }
-            if (formation.HasEffect(EntropyCardIds.BrokenLink)) { message = "Broken Link prevents this Formation from receiving new orders."; return false; }
-            bool unchanged = formation.Mission == task && formation.MissionObjective == objective && formation.MissionObjectiveId == objectiveId && formation.MissionObjectiveHex.Equals(objectiveHex) && formation.MissionPosture == posture && formation.MissionTrigger == trigger;
-            if (unchanged) { message = "That Standing Mission is already assigned."; return false; }
+            if (!CanAssignStandingMission(formation, task, objective, objectiveId, objectiveHex, posture, trigger, out message)) return false;
             int slots = 1 + (formation.HasEffect(EntropyCardIds.ConfusedPriorities) ? 1 : 0);
             if (!TryOccupyCommand(formation.Side, slots, formation.HasEffect(EntropyCardIds.CommunicationsLatency) ? "Delayed Mission Order" : "Standing Mission Change", formation.Id, formation.HasEffect(EntropyCardIds.CommunicationsLatency) ? Time + 1 : -1, out message)) return false;
             if (formation.HasEffect(EntropyCardIds.CommunicationsLatency))
@@ -222,6 +226,22 @@ namespace SeaOfUncertainty.Core
             AddLog($"T{Time:00}  MISSION ASSIGNED — {formation.Name}: {task}, {objective}, {posture}, trigger {trigger}. {slots} Command Slot{(slots == 1 ? string.Empty : "s")} occupied until its next Action.", formation.Side);
             CommandEvent?.Invoke(formation, "MissionChanged", $"{task}; {objective}; {posture}; {trigger}");
             message = Log[0];
+            return true;
+        }
+
+        public bool CanAssignStandingMission(FormationState formation, ActionKind task, MissionObjectiveKind objective, string objectiveId, HexCoord objectiveHex, MissionPosture posture, MissionTrigger trigger, out string message)
+        {
+            if (formation == null || Active == null || formation.Side != Active.Side) { message = "Choose a friendly Formation under the active side's control."; return false; }
+            if (formation.IsDestroyed) { message = "Destroyed formations cannot receive a Standing Mission."; return false; }
+            if (formation.PendingMissionChange || CommandSlotsFor(formation.Side).Any(slot => slot.Status == CommandSlotStatus.Occupied && slot.FormationId == formation.Id && slot.Purpose == "Standing Mission Change")) { message = "Command Attention is already committed to this Formation's Mission change."; return false; }
+            if (formation.MissionChangeLockedUntilAction) { message = "Delegated Authority prevents this Formation from changing Mission until its next Action."; return false; }
+            if (formation.HasEffect(EntropyCardIds.BrokenLink)) { message = "Broken Link prevents this Formation from receiving new orders."; return false; }
+            bool unchanged = formation.Mission == task && formation.MissionObjective == objective && formation.MissionObjectiveId == objectiveId && formation.MissionObjectiveHex.Equals(objectiveHex) && formation.MissionPosture == posture && formation.MissionTrigger == trigger;
+            if (unchanged) { message = "That Standing Mission is already assigned."; return false; }
+            int slots = 1 + (formation.HasEffect(EntropyCardIds.ConfusedPriorities) ? 1 : 0);
+            if (Sides[formation.Side].CommandSlots < slots)
+            { message = $"Mission change needs {slots} free Command Slot(s); follow the current Mission or free occupied Command first."; return false; }
+            message = $"Occupies {slots} Command Slot(s) until the formation's next Action" + (formation.HasEffect(EntropyCardIds.CommunicationsLatency) ? "; delivery at T+1, existing Mission continues until then." : ".");
             return true;
         }
 
@@ -318,6 +338,8 @@ namespace SeaOfUncertainty.Core
             return new SaveData
             {
                 Time = Time,
+                RandomSeed = seed,
+                RandomDrawCount = randomDrawCount,
                 ScenarioId = Scenario.Id,
                 OperationalAreaId = Area.Id,
                 ActiveFormationId = Active?.Id,
@@ -342,8 +364,16 @@ namespace SeaOfUncertainty.Core
 
         public void RestoreState(SaveData data)
         {
-            if (data == null || data.Version < 1 || data.Version > 13) throw new ArgumentException("Unsupported or empty save data.");
+            if (data == null || data.Version < 1 || data.Version > 14) throw new ArgumentException("Unsupported or empty save data.");
             if (data.Version >= 2 && !string.IsNullOrEmpty(data.ScenarioId) && !string.Equals(data.ScenarioId, Scenario.Id, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException($"Save scenario {data.ScenarioId} does not match loaded scenario {Scenario.Id}.");
+            // Older saves never recorded combat randomness. Migrate to an explicit,
+            // repeatable baseline; their original future rolls cannot be reconstructed.
+            if (data.Version >= 14 && (data.RandomDrawCount < 0 || data.RandomDrawCount > 1000000))
+                throw new ArgumentException("Invalid combat random checkpoint.");
+            seed = data.Version >= 14 ? data.RandomSeed : 1978;
+            randomDrawCount = data.Version >= 14 ? data.RandomDrawCount : 0;
+            random = new Random(seed);
+            for (int index = 0; index < randomDrawCount; index++) random.Next(1, 7);
             Formations.Clear();
             Formations.AddRange(data.Formations ?? new List<FormationState>());
             foreach (FormationState formation in Formations)
@@ -424,11 +454,9 @@ namespace SeaOfUncertainty.Core
 
         public bool RespondToEntropy(FormationState formation, string cardId, out string message)
         {
-            if (formation == null || !formation.HasEffect(cardId)) { message = "That effect is not active."; return false; }
+            if (!CanRespondToEntropy(formation, cardId, out message)) return false;
             EntropyEffectDefinition card = EntropyEffectCatalog.Find(cardId);
-            EntropyResponseWindowState window = EntropyResponseWindows.FirstOrDefault(item => item.FormationId == formation.Id && item.CardId == cardId && formation.CompletedActions < item.ExpiresAfterCompletedActions);
-            if (card == null || string.IsNullOrEmpty(card.Response) || card.ResponseWindow == EntropyResponseWindow.None) { message = "This effect has no printed Command response."; return false; }
-            if (window == null) { message = "That effect's response window has closed; Recover it normally."; return false; }
+            EntropyResponseWindowState window = EntropyResponseWindows.First(item => item.FormationId == formation.Id && item.CardId == cardId && formation.CompletedActions < item.ExpiresAfterCompletedActions);
             if (!TryOccupyCommand(formation.Side, card.ResponseCommandCost, "Entropy Response", formation.Id, -1, out message)) return false;
             ResolveAttachedEffect(formation, cardId);
             EntropyResponseWindows.Remove(window);
@@ -437,12 +465,19 @@ namespace SeaOfUncertainty.Core
             return true;
         }
 
-        public bool CanRespondToEntropy(FormationState formation, string cardId)
+        public bool CanRespondToEntropy(FormationState formation, string cardId) => CanRespondToEntropy(formation, cardId, out _);
+
+        public bool CanRespondToEntropy(FormationState formation, string cardId, out string message)
         {
+            if (formation == null || !formation.HasEffect(cardId)) { message = "That effect is not active."; return false; }
             EntropyEffectDefinition card = EntropyEffectCatalog.Find(cardId);
-            return formation != null && formation.HasEffect(cardId) && card != null && !string.IsNullOrEmpty(card.Response) && card.ResponseWindow != EntropyResponseWindow.None &&
-                Sides.TryGetValue(formation.Side, out SideState side) && side.CommandSlots >= card.ResponseCommandCost &&
-                EntropyResponseWindows.Any(item => item.FormationId == formation.Id && item.CardId == cardId && formation.CompletedActions < item.ExpiresAfterCompletedActions);
+            EntropyResponseWindowState window = EntropyResponseWindows.FirstOrDefault(item => item.FormationId == formation.Id && item.CardId == cardId && formation.CompletedActions < item.ExpiresAfterCompletedActions);
+            if (card == null || string.IsNullOrEmpty(card.Response) || card.ResponseWindow == EntropyResponseWindow.None) { message = "This effect has no printed Command response."; return false; }
+            if (window == null) { message = "That effect's response window has closed; Recover it normally."; return false; }
+            if (!Sides.TryGetValue(formation.Side, out SideState side) || side.CommandSlots < card.ResponseCommandCost)
+            { message = $"Response requires {card.ResponseCommandCost} free Command Slot(s). Free occupied Command or Recover the effect normally."; return false; }
+            message = $"Occupies {card.ResponseCommandCost} Command Slot(s) until the formation's next completed Action; use before that Action closes the response window.";
+            return true;
         }
 
         public bool PlayCommandResponse(Side side, string cardId, FormationState formation, ContactState contact, HexCoord? hex, out string message)
@@ -627,16 +662,9 @@ namespace SeaOfUncertainty.Core
 
         public bool SearchArea(FormationState searcher, HexCoord center, SearchMode mode, SearchPriority priority, out string message)
         {
-            if (searcher != Active) { message = "Only the highlighted Ready formation may act."; return false; }
-            if (!Area.Contains(center)) { message = "That Search area is outside the operational area."; return false; }
-            int centerRange = HexCoord.Distance(searcher.Position, center);
-            int maximumRange = SearchRangeFor(searcher, mode);
-            if (centerRange > maximumRange) { message = $"{mode} Search range is {maximumRange} hexes ({maximumRange * Area.NauticalMilesPerHex} nm)."; return false; }
-            SideState side = Sides[searcher.Side];
-            if (mode == SearchMode.Focused && searcher.HasEffect(EntropyCardIds.JammedCircuits)) { message = "Jammed Circuits prevents Focused Search until Recover."; return false; }
+            if (!CanSearchArea(searcher, center, mode, out message)) return false;
             bool freeFocused = mode == SearchMode.Focused && searcher.FreeFocusedSearch;
-            int attentionEstimate = ActionFollowsMission(searcher, ActionKind.Search) || TriggeredMissionFor(searcher) == ActionKind.Search ? 0 : 1;
-            if (mode == SearchMode.Focused && !freeFocused && side.CommandSlots < 1 + attentionEstimate) { message = $"Focused Search needs {1 + attentionEstimate} free Command Slot{(attentionEstimate == 0 ? string.Empty : "s")} including immediate retasking."; return false; }
+            int maximumRange = SearchRangeFor(searcher, mode);
             if (!AuthorizeAction(searcher, ActionKind.Search, out message)) return false;
             if (mode == SearchMode.Focused && !freeFocused && !TryOccupyCommand(searcher.Side, 1, "Focused Search", searcher.Id, -1, out message)) return false;
             int searchSupport = ConsumeSupportBonus(searcher, SupportKind.Search);
@@ -688,6 +716,22 @@ namespace SeaOfUncertainty.Core
             CompleteAction(searcher, ActionKind.Search, false, $"{searcher.Name} searched area {center} (radius {Rules.SearchAreaRadius}, {mode}, {priority} priority) — {outcome}.", loudAfterAction: mode == SearchMode.Active);
             message = Log[0];
             return true;
+        }
+
+        public bool CanSearchArea(FormationState searcher, HexCoord center, SearchMode mode, out string message)
+        {
+            if (searcher == null) { message = "Choose a friendly Ready formation."; return false; }
+            if (searcher != Active) { message = "Only the highlighted Ready formation may act."; return false; }
+            if (!Area.Contains(center)) { message = "That Search area is outside the operational area."; return false; }
+            int centerRange = HexCoord.Distance(searcher.Position, center);
+            int maximumRange = SearchRangeFor(searcher, mode);
+            if (centerRange > maximumRange) { message = $"{mode} Search range is {maximumRange} hexes ({maximumRange * Area.NauticalMilesPerHex} nm)."; return false; }
+            SideState side = Sides[searcher.Side];
+            if (mode == SearchMode.Focused && searcher.HasEffect(EntropyCardIds.JammedCircuits)) { message = "Jammed Circuits prevents Focused Search until Recover."; return false; }
+            bool freeFocused = mode == SearchMode.Focused && searcher.FreeFocusedSearch;
+            int attentionEstimate = ActionFollowsMission(searcher, ActionKind.Search) || TriggeredMissionFor(searcher) == ActionKind.Search ? 0 : 1;
+            if (mode == SearchMode.Focused && !freeFocused && side.CommandSlots < 1 + attentionEstimate) { message = $"Focused Search needs {1 + attentionEstimate} free Command Slot{(attentionEstimate == 0 ? string.Empty : "s")} including immediate retasking."; return false; }
+            return CanAuthorizeAction(searcher, ActionKind.Search, out message);
         }
 
         public bool Strike(FormationState attacker, FormationState target, Salvo salvo, Reaction reaction, out CombatResult result, out string message)
@@ -1052,7 +1096,7 @@ namespace SeaOfUncertainty.Core
             return true;
         }
 
-        private bool AuthorizeAction(FormationState formation, ActionKind action, out string message)
+        private bool AuthorizeAction(FormationState formation, ActionKind action, out string message, bool commit = true)
         {
             if (formation.Kind == FormationKind.BallisticMissileBattery && (action == ActionKind.Patrol || action == ActionKind.Support)) { message = "Missile batteries cannot provide naval Patrol or Support."; return false; }
             bool complex = Rules.IsComplexAction(action);
@@ -1064,8 +1108,8 @@ namespace SeaOfUncertainty.Core
             }
             if (ActionFollowsMission(formation, action))
             {
-                if (consumePushThrough) formation.PushThroughReady = false;
-                formation.LastActionFollowedMission = true;
+                if (commit && consumePushThrough) formation.PushThroughReady = false;
+                if (commit) formation.LastActionFollowedMission = true;
                 message = "Standing Mission followed without Command Attention.";
                 return true;
             }
@@ -1073,18 +1117,25 @@ namespace SeaOfUncertainty.Core
             if (triggered == action)
             {
                 if (formation.HasEffect(EntropyCardIds.BrokenLink) && !formation.TriggerMissionCommandReady) { message = "Broken Link blocks this trigger-authorized Mission change without Mission Command."; return false; }
+                if (!commit) { message = "Standing Mission Trigger authorizes this action without Command Attention."; return true; }
                 if (formation.HasEffect(EntropyCardIds.BrokenLink)) formation.TriggerMissionCommandReady = false;
-                if (consumePushThrough) formation.PushThroughReady = false;
+                if (commit && consumePushThrough) formation.PushThroughReady = false;
                 formation.Mission = action;
-                formation.LastActionFollowedMission = true;
+                if (commit) formation.LastActionFollowedMission = true;
                 AddLog($"T{Time:00}  MISSION TRIGGER — {formation.Name} automatically changed Task to {action} under {formation.MissionTrigger}.", formation.Side);
                 CommandEvent?.Invoke(formation, "MissionTrigger", $"{formation.MissionTrigger}; {action}");
                 message = "Standing Mission Trigger authorized the action without Command Attention.";
                 return true;
             }
             if (formation.HasEffect(EntropyCardIds.BrokenLink)) { message = "Broken Link permits only the current Mission or an authorized Trigger."; return false; }
+            if (!commit)
+            {
+                bool available = Sides[formation.Side].CommandSlots >= 1;
+                message = available ? "Immediate retask occupies 1 Command Slot until action resolution." : "1 free Command Slot is required for immediate retasking; follow the current Mission or an authorized Trigger.";
+                return available;
+            }
             if (!TryOccupyCommand(formation.Side, 1, "Immediate Retask", formation.Id, -1, out message)) return false;
-            if (consumePushThrough) formation.PushThroughReady = false;
+            if (commit && consumePushThrough) formation.PushThroughReady = false;
             formation.LastActionFollowedMission = false;
             AddLog($"T{Time:00}  COMMAND OCCUPIED — {formation.Name} received an immediate out-of-Mission {action} order until action resolution.", formation.Side);
             CommandEvent?.Invoke(formation, "OutOfMissionAction", action.ToString());
@@ -1527,7 +1578,16 @@ namespace SeaOfUncertainty.Core
                 .OrderBy(candidate => candidate.Id, StringComparer.Ordinal).FirstOrDefault();
             if (screener == null) return string.Empty;
             screener.PatrolInterceptionAvailable = false;
-            ContactState contact = ContactFor(screener.Side, movingEnemy.Id);
+            ContactState contact = ContactFor(screener.Side, movingEnemy.Id)
+                ?? Contacts.FirstOrDefault(item => item.Owner == screener.Side && item.TargetId == movingEnemy.Id);
+            if (contact != null && contact.IsLost)
+            {
+                // Reacquisition replaces the lost report rather than creating a
+                // second record with the same owner/target identity.
+                contact.Location = LocationQuality.Low;
+                contact.Identity = IdentityQuality.General;
+                contact.Domain = ContactDomain.Unknown;
+            }
             if (contact == null)
             {
                 contact = new ContactState { Owner = screener.Side, TargetId = movingEnemy.Id, Location = LocationQuality.Low, Identity = IdentityQuality.General };
@@ -1599,7 +1659,7 @@ namespace SeaOfUncertainty.Core
                 }
                 if (deck.DrawPile == null) deck.DrawPile = new List<string>();
                 if (deck.DiscardPile == null) deck.DiscardPile = new List<string>();
-                HashSet<string> known = new HashSet<string>(deck.DrawPile.Concat(deck.DiscardPile), StringComparer.OrdinalIgnoreCase);
+                HashSet<string> known = new HashSet<string>(deck.DrawPile.Concat(deck.DiscardPile).Concat(Formations.SelectMany(formation => formation.ActiveEffectCardIds ?? new List<string>())), StringComparer.OrdinalIgnoreCase);
                 foreach (string id in EntropyEffectCatalog.For(source).Select(card => card.Id)) if (!known.Contains(id)) deck.DrawPile.Add(id);
             }
         }
@@ -1963,7 +2023,7 @@ namespace SeaOfUncertainty.Core
         };
         private EntropyDrawNotice PendingNoticeFor(Side side) => PendingEntropyReveals.FirstOrDefault(notice => Find(notice.FormationId)?.Side == side);
 
-        private int Roll() => random.Next(1, 7);
+        private int Roll() { randomDrawCount++; return random.Next(1, 7); }
         private void AddLog(string text, Side? audience = null)
         {
             Log.Insert(0, text);

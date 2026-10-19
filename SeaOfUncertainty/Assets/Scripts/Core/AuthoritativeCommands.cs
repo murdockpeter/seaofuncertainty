@@ -100,7 +100,7 @@ namespace SeaOfUncertainty.Core
     [Serializable]
     public sealed class AuthoritativeReplayDocument
     {
-        public int Version = 1;
+        public int Version = 2;
         public string ScenarioId;
         public int Seed;
         public List<AuthoritativeCommand> Commands = new List<AuthoritativeCommand>();
@@ -186,13 +186,13 @@ namespace SeaOfUncertainty.Core
             if (command == null) throw new ArgumentNullException(nameof(command));
             if (string.IsNullOrEmpty(document.ScenarioId)) { document.ScenarioId = game.Scenario.Id; document.Seed = game.Seed; }
             command.Sequence = document.Commands.Count;
-            string before = StateDigest(game);
+            string before = StateDigest(game, document.Version);
             int timeBefore = game.Time;
             bool accepted = AuthoritativeCommandProcessor.Execute(game, command, out string outcome);
             var resolved = new AuthoritativeEvent
             {
                 Sequence = command.Sequence, OperationalTimeBefore = timeBefore, OperationalTimeAfter = game.Time,
-                Accepted = accepted, StateBefore = before, StateAfter = StateDigest(game), Outcome = outcome ?? string.Empty
+                Accepted = accepted, StateBefore = before, StateAfter = StateDigest(game, document.Version), Outcome = outcome ?? string.Empty
             };
             document.Commands.Add(command);
             document.Events.Add(resolved);
@@ -203,7 +203,7 @@ namespace SeaOfUncertainty.Core
         {
             var result = new AuthoritativeReplayResult { Message = "Replay document is missing." };
             if (document == null) return result;
-            if (document.Version != 1) { result.Message = $"Unsupported replay version {document.Version}."; return result; }
+            if (document.Version < 1 || document.Version > 2) { result.Message = $"Unsupported replay version {document.Version}."; return result; }
             ScenarioDefinition scenario = ScenarioCatalog.Find(document.ScenarioId);
             if (scenario == null) { result.Message = $"Scenario {document.ScenarioId} was not found."; return result; }
             var game = new PrototypeGame(document.Seed, scenario);
@@ -212,10 +212,10 @@ namespace SeaOfUncertainty.Core
             {
                 AuthoritativeCommand command = document.Commands[index];
                 AuthoritativeEvent expected = document.Events != null && index < document.Events.Count ? document.Events[index] : null;
-                string before = StateDigest(game);
+                string before = StateDigest(game, document.Version);
                 if (expected != null && expected.StateBefore != before) return Fail(result, command.Sequence, $"State diverged before command {command.Sequence}.");
                 bool accepted = AuthoritativeCommandProcessor.Execute(game, command, out string outcome);
-                string after = StateDigest(game);
+                string after = StateDigest(game, document.Version);
                 if (expected != null && (expected.Accepted != accepted || expected.StateAfter != after || expected.OperationalTimeAfter != game.Time))
                     return Fail(result, command.Sequence, $"State diverged after command {command.Sequence}: {outcome}");
                 result.CommandsApplied++;
@@ -228,9 +228,15 @@ namespace SeaOfUncertainty.Core
         public static string ToJson(AuthoritativeReplayDocument document, bool pretty = true) => JsonUtility.ToJson(document, pretty);
         public static AuthoritativeReplayDocument FromJson(string json) => JsonUtility.FromJson<AuthoritativeReplayDocument>(json);
 
-        public static string StateDigest(PrototypeGame game)
+        public static string StateDigest(PrototypeGame game, int replayVersion = 2)
         {
-            string canonical = JsonUtility.ToJson(game.CaptureState(), false);
+            PrototypeGame.SaveData state = game.CaptureState();
+            if (replayVersion == 1) state.Version = 13;
+            string canonical = JsonUtility.ToJson(state, false);
+            // The preceding v1/v13 baseline used this exact serialized shape, so
+            // existing replay receipts and signed recovery checkpoints still verify.
+            if (replayVersion == 1)
+                canonical = canonical.Substring(0, canonical.LastIndexOf(",\"RandomSeed\":", StringComparison.Ordinal)) + "}";
             using (SHA256 sha = SHA256.Create())
             {
                 byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(canonical));

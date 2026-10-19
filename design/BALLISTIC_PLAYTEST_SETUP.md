@@ -42,3 +42,12 @@ Seeded Adaptive AI runs on 2026-10-15 completed without rejected decisions or st
 | Northern Gateway | 4200 | 134 | 5 | 2 | T24 |
 
 These are automated rules checks, not human balance approval. Logs: `SeaOfUncertainty/TestResults/ScenarioAuthoring.log`. Generated HTML formation/scenario aids and counters have been refreshed from the equipped catalog; full rule/PDF integration remains SCN-BM-004.
+
+
+## Narrows Shield (2026-10-19)
+
+Select **Narrows Shield** for the first dedicated defense operation. It uses the Meridian Veil theater with six formations and a T12 horizon. Blue starts near the passage with Resolute, Valiant and Nightfall; Red fields Tempest, Surface Action Two and Battery Cinder. Blue has one submarine launch package; Red has three battery launch packages. Valiant has two radius-four rating-4 interceptor packages; the Red surface escort has one. Each carrier retains one rating-2 self-defense package. Both carriers begin covered by their escort, with fresh High/General carrier reports for each side.
+
+Both sides score the same executable objectives: sole control (6), a combat-capable naval escort within two hexes of the carrier (3), denial within two hexes of the passage (2), and carrier preservation/withdrawal (2). The briefing explicitly describes the shared scoring and tie-breaks. Escort points do not require interceptor stocks or a surface-group identity: the existing rule accepts any qualifying naval escort. Damage, launches and interceptions do not directly award points. Ports/airfields provide ordinary logistics, but no region reloads ballistic or interceptor ammunition in this operation. Finite stocks cannot be reset by replenishment.
+
+Authored ID: `narrows-shield`. The compiled conventional template and the two original live catalog operations are unchanged. Values remain provisional until human balance review. Automated simulation and screenshot evidence is tracked in the dated acceptance note.

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using SeaOfUncertainty.Core;
 using UnityEngine;
@@ -7,146 +6,113 @@ namespace SeaOfUncertainty.Prototype
 {
     public sealed class OperationalMissionAudio : MonoBehaviour
     {
-        private const int SampleRate = 44100;
-        private readonly Dictionary<ActionKind, AudioClip> clips = new Dictionary<ActionKind, AudioClip>();
-        private AudioSource effectsSource;
+        private readonly Dictionary<int, AudioClip[]> clips = new Dictionary<int, AudioClip[]>();
+        private readonly Dictionary<int, int> nextVariants = new Dictionary<int, int>();
+        private readonly AudioSource[] voices = new AudioSource[2];
         private AudioSource ambienceSource;
         private AudioClip ambienceClip;
+        private float ambienceVolume;
+        private float nextCueTime;
 
         private void Awake()
         {
-            effectsSource = gameObject.AddComponent<AudioSource>();
-            effectsSource.playOnAwake = false;
-            effectsSource.loop = false;
-            effectsSource.spatialBlend = 0f;
-            ambienceSource = gameObject.AddComponent<AudioSource>();
-            ambienceSource.playOnAwake = false;
-            ambienceSource.loop = true;
-            ambienceSource.spatialBlend = 0f;
-            foreach (ActionKind kind in Enum.GetValues(typeof(ActionKind))) clips[kind] = BuildClip(kind);
-            ambienceClip = BuildAmbienceClip();
+            for (int i = 0; i < voices.Length; i++) voices[i] = CreateSource(false);
+            ambienceSource = CreateSource(true);
+            ambienceClip = CreateClip("Open sea - wind and water", OperationalAudioSynthesis.Ambience(), 2);
             ambienceSource.clip = ambienceClip;
-            ambienceSource.Play();
             Configure(.8f, .7f, .35f);
+            ambienceSource.Play();
+        }
+
+        private AudioSource CreateSource(bool loop)
+        {
+            AudioSource source = gameObject.AddComponent<AudioSource>();
+            source.playOnAwake = false;
+            source.loop = loop;
+            // Command-map audio is never positioned at an unseen enemy's location.
+            source.spatialBlend = 0f;
+            source.dopplerLevel = 0f;
+            source.priority = loop ? 200 : 100;
+            return source;
         }
 
         public void Configure(float master, float effects, float ambience)
         {
             AudioListener.volume = Mathf.Clamp01(master);
-            if (effectsSource != null) effectsSource.volume = Mathf.Clamp01(effects) * .6f;
-            if (ambienceSource != null) ambienceSource.volume = Mathf.Clamp01(ambience) * .18f;
+            foreach (AudioSource voice in voices)
+                if (voice != null) voice.volume = Mathf.Clamp01(effects) * .4f;
+            ambienceVolume = Mathf.Clamp01(ambience) * .4f;
+            if (ambienceSource != null) ambienceSource.volume = ambienceVolume;
         }
 
-        public void Play(ActionKind mission)
+        private void Update()
         {
-            if (effectsSource == null || !clips.TryGetValue(mission, out AudioClip clip) || clip == null) return;
-            effectsSource.PlayOneShot(clip);
+            if (ambienceSource == null) return;
+            bool active = false;
+            foreach (AudioSource voice in voices) if (voice != null && voice.isPlaying) active = true;
+            ambienceSource.volume = Mathf.MoveTowards(ambienceSource.volume, ambienceVolume * (active ? .6f : 1f), Time.unscaledDeltaTime * .3f);
+        }
+
+        public void Play(ActionKind mission, FormationKind formation = FormationKind.SurfaceGroup)
+        {
+            if (Time.unscaledTime < nextCueTime) return;
+            AudioSource available = null;
+            foreach (AudioSource voice in voices) if (voice != null && !voice.isPlaying) { available = voice; break; }
+            // Bound overlapping cues without cutting a playing waveform mid-transient.
+            if (available == null) return;
+            FormationKind style = OperationalAudioSynthesis.Style(mission, formation);
+            int key = (int)mission * 16 + (int)style;
+            if (!clips.TryGetValue(key, out AudioClip[] variants))
+            {
+                variants = new AudioClip[3]; clips[key] = variants; nextVariants[key] = 0;
+            }
+            int index = nextVariants[key];
+            if (variants[index] == null)
+                variants[index] = CreateClip($"{mission} - {style} - {index + 1}", OperationalAudioSynthesis.Action(mission, style, index), 1);
+            nextVariants[key] = (index + 1) % variants.Length;
+            available.clip = variants[index]; available.Play();
+            nextCueTime = Time.unscaledTime + .08f;
+        }
+
+        private static AudioClip CreateClip(string name, float[] samples, int channels)
+        {
+            AudioClip clip = AudioClip.Create(name, samples.Length / channels, channels, OperationalAudioSynthesis.SampleRate, false);
+            clip.SetData(samples, 0); return clip;
         }
 
         private void OnDestroy()
         {
-            foreach (AudioClip clip in clips.Values) if (clip != null) Destroy(clip);
+            foreach (AudioSource voice in voices) if (voice != null) voice.Stop();
+            if (ambienceSource != null) ambienceSource.Stop();
+            foreach (AudioClip[] variants in clips.Values)
+                foreach (AudioClip clip in variants) if (clip != null) Destroy(clip);
             clips.Clear();
             if (ambienceClip != null) Destroy(ambienceClip);
         }
 
-        public static string Description(ActionKind kind)
+        public static string Description(ActionKind kind, FormationKind formation = FormationKind.SurfaceGroup)
         {
             switch (kind)
             {
-                case ActionKind.Move: return "Movement complete: rising engine pulse.";
-                case ActionKind.Search: return "Search complete: descending sonar sweep.";
-                case ActionKind.Strike: return "Strike resolved: sharp impact burst.";
-                case ActionKind.Recover: return "Recovery complete: three ascending clear tones.";
-                case ActionKind.Hold: return "Hold complete: steady two-note tone.";
-                case ActionKind.Patrol: return "Patrol established: alternating watch tones.";
-                case ActionKind.Support: return "Support established: paired confirmation tones.";
-                case ActionKind.Replenish: return "Replenishment complete: rising machinery tone.";
+                case ActionKind.Move:
+                    switch (formation)
+                    {
+                        case FormationKind.AirGroup: return "Movement complete: turbine rush and airflow.";
+                        case FormationKind.Submarine: return "Movement complete: muffled propulsion and low water wash.";
+                        case FormationKind.BallisticMissileBattery: return "Movement complete: diesel rumble and running gear.";
+                        default: return "Movement complete: marine engine, propeller rhythm and wake wash.";
+                    }
+                case ActionKind.Search: return formation == FormationKind.AirGroup || formation == FormationKind.BallisticMissileBattery
+                    ? "Search complete: sensor-console relay and radio squelch; no detection information."
+                    : "Search complete: damped sonar ping and fading echoes; no detection information.";
+                case ActionKind.Strike: return "Strike resolved: weapon-launch rush and pressure thump; no hit confirmation.";
+                case ActionKind.Recover: return "Recovery complete: equipment relays and a short motor spin-down.";
+                case ActionKind.Hold: return "Hold complete: brief radio squelch and receiver click.";
+                case ActionKind.Patrol: return "Patrol established: quiet watch ping and relay clicks.";
+                case ActionKind.Support: return "Support established: paired radio bursts and key clicks.";
+                case ActionKind.Replenish: return "Replenishment complete: winch, hydraulic hiss and coupling latch.";
                 default: return "Operational audio cue.";
             }
-        }
-
-        private static AudioClip BuildAmbienceClip()
-        {
-            const float duration = 4f;
-            int count = Mathf.CeilToInt(duration * SampleRate);
-            var samples = new float[count];
-            uint noise = 0x5EA0BEEFu;
-            float filtered = 0f;
-            for (int index = 0; index < count; index++)
-            {
-                noise = noise * 1664525u + 1013904223u;
-                float raw = (noise >> 8) / 8388607.5f - 1f;
-                filtered = Mathf.Lerp(filtered, raw, .006f);
-                float time = index / (float)SampleRate;
-                samples[index] = (filtered * .42f + Mathf.Sin(2f * Mathf.PI * .18f * time) * .025f) * Mathf.Sin(Mathf.PI * index / count);
-            }
-            AudioClip clip = AudioClip.Create("Open Sea Ambience", count, 1, SampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private static AudioClip BuildClip(ActionKind kind)
-        {
-            float duration = kind == ActionKind.Search || kind == ActionKind.Recover || kind == ActionKind.Replenish ? .62f : kind == ActionKind.Support ? .5f : .38f;
-            int count = Mathf.CeilToInt(duration * SampleRate);
-            var samples = new float[count];
-            uint noise = 0x5EA01978u + (uint)kind * 7919u;
-            for (int index = 0; index < count; index++)
-            {
-                float time = index / (float)SampleRate;
-                float progress = index / (float)Mathf.Max(1, count - 1);
-                float attack = Mathf.Clamp01(time / .018f);
-                float release = Mathf.Clamp01((duration - time) / .11f);
-                float envelope = attack * release;
-                float sample;
-                switch (kind)
-                {
-                    case ActionKind.Move:
-                        sample = Mathf.Sin(2f * Mathf.PI * Mathf.Lerp(105f, 155f, progress) * time) * (.62f + .18f * Mathf.Sin(2f * Mathf.PI * 7f * time));
-                        break;
-                    case ActionKind.Search:
-                        sample = Chirp(time, progress, 920f, 510f) + (time > .24f ? .34f * Chirp(time - .24f, progress, 760f, 430f) : 0f);
-                        break;
-                    case ActionKind.Strike:
-                        noise = noise * 1664525u + 1013904223u;
-                        float burst = ((noise >> 8) / 8388607.5f - 1f) * Mathf.Exp(-time * 18f);
-                        sample = burst * .62f + Mathf.Sin(2f * Mathf.PI * 82f * time) * Mathf.Exp(-time * 8f);
-                        break;
-                    case ActionKind.Recover:
-                        sample = DelayedBell(time, 330f, 0f) + DelayedBell(time, 440f, .18f) + DelayedBell(time, 660f, .38f);
-                        break;
-                    case ActionKind.Hold:
-                        sample = Mathf.Sin(2f * Mathf.PI * 196f * time) * .72f + Mathf.Sin(2f * Mathf.PI * 294f * time) * .22f;
-                        break;
-                    case ActionKind.Patrol:
-                        sample = Mathf.Sin(2f * Mathf.PI * (progress < .5f ? 280f : 350f) * time) * (.65f + .2f * Mathf.Sin(2f * Mathf.PI * 5f * time));
-                        break;
-                    case ActionKind.Support:
-                        sample = DelayedBell(time, 523.25f, 0f) + DelayedBell(time, 659.25f, .2f);
-                        break;
-                    case ActionKind.Replenish:
-                        sample = Mathf.Sin(2f * Mathf.PI * Mathf.Lerp(180f, 360f, progress) * time) * .72f + Mathf.Sin(2f * Mathf.PI * 90f * time) * .18f;
-                        break;
-                    default:
-                        sample = 0f;
-                        break;
-                }
-                samples[index] = Mathf.Clamp(sample * envelope * .42f, -.9f, .9f);
-            }
-            AudioClip clip = AudioClip.Create("Mission " + kind, count, 1, SampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
-
-        private static float Chirp(float time, float progress, float high, float low)
-            => Mathf.Sin(2f * Mathf.PI * Mathf.Lerp(high, low, progress) * time) * Mathf.Exp(-time * 5.5f);
-
-        private static float DelayedBell(float time, float frequency, float delay)
-        {
-            float local = time - delay;
-            if (local < 0f) return 0f;
-            return Mathf.Sin(2f * Mathf.PI * frequency * local) * Mathf.Exp(-local * 5.2f) * Mathf.Clamp01(local / .012f) * .52f;
         }
     }
 }
