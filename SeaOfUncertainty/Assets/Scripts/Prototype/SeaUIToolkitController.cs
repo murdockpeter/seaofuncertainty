@@ -1732,6 +1732,13 @@ namespace SeaOfUncertainty.Prototype
                     FormationState selected = formation;
                     modal.Add(ActionButton($"{selected.Name.ToUpperInvariant()}  •  MISSION {selected.Mission.ToString().ToUpperInvariant()}  •  READY T{selected.ReadyTime:00}", () =>
                     {
+            settings.Add(Text("VERSION " + Application.version, "muted"));
+            settings.Add(ActionButton("CHECK FOR UPDATES", () =>
+            {
+                VisualElement update = Modal("GAME UPDATES");
+                update.Add(Text(GitHubUpdates.CheckForUpdates(), "body-copy"));
+                update.Add(ActionButton("CLOSE", CloseOverlay));
+            }));
                         if (card.Id == CommandResponseIds.RapidReplan || card.Id == CommandResponseIds.FlashOrder) ShowMissionChoices(card, selected);
                         else PlayResponse(card, selected, null, null);
                     }));

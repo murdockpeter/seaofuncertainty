@@ -4,6 +4,8 @@ An operational naval wargame prototype about acting effectively inside incomplet
 
 ## Play the current Unity slice
 
+Windows distribution now supports a launcher with GitHub Releases updates. Extract a release ZIP and run **Start Sea of Uncertainty.cmd**; newer stable versions are offered before launch. **Settings > Check for Updates** can install an update for the next launch. Builds remain available offline and previous versions are retained for rollback. See [release packaging and update recovery](design/GITHUB_RELEASE_UPDATES.md). Source checkout instructions follow.
+
 1. Open `SeaOfUncertainty` in Unity `6000.2.12f1`.
 2. Open `Assets/Scenes/Prototype.unity`.
 3. Press Play.
