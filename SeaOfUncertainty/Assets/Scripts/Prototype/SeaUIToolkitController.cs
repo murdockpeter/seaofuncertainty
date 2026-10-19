@@ -1604,6 +1604,13 @@ namespace SeaOfUncertainty.Prototype
             settings.Add(Text("Audio descriptions identify each operational cue. Controller sticks must return below the dead zone before another focus step, preventing accidental repeated movement.", "muted"));
             settings.Add(Text($"CURRENT {Screen.width} × {Screen.height}  •  DESKTOP {Display.main.systemWidth} × {Display.main.systemHeight}", "muted"));
             settings.Add(ActionButton(Screen.fullScreen ? "SWITCH TO WINDOWED" : "SWITCH TO NATIVE FULLSCREEN", ToggleFullscreen));
+            settings.Add(Text("VERSION " + Application.version, "muted"));
+            settings.Add(ActionButton("CHECK FOR UPDATES", () =>
+            {
+                VisualElement update = Modal("GAME UPDATES");
+                update.Add(Text(GitHubUpdates.CheckForUpdates(), "body-copy"));
+                update.Add(ActionButton("CLOSE", CloseOverlay));
+            }));
             settings.Add(ActionButton("APPLY", () =>
             {
                 float selectedTextScale = textScale.index == 2 ? 1.5f : textScale.index == 1 ? 1.25f : 1f;
@@ -1732,13 +1739,6 @@ namespace SeaOfUncertainty.Prototype
                     FormationState selected = formation;
                     modal.Add(ActionButton($"{selected.Name.ToUpperInvariant()}  •  MISSION {selected.Mission.ToString().ToUpperInvariant()}  •  READY T{selected.ReadyTime:00}", () =>
                     {
-            settings.Add(Text("VERSION " + Application.version, "muted"));
-            settings.Add(ActionButton("CHECK FOR UPDATES", () =>
-            {
-                VisualElement update = Modal("GAME UPDATES");
-                update.Add(Text(GitHubUpdates.CheckForUpdates(), "body-copy"));
-                update.Add(ActionButton("CLOSE", CloseOverlay));
-            }));
                         if (card.Id == CommandResponseIds.RapidReplan || card.Id == CommandResponseIds.FlashOrder) ShowMissionChoices(card, selected);
                         else PlayResponse(card, selected, null, null);
                     }));
