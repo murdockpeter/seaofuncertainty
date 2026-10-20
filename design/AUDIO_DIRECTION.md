@@ -10,6 +10,8 @@ The prototype uses original procedural foley rather than field recordings or thi
 
 Each cue has three deterministic waveform variants, cached lazily. Two non-spatial voices allow overlap without truncating a playing waveform. Settings retain separate Master, Effects and Ambience controls, and the matching text descriptions remain available when muted.
 
+The persistent audio host supplies an enabled `AudioListener` when the scene has none, reusing an existing enabled listener when available. This is required even for the non-spatial command-map sources; neither generated camera originally supplied one. Listener checks cover absent, disabled, existing and inactive listeners. If playback is silent, check **Settings > Audio > Master volume** as well as Effects/Ambience: a previously saved zero Master remains muted after an update.
+
 Audio receives only the completed action and acting formation kind. The existing Solo visibility gate suppresses enemy cues and descriptions. Audio neither reads combat outcomes nor advances gameplay random state.
 
 Run `tools/run-tests.ps1 -Suite Audio` to export individual WAV previews, `audio-showcase.wav`, and `showcase-timestamps.txt` under `SeaOfUncertainty/TestResults/audio`. The Audio checks also run within Presentation and Regression. They cover all 144 action/formation/variant renders, finite samples, peak headroom, DC offset, fades, variant differences, continuous stereo ambience, privacy and random-state isolation. These signal checks do not establish subjective realism; audition on speakers and headphones remains the listening acceptance step.

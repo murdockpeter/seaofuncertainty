@@ -16,12 +16,25 @@ namespace SeaOfUncertainty.Prototype
 
         private void Awake()
         {
+            EnsureOutputListener(gameObject);
             for (int i = 0; i < voices.Length; i++) voices[i] = CreateSource(false);
             ambienceSource = CreateSource(true);
             ambienceClip = CreateClip("Open sea - wind and water", OperationalAudioSynthesis.Ambience(), 2);
             ambienceSource.clip = ambienceClip;
             Configure(.8f, .7f, .35f);
             ambienceSource.Play();
+        }
+
+        public static AudioListener EnsureOutputListener(GameObject host)
+        {
+            // Both cameras are created without listeners. Keep command-map audio on
+            // the persistent audio host so changing theaters cannot silence it.
+            foreach (AudioListener existing in FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+                if (existing.enabled) return existing;
+            AudioListener listener = host.GetComponent<AudioListener>();
+            if (listener == null) listener = host.AddComponent<AudioListener>();
+            listener.enabled = true;
+            return listener;
         }
 
         private AudioSource CreateSource(bool loop)

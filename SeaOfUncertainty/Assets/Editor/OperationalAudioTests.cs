@@ -15,6 +15,7 @@ namespace SeaOfUncertainty.Editor
     {
         public static void Run()
         {
+            TestOutputListener();
             string directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../TestResults/audio"));
             Directory.CreateDirectory(directory);
             var previews = new List<KeyValuePair<string, float[]>>();
@@ -102,6 +103,36 @@ namespace SeaOfUncertainty.Editor
                 Check(UnityEngine.Random.value == expected, "Audio generation leaves Unity random state unchanged");
             }
             finally { UnityEngine.Random.state = old; }
+        }
+
+        private static void TestOutputListener()
+        {
+            AudioListener[] existing = UnityEngine.Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            bool[] enabled = existing.Select(listener => listener.enabled).ToArray();
+            var host = new GameObject("Audio output tests");
+            var secondHost = new GameObject("Second audio output tests");
+            try
+            {
+                foreach (AudioListener listener in existing) listener.enabled = false;
+                AudioListener output = OperationalMissionAudio.EnsureOutputListener(host);
+                Check(output != null && output.enabled && output.gameObject.activeInHierarchy, "Audio startup supplies an enabled listener when the scene has none");
+                Check(OperationalMissionAudio.EnsureOutputListener(secondHost) == output && secondHost.GetComponent<AudioListener>() == null,
+                    "Another audio host reuses the enabled listener without duplicating output");
+                output.enabled = false;
+                Check(OperationalMissionAudio.EnsureOutputListener(host) == output && output.enabled,
+                    "A disabled host listener is reenabled rather than duplicated");
+                Check(host.GetComponents<AudioListener>().Length == 1, "Repeated output initialization leaves one host listener");
+                host.SetActive(false);
+                AudioListener replacement = OperationalMissionAudio.EnsureOutputListener(secondHost);
+                Check(replacement.gameObject == secondHost && replacement.enabled,
+                    "An inactive scene listener cannot suppress active audio output");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
+                UnityEngine.Object.DestroyImmediate(secondHost);
+                for (int i = 0; i < existing.Length; i++) if (existing[i] != null) existing[i].enabled = enabled[i];
+            }
         }
 
         private static void TestPrivacy()
